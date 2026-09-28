@@ -1755,13 +1755,13 @@ function AboutTab() {
           </button>
 
           <button
-            onClick={() => openExternal("https://github.com/avihaymenahem/maish")}
+            onClick={() => openExternal("https://github.com/seemopz/maish")}
             className="flex items-center gap-3 w-full hover:bg-bg-hover first:rounded-t-md last:rounded-b-md transition-colors text-left"
           >
             <Github size={16} className="text-text-tertiary shrink-0" />
             <div className="min-w-0 flex-1">
               <span className="text-sm text-text-primary">GitHub Repository</span>
-              <p className="text-xs text-text-tertiary">avihaymenahem/maish</p>
+              <p className="text-xs text-text-tertiary">seemopz/maish</p>
             </div>
             <ExternalLink size={14} className="text-text-tertiary shrink-0" />
           </button>

@@ -34,16 +34,15 @@ const BIND_RETRY_STEP: Duration = Duration::from_millis(50);
 /// five minutes and then fails without saying why.
 async fn bind_callback_port(port: u16) -> Result<TcpListener, String> {
     let deadline = std::time::Instant::now() + BIND_RETRY_TOTAL;
-    let mut last_err = String::new();
 
     loop {
-        match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
+        let err = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
             Ok(listener) => return Ok(listener),
-            Err(e) => last_err = e.to_string(),
-        }
+            Err(e) => e,
+        };
         if std::time::Instant::now() >= deadline {
             return Err(format!(
-                "Could not listen on port {port} for the sign-in redirect ({last_err}). \
+                "Could not listen on port {port} for the sign-in redirect ({err}). \
                  Another program is using it — close it and try again."
             ));
         }

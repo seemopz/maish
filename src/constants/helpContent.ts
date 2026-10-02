@@ -90,12 +90,6 @@ export interface HelpCategory {
   cards: HelpCard[];
 }
 
-export interface ContextualTip {
-  title: string;
-  body: string;
-  helpTopic: string;
-}
-
 // ---------- Valid settings tabs (for type-safe references) ----------
 
 const VALID_SETTINGS_TABS = [
@@ -1319,56 +1313,6 @@ export const HELP_CATEGORIES: HelpCategory[] = [
     ],
   },
 ];
-
-// ---------- Contextual Tips ----------
-
-export const CONTEXTUAL_TIPS: Record<string, ContextualTip> = {
-  "reading-pane": {
-    title: "Reading pane",
-    body: "Choose where to display the reading pane — right, bottom, or hidden. Right works best on wide screens.",
-    helpTopic: "reading-email",
-  },
-  "split-inbox": {
-    title: "Split inbox",
-    body: "Divide your inbox into categories (Primary, Updates, Promotions, Social, Newsletters) so you can focus on what matters most.",
-    helpTopic: "productivity",
-  },
-  "undo-send": {
-    title: "Undo send",
-    body: "Set how many seconds you have to undo a sent email. You can choose up to 30 seconds.",
-    helpTopic: "composing",
-  },
-  "smart-notifications": {
-    title: "Smart notifications",
-    body: "Only get notified for the categories you care about. Add VIP senders who always trigger notifications regardless of category.",
-    helpTopic: "notifications-contacts",
-  },
-  "phishing-sensitivity": {
-    title: "Phishing sensitivity",
-    body: "Low catches only obvious threats. Default is balanced. High flags more aggressively but may have false positives.",
-    helpTopic: "security",
-  },
-  "ai-provider": {
-    title: "AI provider",
-    body: "Choose between Claude, OpenAI, or Gemini. Bring your own API key — your data is sent directly to the provider, never through a middleman.",
-    helpTopic: "ai-features",
-  },
-  "search-operators": {
-    title: "Search operators",
-    body: "Use from:, to:, subject:, has:attachment, is:unread, before:, after:, and label: to narrow your search.",
-    helpTopic: "search-navigation",
-  },
-  "filters": {
-    title: "Automatic filters",
-    body: "Filters run on every new message during sync. Criteria use AND logic, and when multiple filters match, their actions are merged.",
-    helpTopic: "organization",
-  },
-  "smart-labels": {
-    title: "Smart labels",
-    body: "Describe what emails should get a label in plain English. AI auto-labels matching emails during sync. Optional criteria provide instant matching without AI.",
-    helpTopic: "organization",
-  },
-};
 
 // ---------- Helpers ----------
 

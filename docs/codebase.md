@@ -19,7 +19,6 @@ Tauri v2 desktop app: Rust backend + React 19 frontend communicating via Tauri I
    - `dav/` — `contentLine.ts`, the line format iCalendar and vCard share: unfolding, parameter quoting, text escaping, folding.
    - `threading/` — JWZ threading algorithm (`threadBuilder.ts`) for grouping IMAP messages into conversation threads using Message-ID, References, and In-Reply-To headers. Supports incremental threading, phantom containers for missing references, and subject-based merging.
    - `ai/` — `aiService.ts` provides thread summaries, smart replies, AI compose, text transform, auto-categorization, smart label classification, and task extraction. `providerManager.ts` manages three providers (`providers/claudeProvider.ts`, `providers/openaiProvider.ts`, `providers/geminiProvider.ts`). `askInbox.ts` enables natural language inbox queries. `categorizationManager.ts` auto-sorts threads into Primary/Updates/Promotions/Social/Newsletters. `writingStyleService.ts` analyzes user writing style from sent emails and generates auto-draft replies. `taskExtraction.ts` extracts tasks from email threads via AI. `errors.ts` and `types.ts` define shared AI types. Results cached locally via `db/aiCache.ts`.
-   - `google/` — `calendar.ts` handles Google Calendar API (list calendars, fetch events, create events, token refresh).
    - `calendar/` — `CalendarProvider` abstraction over Google Calendar and CalDAV, selected by `providerFactory.ts`. `caldavProvider.ts` talks to tsdav, always with `fetch: davFetch`. `icalHelper.ts` parses iCalendar into a component tree and builds VEVENTs; `icalEdit.ts` patches a stored calendar object in place; `recurrence.ts` expands RRULE/RDATE/EXDATE into instances; `recurrenceForm.ts` translates between an RRULE and the handful of rules the repeat control can state; `timezone.ts` converts between wall-clock time in an IANA zone and epoch seconds via `Intl`; `occurrences.ts` bridges stored rows and the instances a view renders. See Recurring events under Key Gotchas.
    - `composer/` — `draftAutoSave.ts` auto-saves drafts every 3 seconds (debounced). Watches composer state changes via Zustand subscribe.
    - `search/` — `searchParser.ts` parses Gmail-style operators (`from:`, `to:`, `subject:`, `has:attachment`, `is:unread/read/starred`, `before:`, `after:`, `label:`). `searchQueryBuilder.ts` builds SQL queries from parsed operators.
@@ -53,7 +52,7 @@ Component groups:
 - `contacts/` — ContactsPage, ContactDetail
 - `attachments/` — AttachmentLibrary, AttachmentGridItem, AttachmentListItem
 - `tasks/` — TasksPage, TaskItem, TaskQuickAdd, TaskSidebar, AiTaskExtractDialog
-- `help/` — HelpPage, HelpSidebar, HelpSearchBar, HelpCard, HelpCardGrid, HelpTooltip
+- `help/` — HelpPage, HelpSidebar, HelpSearchBar, HelpCard, HelpCardGrid
 - `labels/` — LabelForm
 - `dnd/` — DndProvider (@dnd-kit drag-and-drop: threads → sidebar labels)
 - `ui/` — EmptyState, Skeleton, ContextMenu, ContextMenuPortal, OfflineBanner, SyncIndicator (sync spinner / error icon in the sidebar's bottom bar, state in `uiStore.syncState`), illustrations/ (InboxClearIllustration, NoAccountIllustration, NoSearchResultsIllustration, ReadingPaneIllustration, GenericEmptyIllustration)

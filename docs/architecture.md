@@ -71,7 +71,7 @@ maish/
 │   │   ├── tasks/            # TasksPage, TaskItem, TaskSidebar, TaskQuickAdd,
 │   │   │                     # AiTaskExtractDialog
 │   │   ├── help/             # HelpPage, HelpSidebar, HelpSearchBar,
-│   │   │                     # HelpCard, HelpCardGrid, HelpTooltip
+│   │   │                     # HelpCard, HelpCardGrid
 │   │   ├── labels/           # LabelForm
 │   │   ├── dnd/              # DndProvider (drag threads → sidebar labels)
 │   │   └── ui/               # EmptyState, Skeleton, ContextMenu, OfflineBanner, SyncIndicator, illustrations/
@@ -85,7 +85,6 @@ maish/
 │   │   ├── threading/        # JWZ threading engine for IMAP conversations
 │   │   ├── ai/               # AI service, 3 providers, categorization, Ask Inbox,
 │   │   │                     # writing style analysis, auto-drafts, task extraction
-│   │   ├── google/           # Google Calendar API
 │   │   ├── composer/         # Draft auto-save
 │   │   ├── search/           # Query parser, SQL builder
 │   │   ├── filters/          # Auto-apply filter engine
@@ -106,7 +105,7 @@ maish/
 │   │   └── globalShortcut.ts # System-wide compose shortcut
 │   ├── stores/               # Zustand stores (9): ui, account, thread,
 │   │                         # composer, label, contextMenu, shortcut, smartFolder, task
-│   ├── hooks/                # useKeyboardShortcuts, useClickOutside, useContextMenu
+│   ├── hooks/                # useKeyboardShortcuts, useClickOutside
 │   ├── utils/                # crypto, date, emailBuilder, sanitize, imageBlocker,
 │   │                         # mailtoParser, fileUtils, templateVariables, noReply
 │   ├── constants/            # Keyboard shortcuts, help content
@@ -154,7 +153,6 @@ All business logic lives in `src/services/` as plain async functions (except `Gm
 | `imap/` | IMAP sync, folder-to-label mapping, auto-discovery, Tauri command wrappers |
 | `threading/` | JWZ threading algorithm for IMAP message grouping |
 | `ai/` | AI service with 3 providers (selectable models), categorization, Ask Inbox, writing style analysis, auto-drafts, task extraction |
-| `google/` | Google Calendar API |
 | `calendar/` | CalendarProvider abstraction over Google Calendar and CalDAV, iCalendar parsing and in-place editing, recurrence expansion and rule editing, IANA time-zone conversion |
 | `composer/` | Draft auto-save (3s debounce) |
 | `search/` | Gmail-style query parser, SQL builder |

@@ -36,6 +36,7 @@ import { withTransaction } from "../db/connection";
 import {
   upsertFolderSyncState,
   getAllFolderSyncStates,
+  type FolderSyncState,
 } from "../db/folderSyncState";
 import {
   buildThreads,
@@ -219,6 +220,10 @@ export function imapMessageToParsedMessage(
 
 /**
  * Store threads and their messages into the local DB.
+ *
+ * `skippedMessageIds` holds the messages of every thread that was left alone
+ * because a local operation on it is still pending. They are not stored, so the
+ * caller may not record their UIDs as synced.
  */
 async function storeThreadsAndMessages(
   accountId: string,
@@ -226,8 +231,9 @@ async function storeThreadsAndMessages(
   parsedByLocalId: Map<string, ParsedMessage>,
   imapMsgByLocalId: Map<string, ImapMessage>,
   labelsByRfcId?: Map<string, Set<string>>,
-): Promise<ParsedMessage[]> {
+): Promise<{ storedMessages: ParsedMessage[]; skippedMessageIds: Set<string> }> {
   const storedMessages: ParsedMessage[] = [];
+  const skippedMessageIds = new Set<string>();
 
   // Pre-check pending ops OUTSIDE any transaction
   const skippedThreadIds = new Set<string>();
@@ -236,6 +242,7 @@ async function storeThreadsAndMessages(
     if (pendingOps.length > 0) {
       console.log(`[imapSync] Skipping thread ${group.threadId}: has ${pendingOps.length} pending local ops`);
       skippedThreadIds.add(group.threadId);
+      for (const id of group.messageIds) skippedMessageIds.add(id);
     }
   }
 
@@ -398,7 +405,7 @@ async function storeThreadsAndMessages(
     });
   }
 
-  return storedMessages;
+  return { storedMessages, skippedMessageIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -897,6 +904,38 @@ export async function imapInitialSync(
 // ---------------------------------------------------------------------------
 
 /**
+ * Write the folder sync states a delta sync has worked out, once its messages
+ * are stored. A message that was fetched but not stored (its thread was skipped
+ * for a pending local operation) holds the folder's last_uid just below its UID,
+ * so the next delta fetches it again; it never goes below `floor`.
+ */
+async function recordFolderStates(
+  folderStates: { state: FolderSyncState; floor: number }[],
+  imapMsgByLocalId: Map<string, ImapMessage>,
+  skippedMessageIds: Set<string>,
+): Promise<void> {
+  const lowestSkippedUid = new Map<string, number>();
+  for (const id of skippedMessageIds) {
+    const msg = imapMsgByLocalId.get(id);
+    if (!msg) continue;
+    const lowest = lowestSkippedUid.get(msg.folder);
+    if (lowest === undefined || msg.uid < lowest) lowestSkippedUid.set(msg.folder, msg.uid);
+  }
+
+  for (const { state, floor } of folderStates) {
+    const lowest = lowestSkippedUid.get(state.folder_path);
+    let lastUid = state.last_uid;
+    if (lowest !== undefined && lowest - 1 < lastUid) {
+      lastUid = Math.max(floor, lowest - 1);
+      console.warn(
+        `[imapSync] Folder ${state.folder_path}: UID ${lowest} was fetched but not stored, holding last_uid at ${lastUid} instead of ${state.last_uid} so it is retried`,
+      );
+    }
+    await upsertFolderSyncState({ ...state, last_uid: lastUid });
+  }
+}
+
+/**
  * Perform delta sync for an IMAP account.
  * Fetches only new messages since the last sync using stored UID state.
  */
@@ -921,6 +960,12 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   const allParsed = new Map<string, ParsedMessage>();
   const allThreadable: ThreadableMessage[] = [];
   const allImapMsgs = new Map<string, ImapMessage>();
+
+  // The sync state each folder should end up with. It is written only after
+  // the messages are stored: last_uid is a watermark that the next delta
+  // starts above, so recording it first turns any failure while storing
+  // (a locked database, the app closing) into mail that is never fetched again.
+  const folderStates: { state: FolderSyncState; floor: number }[] = [];
 
   // Separate folders into new (no saved state) vs existing (have saved state)
   const newFolders = syncableFolders.filter((f) => !syncStateMap.has(f.raw_path));
@@ -966,13 +1011,16 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
         allImapMsgs.set(parsed.id, msg);
       }
 
-      await upsertFolderSyncState({
-        account_id: accountId,
-        folder_path: folder.raw_path,
-        uidvalidity: searchResult.folder_status.uidvalidity,
-        last_uid: lastUid,
-        modseq: null,
-        last_sync_at: Math.floor(Date.now() / 1000),
+      folderStates.push({
+        state: {
+          account_id: accountId,
+          folder_path: folder.raw_path,
+          uidvalidity: searchResult.folder_status.uidvalidity,
+          last_uid: lastUid,
+          modseq: null,
+          last_sync_at: Math.floor(Date.now() / 1000),
+        },
+        floor: 0,
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
@@ -1080,13 +1128,16 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
             allImapMsgs.set(parsed.id, msg);
           }
 
-          await upsertFolderSyncState({
-            account_id: accountId,
-            folder_path: folder.raw_path,
-            uidvalidity: searchResult.folder_status.uidvalidity,
-            last_uid: lastUid,
-            modseq: null,
-            last_sync_at: Math.floor(Date.now() / 1000),
+          folderStates.push({
+            state: {
+              account_id: accountId,
+              folder_path: folder.raw_path,
+              uidvalidity: searchResult.folder_status.uidvalidity,
+              last_uid: lastUid,
+              modseq: null,
+              last_sync_at: Math.floor(Date.now() / 1000),
+            },
+            floor: 0,
           });
           continue;
         }
@@ -1111,13 +1162,16 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           allImapMsgs.set(parsed.id, msg);
         }
 
-        await upsertFolderSyncState({
-          account_id: accountId,
-          folder_path: folder.raw_path,
-          uidvalidity,
-          last_uid: Math.max(savedState.last_uid, lastUid),
-          modseq: null,
-          last_sync_at: Math.floor(Date.now() / 1000),
+        folderStates.push({
+          state: {
+            account_id: accountId,
+            folder_path: folder.raw_path,
+            uidvalidity,
+            last_uid: Math.max(savedState.last_uid, lastUid),
+            modseq: null,
+            last_sync_at: Math.floor(Date.now() / 1000),
+          },
+          floor: savedState.last_uid,
         });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
@@ -1133,6 +1187,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   }
 
   if (allThreadable.length === 0) {
+    await recordFolderStates(folderStates, allImapMsgs, new Set());
     return { messages: [] };
   }
 
@@ -1155,13 +1210,16 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   const threadGroups = buildThreads(allThreadable);
 
   // Store in DB
-  const storedMessages = await storeThreadsAndMessages(
+  const { storedMessages, skippedMessageIds } = await storeThreadsAndMessages(
     accountId,
     threadGroups,
     allParsed,
     allImapMsgs,
     labelsByRfcId,
   );
+
+  // Only now is it safe to say these UIDs are synced
+  await recordFolderStates(folderStates, allImapMsgs, skippedMessageIds);
 
   // Update sync state timestamp
   await updateAccountSyncState(accountId, `imap-synced-${Date.now()}`);

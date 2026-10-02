@@ -1080,3 +1080,97 @@ describe("imapDeltaSync — UIDVALIDITY change", () => {
     expect(mockDeleteMessagesInFolder).not.toHaveBeenCalled();
   });
 });
+
+describe("imapDeltaSync — last_uid is recorded only for messages that were stored", () => {
+  const mockGetAccount = vi.mocked(getAccount);
+  const mockImapListFolders = vi.mocked(imapListFolders);
+  const mockImapFetchMessages = vi.mocked(imapFetchMessages);
+  const mockImapDeltaCheck = vi.mocked(imapDeltaCheck);
+  const mockGetAllFolderSyncStates = vi.mocked(getAllFolderSyncStates);
+  const mockUpsertFolderSyncState = vi.mocked(upsertFolderSyncState);
+  const mockUpsertMessage = vi.mocked(upsertMessage);
+  const mockGetPendingOps = vi.mocked(getPendingOpsForResource);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUpsertMessage.mockReset();
+    mockGetPendingOps.mockReset();
+    mockGetPendingOps.mockResolvedValue([]);
+    mockGetAccount.mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
+    mockImapListFolders.mockResolvedValue([
+      createMockImapFolder({ path: "INBOX", raw_path: "INBOX" }),
+    ]);
+    mockGetAllFolderSyncStates.mockResolvedValue([
+      {
+        account_id: "acc-1",
+        folder_path: "INBOX",
+        uidvalidity: 1,
+        last_uid: 4,
+        modseq: null,
+        last_sync_at: 0,
+      },
+    ] as never);
+    mockImapDeltaCheck.mockResolvedValue([
+      { folder: "INBOX", uidvalidity: 1, new_uids: [5, 6, 7], uidvalidity_changed: false },
+    ] as never);
+    // Three unrelated messages, so each one is a thread of its own.
+    mockImapFetchMessages.mockResolvedValue(
+      createMockImapFetchResult(
+        [5, 6, 7].map((uid) =>
+          createMockImapMessage({
+            uid,
+            message_id: `<m${uid}@test>`,
+            subject: `Subject ${uid}`,
+            date: uid * 1000,
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("records the highest UID once every message is stored", async () => {
+    await imapDeltaSync("acc-1");
+
+    expect(mockUpsertFolderSyncState).toHaveBeenCalledTimes(1);
+    expect(mockUpsertFolderSyncState.mock.calls[0]![0].last_uid).toBe(7);
+  });
+
+  it("records it after the messages, not before", async () => {
+    await imapDeltaSync("acc-1");
+
+    expect(mockUpsertMessage).toHaveBeenCalled();
+    expect(mockUpsertMessage.mock.invocationCallOrder.at(-1)!).toBeLessThan(
+      mockUpsertFolderSyncState.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("leaves last_uid alone when storing the messages fails", async () => {
+    mockUpsertMessage.mockRejectedValue(new Error("database is locked"));
+
+    await expect(imapDeltaSync("acc-1")).rejects.toThrow("database is locked");
+
+    expect(mockUpsertFolderSyncState).not.toHaveBeenCalled();
+  });
+
+  it("holds last_uid below a message whose thread was skipped", async () => {
+    // The second thread has a local operation in flight, so it is not written.
+    mockGetPendingOps
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 1 } as never])
+      .mockResolvedValueOnce([]);
+
+    await imapDeltaSync("acc-1");
+
+    // UID 7 was stored, but 6 was not — the watermark may not pass it.
+    expect(mockUpsertFolderSyncState.mock.calls.at(-1)![0].last_uid).toBe(5);
+  });
+
+  it("keeps the previous last_uid when every thread was skipped", async () => {
+    mockGetPendingOps.mockResolvedValue([{ id: 1 } as never]);
+
+    await imapDeltaSync("acc-1");
+
+    const calls = mockUpsertFolderSyncState.mock.calls;
+    expect(calls.every(([state]) => state.last_uid <= 4)).toBe(true);
+  });
+});

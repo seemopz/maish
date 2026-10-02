@@ -1,9 +1,9 @@
-import { SyncIndicator } from "../ui/SyncIndicator";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { AccountSwitcher } from "../accounts/AccountSwitcher";
 import { LabelForm } from "../labels/LabelForm";
 import { InputDialog } from "../ui/InputDialog";
+import { SyncIndicator } from "../ui/SyncIndicator";
 import { useUIStore } from "@/stores/uiStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useAccountStore } from "@/stores/accountStore";
@@ -621,7 +621,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
         )}
       </nav>
 
-      {/* Bottom bar: Settings + collapse toggle */}
+      {/* Bottom bar: sync indicator (slot kept even when idle), Settings, Help + collapse toggle */}
       <div className={`py-2 border-t border-border-primary flex ${collapsed ? "flex-col items-center gap-1 px-2" : "items-center gap-0.5 px-3"}`}>
         <SyncIndicator />
         <button

@@ -17,9 +17,7 @@ fn decode_base64url(input: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Build an async SMTP transport from the given config.
-fn build_transport(
-    config: &SmtpConfig,
-) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
+fn build_transport(config: &SmtpConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
     let credentials = Credentials::new(config.username.clone(), config.password.clone());
 
     // For OAuth2, force XOAUTH2 mechanism; for password, use default mechanisms
@@ -260,9 +258,9 @@ mod tests {
     fn test_build_transport_rejects_unknown_security() {
         for value in ["", "ssl", "TLS", "starttls ", "stattls", "opportunistic"] {
             let result = build_transport(&config_with_security(value));
-            let err = result.err().unwrap_or_else(|| {
-                panic!("security {:?} must not produce a transport", value)
-            });
+            let err = result
+                .err()
+                .unwrap_or_else(|| panic!("security {:?} must not produce a transport", value));
             assert!(err.contains("Unknown SMTP security"), "got: {}", err);
         }
     }
@@ -410,7 +408,11 @@ mod tests {
         let raw = b"From: alice@example.com\r\nTo: bob@example.com\r\nBcc: secret@example.com\r\nSubject: Test\r\n\r\nBody";
 
         let envelope = extract_envelope(raw).unwrap();
-        assert_eq!(envelope.to().len(), 2, "bcc recipient belongs in the envelope");
+        assert_eq!(
+            envelope.to().len(),
+            2,
+            "bcc recipient belongs in the envelope"
+        );
 
         let stripped = strip_bcc_headers(raw);
         let envelope_after = extract_envelope(&stripped).unwrap();

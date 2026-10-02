@@ -181,15 +181,3 @@ export function notifyFollowUpDue(
     actionTypeId: "email",
   });
 }
-
-/**
- * Show a notification for a snoozed email returning.
- */
-export function notifySnoozeReturn(subject: string): void {
-  if (!notificationsEnabled) return;
-  sendNotification({
-    title: "Snoozed email returned",
-    body: subject || "(No subject)",
-    actionTypeId: "default",
-  });
-}

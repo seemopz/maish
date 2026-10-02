@@ -27,16 +27,6 @@ export async function getPendingScheduledEmails(): Promise<DbScheduledEmail[]> {
   );
 }
 
-export async function getScheduledEmailsForAccount(
-  accountId: string,
-): Promise<DbScheduledEmail[]> {
-  const db = await getDb();
-  return db.select<DbScheduledEmail[]>(
-    "SELECT * FROM scheduled_emails WHERE account_id = $1 AND status = 'pending' ORDER BY scheduled_at ASC",
-    [accountId],
-  );
-}
-
 export async function insertScheduledEmail(email: {
   accountId: string;
   toAddresses: string;
@@ -80,9 +70,4 @@ export async function updateScheduledEmailStatus(
     "UPDATE scheduled_emails SET status = $1 WHERE id = $2",
     [status, id],
   );
-}
-
-export async function deleteScheduledEmail(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM scheduled_emails WHERE id = $1", [id]);
 }

@@ -1,3 +1,5 @@
+import { base64UrlEncode } from "./base64url";
+
 /**
  * Build an RFC 2822 email message and encode as base64url for the Gmail API.
  */
@@ -18,18 +20,6 @@ export interface EmailDraft {
   references?: string;
   threadId?: string;
   attachments?: EmailAttachment[];
-}
-
-function base64UrlEncode(str: string): string {
-  const bytes = new TextEncoder().encode(str);
-  let binary = "";
-  for (const b of bytes) {
-    binary += String.fromCharCode(b);
-  }
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
 }
 
 function htmlToPlainText(html: string): string {

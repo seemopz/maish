@@ -6,7 +6,6 @@ vi.mock("./tauriCommands", () => ({
   imapGetFolderStatus: vi.fn(),
   imapFetchMessages: vi.fn(),
   imapFetchNewUids: vi.fn(),
-  imapSearchAllUids: vi.fn(),
   imapSearchFolder: vi.fn(),
   imapDeltaCheck: vi.fn(),
 }));
@@ -106,6 +105,11 @@ describe("imapMessageToParsedMessage", () => {
     expect(parsed.rawSize).toBe(1024);
     expect(parsed.hasAttachments).toBe(false);
     expect(parsed.attachments).toEqual([]);
+  });
+
+  it("passes the backend's content hash on to threading", () => {
+    const msg = createMockImapMessage({ content_hash: "abc123" });
+    expect(imapMessageToParsedMessage(msg, "acc-1", "INBOX").threadable.contentKey).toBe("abc123");
   });
 
   it("generates stable message ID from account, folder, and uid", () => {

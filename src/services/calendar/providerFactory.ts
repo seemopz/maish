@@ -26,12 +26,8 @@ export async function getCalendarProvider(accountId: string): Promise<CalendarPr
   else if (account.calendar_provider === "caldav" && account.caldav_url) {
     provider = new CalDAVProvider(accountId);
   }
-  // Gmail API account
+  // Gmail API account, or an account that picked Google Calendar explicitly
   else if (account.provider === "gmail_api" || account.calendar_provider === "google_api") {
-    provider = new GoogleCalendarProvider(accountId);
-  }
-  // Default for Gmail accounts
-  else if (account.provider === "gmail_api") {
     provider = new GoogleCalendarProvider(accountId);
   } else {
     throw new Error(`No calendar provider configured for account ${accountId}`);

@@ -6,7 +6,7 @@ authors = ["Seemops1337"]
 license = "Apache-2.0"
 repository = "https://github.com/seemopz/maish"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 [lib]
 name = "app_lib"
@@ -42,9 +42,13 @@ native-tls = "0.2"
 mail-parser = "0.9"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 base64 = "0.22"
+# Same 0.10 line already in Cargo.lock via sqlx-core, so no new crate is built.
+sha2 = "0.10"
 utf7-imap = "0.3"
 socket2 = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }
+keyring = "4.2"
+
 # Same major/minor as the one tauri-plugin-sql pulls in, so cargo unifies them.
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 

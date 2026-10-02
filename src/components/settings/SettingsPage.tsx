@@ -7,7 +7,7 @@ import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/se
 import { PROVIDER_MODELS } from "@/services/ai/types";
 import { deleteAccount } from "@/services/db/accounts";
 import { removeClient, reauthorizeAccount } from "@/services/gmail/tokenManager";
-import { triggerSync, forceFullSync, resyncAccount } from "@/services/gmail/syncManager";
+import { triggerSync, forceFullSync, resyncAccount, removeAccountFromSync } from "@/services/gmail/syncManager";
 import {
   registerComposeShortcut,
   getCurrentShortcut,
@@ -316,6 +316,7 @@ export function SettingsPage() {
     async (accountId: string) => {
       removeClient(accountId);
       await deleteAccount(accountId);
+      removeAccountFromSync(accountId);
       removeAccountFromStore(accountId);
     },
     [removeAccountFromStore],

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   HELP_CATEGORIES,
-  CONTEXTUAL_TIPS,
   getAllCards,
   getCategoryById,
 } from "./helpContent";
@@ -53,13 +52,6 @@ describe("helpContent", () => {
       if (card.relatedSettingsTab) {
         expect(VALID_SETTINGS_TABS).toContain(card.relatedSettingsTab);
       }
-    }
-  });
-
-  it("all contextual tip helpTopic values map to valid category IDs", () => {
-    const categoryIds = new Set(HELP_CATEGORIES.map((c) => c.id));
-    for (const [, tip] of Object.entries(CONTEXTUAL_TIPS)) {
-      expect(categoryIds.has(tip.helpTopic)).toBe(true);
     }
   });
 

@@ -47,6 +47,8 @@ export interface ImapMessage {
   list_unsubscribe_post: string | null;
   auth_results: string | null;
   attachments: ImapAttachment[];
+  /** Hex SHA-256 over text, HTML and attachments (metadata and bytes), computed in Rust. */
+  content_hash: string;
 }
 
 export interface ImapAttachment {
@@ -75,14 +77,6 @@ export interface ImapFetchResult {
 
 export interface ImapFolderSearchResult {
   uids: number[];
-  folder_status: ImapFolderStatus;
-}
-
-// ---------- Folder sync result (single-connection search + fetch) ----------
-
-export interface ImapFolderSyncResult {
-  uids: number[];
-  messages: ImapMessage[];
   folder_status: ImapFolderStatus;
 }
 
@@ -156,17 +150,6 @@ export async function imapFetchNewUids(
   sinceUid: number
 ): Promise<number[]> {
   return invoke<number[]>('imap_fetch_new_uids', { config, folder, sinceUid });
-}
-
-/**
- * Search for all UIDs in a folder using UID SEARCH ALL.
- * Returns real UIDs — avoids the sparse UID gap problem with generateUidRange.
- */
-export async function imapSearchAllUids(
-  config: ImapConfig,
-  folder: string
-): Promise<number[]> {
-  return invoke<number[]>('imap_search_all_uids', { config, folder });
 }
 
 /**
@@ -280,23 +263,9 @@ export async function imapDeltaCheck(
 }
 
 /**
- * Sync a folder in a single IMAP connection: SELECT → UID SEARCH → batched UID FETCH.
- * When `sinceDate` is provided (format `DD-Mon-YYYY`), uses `UID SEARCH SINCE <date>`
- * to only fetch messages from that date onward, avoiding timeouts on large folders.
- */
-export async function imapSyncFolder(
-  config: ImapConfig,
-  folder: string,
-  batchSize: number,
-  sinceDate?: string | null,
-): Promise<ImapFolderSyncResult> {
-  return invoke<ImapFolderSyncResult>('imap_sync_folder', { config, folder, batchSize, sinceDate: sinceDate ?? null });
-}
-
-/**
  * Search a folder for UIDs without fetching message bodies.
- * Returns UIDs and folder status — lightweight alternative to `imapSyncFolder`
- * for callers that fetch messages in smaller IPC-friendly chunks.
+ * Returns UIDs and folder status, so callers can fetch messages in smaller
+ * IPC-friendly chunks.
  */
 export async function imapSearchFolder(
   config: ImapConfig,
@@ -304,17 +273,6 @@ export async function imapSearchFolder(
   sinceDate?: string | null,
 ): Promise<ImapFolderSearchResult> {
   return invoke<ImapFolderSearchResult>('imap_search_folder', { config, folder, sinceDate: sinceDate ?? null });
-}
-
-/**
- * Raw IMAP diagnostic: bypasses async-imap to show raw server responses.
- */
-export async function imapRawFetchDiagnostic(
-  config: ImapConfig,
-  folder: string,
-  uidRange: string,
-): Promise<string> {
-  return invoke<string>('imap_raw_fetch_diagnostic', { config, folder, uidRange });
 }
 
 // ---------- SMTP commands ----------

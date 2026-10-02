@@ -209,6 +209,9 @@ export function imapMessageToParsedMessage(
     references: msg.references,
     subject: msg.subject,
     date: msg.date * 1000,
+    fromAddress: msg.from_address,
+    // Computed in Rust, where the attachment bytes are available
+    contentKey: msg.content_hash,
   };
 
   return { parsed, threadable };

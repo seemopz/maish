@@ -67,13 +67,6 @@ export async function getVisibleAddressBooks(accountId: string): Promise<DbAddre
   );
 }
 
-export async function getAllAddressBooks(): Promise<DbAddressBook[]> {
-  const db = await getDb();
-  return db.select<DbAddressBook[]>(
-    "SELECT * FROM address_books ORDER BY display_name ASC",
-  );
-}
-
 export async function getAddressBookById(id: string): Promise<DbAddressBook | null> {
   return selectFirstBy<DbAddressBook>("SELECT * FROM address_books WHERE id = $1", [id]);
 }

@@ -6,7 +6,7 @@ pub struct ImapConfig {
     pub port: u16,
     pub security: String, // "tls", "starttls", "none"
     pub username: String,
-    pub password: String, // plaintext password or OAuth2 access token
+    pub password: String,    // plaintext password or OAuth2 access token
     pub auth_method: String, // "password" or "oauth2"
     #[serde(default)]
     pub accept_invalid_certs: bool,
@@ -14,9 +14,9 @@ pub struct ImapConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImapFolder {
-    pub path: String,      // decoded UTF-8 display name
-    pub raw_path: String,  // original modified UTF-7 path for IMAP commands
-    pub name: String,      // decoded display name (last segment)
+    pub path: String,     // decoded UTF-8 display name
+    pub raw_path: String, // original modified UTF-7 path for IMAP commands
+    pub name: String,     // decoded display name (last segment)
     pub delimiter: String,
     pub special_use: Option<String>, // "\Sent", "\Trash", "\Drafts", "\Junk", "\Archive", "\All"
     pub exists: u32,
@@ -49,6 +49,11 @@ pub struct ImapMessage {
     pub list_unsubscribe_post: Option<String>,
     pub auth_results: Option<String>,
     pub attachments: Vec<ImapAttachment>,
+    /// Hex SHA-256 over the text part, the HTML part and every attachment
+    /// (metadata and decoded bytes). Lets threading tell folder copies of one
+    /// message from different mails that reuse its Message-ID. Independent of
+    /// the MIME section numbers, which differ between folder copies.
+    pub content_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,13 +77,6 @@ pub struct ImapFolderStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImapFetchResult {
-    pub messages: Vec<ImapMessage>,
-    pub folder_status: ImapFolderStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImapFolderSyncResult {
-    pub uids: Vec<u32>,
     pub messages: Vec<ImapMessage>,
     pub folder_status: ImapFolderStatus,
 }

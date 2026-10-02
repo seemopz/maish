@@ -26,15 +26,30 @@ function mapImapPhase(phase: string): "labels" | "threads" | "messages" | "done"
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 let syncPromise: Promise<void> | null = null;
 let pendingAccountIds: string[] | null = null;
+/** Accounts the periodic timer syncs; read on every tick so a deleted account drops out. */
+let backgroundAccountIds: string[] = [];
 
 export type SyncStatusCallback = (
   accountId: string,
-  status: "syncing" | "done" | "error",
+  status: "syncing" | "done" | "error" | "removed",
   progress?: SyncProgress,
   error?: string,
 ) => void;
 
 let statusCallback: SyncStatusCallback | null = null;
+/** Accounts deleted this session. Account ids are random UUIDs, so they are never reused. */
+const removedAccountIds = new Set<string>();
+
+/**
+ * Report a status unless the account was deleted: a sync that was running when
+ * the account went away would otherwise report an error (or late progress) for
+ * an account that is never synced again, and nothing would clear it.
+ */
+function notify(...args: Parameters<SyncStatusCallback>): void {
+  const [accountId, status] = args;
+  if (removedAccountIds.has(accountId) && status !== "removed") return;
+  statusCallback?.(...args);
+}
 
 export function onSyncStatus(cb: SyncStatusCallback): () => void {
   statusCallback = cb;
@@ -66,7 +81,7 @@ async function syncGmailAccount(accountId: string): Promise<void> {
       if (message === "HISTORY_EXPIRED") {
         // Fallback to full sync
         await initialSync(client, accountId, syncDays, (progress) => {
-          statusCallback?.(accountId, "syncing", progress);
+          notify(accountId, "syncing", progress);
         });
       } else {
         throw err;
@@ -75,7 +90,7 @@ async function syncGmailAccount(accountId: string): Promise<void> {
   } else {
     // First time — full initial sync
     await initialSync(client, accountId, syncDays, (progress) => {
-      statusCallback?.(accountId, "syncing", progress);
+      notify(accountId, "syncing", progress);
     });
   }
 }
@@ -112,7 +127,7 @@ async function syncImapAccount(accountId: string): Promise<void> {
         await clearAccountHistoryId(accountId);
         await clearAllFolderSyncStates(accountId);
         await imapInitialSync(accountId, syncDays, (progress) => {
-          statusCallback?.(accountId, "syncing", {
+          notify(accountId, "syncing", {
             phase: mapImapPhase(progress.phase),
             current: progress.current,
             total: progress.total,
@@ -123,7 +138,7 @@ async function syncImapAccount(accountId: string): Promise<void> {
   } else {
     // First time — full initial sync
     await imapInitialSync(accountId, syncDays, (progress) => {
-      statusCallback?.(accountId, "syncing", {
+      notify(accountId, "syncing", {
         phase: mapImapPhase(progress.phase),
         current: progress.current,
         total: progress.total,
@@ -215,10 +230,12 @@ async function syncAccountInternal(accountId: string): Promise<void> {
     const account = await getAccount(accountId);
 
     if (!account) {
-      throw new Error("Account not found");
+      // Deleted while a sync was queued or running — nothing to sync, nothing to report.
+      notify(accountId, "removed");
+      return;
     }
 
-    statusCallback?.(accountId, "syncing");
+    notify(accountId, "syncing");
 
     console.log(`[syncManager] Syncing account ${accountId} (provider=${account.provider}, history_id=${account.history_id ?? "null"})`);
 
@@ -226,7 +243,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
       // DAV-only accounts carry no mailbox — sync what they do have.
       await syncCalendarForAccount(accountId);
       await syncContactsForAccount(accountId);
-      statusCallback?.(accountId, "done");
+      notify(accountId, "done");
       return;
     }
 
@@ -239,7 +256,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
     // Always emit "done" when an initial sync completes (clears the bar).
     // Also emit for delta syncs that fell back to initial (recovery re-sync)
     // since those emit progress via statusCallback inside syncImapAccount.
-    statusCallback?.(accountId, "done");
+    notify(accountId, "done");
 
     // Sync calendar alongside email (non-blocking — calendar errors don't affect email sync)
     syncCalendarForAccount(accountId).catch((err) => {
@@ -254,11 +271,15 @@ async function syncAccountInternal(accountId: string): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err ?? "Unknown error");
     console.error(`[syncManager] Sync failed for account ${accountId}:`, message);
-    statusCallback?.(accountId, "error", undefined, message);
+    notify(accountId, "error", undefined, message);
   }
 }
 
 async function runSync(accountIds: string[]): Promise<void> {
+  // An empty run would clear `syncPromise` before the assignment below stores it,
+  // leaving a settled promise behind that every later run would queue onto.
+  if (accountIds.length === 0) return;
+
   if (syncPromise) {
     // Queue these accounts, merging with any already-pending IDs
     const existing = new Set(pendingAccountIds ?? []);
@@ -302,16 +323,31 @@ export async function syncAccount(accountId: string): Promise<void> {
  */
 export function startBackgroundSync(accountIds: string[], skipImmediateSync = false): void {
   stopBackgroundSync();
+  backgroundAccountIds = [...accountIds];
 
   if (!skipImmediateSync) {
     // Immediate sync
-    runSync(accountIds);
+    runSync(backgroundAccountIds);
   }
 
   // Periodic sync
   syncTimer = setInterval(() => {
-    runSync(accountIds);
+    runSync(backgroundAccountIds);
   }, SYNC_INTERVAL_MS);
+}
+
+/**
+ * Stop syncing an account that was deleted. Drops it from the periodic timer
+ * and the queued run, and tells the status listener to forget any failure it
+ * remembers for it — otherwise the error icon would outlive the account.
+ */
+export function removeAccountFromSync(accountId: string): void {
+  removedAccountIds.add(accountId);
+  backgroundAccountIds = backgroundAccountIds.filter((id) => id !== accountId);
+  if (pendingAccountIds) {
+    pendingAccountIds = pendingAccountIds.filter((id) => id !== accountId);
+  }
+  notify(accountId, "removed");
 }
 
 /**

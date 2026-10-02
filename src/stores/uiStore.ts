@@ -34,6 +34,8 @@ interface UIState {
   sidebarNavConfig: SidebarNavItem[] | null;
   reduceMotion: boolean;
   isOnline: boolean;
+  /** Why the app could not load its accounts or credentials at startup; shown in a banner. */
+  startupError: string | null;
   pendingOpsCount: number;
   isSyncingFolder: string | null;
   syncState: SyncState;
@@ -59,6 +61,7 @@ interface UIState {
   restoreSidebarNavConfig: (config: SidebarNavItem[]) => void;
   setReduceMotion: (reduce: boolean) => void;
   setOnline: (online: boolean) => void;
+  setStartupError: (message: string | null) => void;
   setPendingOpsCount: (count: number) => void;
   setSyncingFolder: (folder: string | null) => void;
   setSyncState: (state: SyncState, message?: string | null) => void;
@@ -81,6 +84,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarNavConfig: null,
   reduceMotion: false,
   isOnline: true,
+  startupError: null,
   pendingOpsCount: 0,
   isSyncingFolder: null,
   syncState: "idle",
@@ -154,6 +158,7 @@ export const useUIStore = create<UIState>((set) => ({
     set({ reduceMotion });
   },
   setOnline: (isOnline) => set({ isOnline }),
+  setStartupError: (startupError) => set({ startupError }),
   setPendingOpsCount: (pendingOpsCount) => set({ pendingOpsCount }),
   setSyncingFolder: (isSyncingFolder) => set({ isSyncingFolder }),
   setSyncState: (syncState, syncMessage = null) => set({ syncState, syncMessage }),

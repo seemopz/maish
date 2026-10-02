@@ -437,7 +437,10 @@ mod tls_tests {
     /// `test`). Generated per run so no key material lives in the repository.
     #[rustfmt::skip]
     fn self_signed_p12() -> Vec<u8> {
-        let dir = std::env::temp_dir().join(format!("maish-smtp-tls-test-{}", std::process::id()));
+        // Both tests call this concurrently, so each call gets its own directory.
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("maish-smtp-tls-test-{}-{}", std::process::id(), n));
         std::fs::create_dir_all(&dir).unwrap();
         let (key, cert, p12) = (dir.join("k.pem"), dir.join("c.pem"), dir.join("b.p12"));
 

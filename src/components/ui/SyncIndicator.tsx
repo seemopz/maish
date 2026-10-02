@@ -4,12 +4,14 @@ import { useUIStore } from "@/stores/uiStore";
 /**
  * Unobtrusive sync state in the bottom-left corner: a spinner while syncing, an error icon after a failure.
  * Rendered inside the sidebar's bottom bar as a flex item, so it takes its own space instead of covering a button.
+ * That space is reserved while idle as well.
  */
 export function SyncIndicator() {
   const syncState = useUIStore((s) => s.syncState);
   const syncMessage = useUIStore((s) => s.syncMessage);
 
-  if (syncState === "idle") return null;
+  // Idle keeps the badge's footprint so the buttons next to it do not move when a sync starts.
+  if (syncState === "idle") return <div aria-hidden="true" className="shrink-0 w-6 h-6" />;
 
   const isError = syncState === "error";
   const label = syncMessage ?? (isError ? "Sync failed" : "Syncing...");

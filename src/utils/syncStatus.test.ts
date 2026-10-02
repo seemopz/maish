@@ -26,4 +26,16 @@ describe("nextSyncDisplay", () => {
   it("falls back to a generic message", () => {
     expect(nextSyncDisplay(new Map(), "a", "error", null)).toEqual({ state: "error", message: "Sync failed" });
   });
+
+  it("forgets a removed account's failure", () => {
+    const errors = new Map<string, string>();
+    nextSyncDisplay(errors, "a", "error", "Sync failed: A");
+    expect(nextSyncDisplay(errors, "a", "removed", null)).toEqual({ state: "idle", message: null });
+  });
+
+  it("keeps another account's failure when a different account is removed", () => {
+    const errors = new Map<string, string>();
+    nextSyncDisplay(errors, "a", "error", "Sync failed: A");
+    expect(nextSyncDisplay(errors, "b", "removed", null)).toEqual({ state: "error", message: "Sync failed: A" });
+  });
 });

@@ -11,12 +11,13 @@ export interface SyncDisplay {
  * Accounts sync one after another, so a failure must outlive the accounts that
  * follow it: `errors` remembers the last failure per account and an account's
  * entry is dropped only when that account starts or finishes a sync again.
+ * "removed" (the account was deleted) forgets the entry like "done" does.
  * While any sync runs the spinner wins; once none runs, a remembered error shows.
  */
 export function nextSyncDisplay(
   errors: Map<string, string>,
   accountId: string,
-  status: "syncing" | "done" | "error",
+  status: "syncing" | "done" | "error" | "removed",
   message: string | null,
 ): SyncDisplay {
   if (status === "error") {

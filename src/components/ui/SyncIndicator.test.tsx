@@ -8,9 +8,16 @@ beforeEach(() => {
 });
 
 describe("SyncIndicator", () => {
-  it("renders nothing while idle", () => {
+  it("keeps an empty, hidden slot of the badge's size while idle so the bar does not shift", () => {
     const { container } = render(<SyncIndicator />);
-    expect(container.firstChild).toBeNull();
+    const slot = container.firstElementChild;
+    expect(slot).not.toBeNull();
+    expect(slot?.getAttribute("aria-hidden")).toBe("true");
+    expect(slot?.className).toContain("w-6");
+    expect(slot?.className).toContain("h-6");
+    expect(slot?.textContent).toBe("");
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("shows a spinner with the progress text while syncing", () => {

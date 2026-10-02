@@ -393,6 +393,8 @@ export default function App() {
       const display = nextSyncDisplay(errors, accountId, status, message);
       useUIStore.getState().setSyncState(display.state, display.message);
 
+      if (status === "removed") return;
+
       if (status === "done") {
         window.dispatchEvent(new Event("maish-sync-done"));
         updateBadgeCount();

@@ -26,10 +26,12 @@ function mapImapPhase(phase: string): "labels" | "threads" | "messages" | "done"
 let syncTimer: ReturnType<typeof setInterval> | null = null;
 let syncPromise: Promise<void> | null = null;
 let pendingAccountIds: string[] | null = null;
+/** Accounts the periodic timer syncs; read on every tick so a deleted account drops out. */
+let backgroundAccountIds: string[] = [];
 
 export type SyncStatusCallback = (
   accountId: string,
-  status: "syncing" | "done" | "error",
+  status: "syncing" | "done" | "error" | "removed",
   progress?: SyncProgress,
   error?: string,
 ) => void;
@@ -215,7 +217,9 @@ async function syncAccountInternal(accountId: string): Promise<void> {
     const account = await getAccount(accountId);
 
     if (!account) {
-      throw new Error("Account not found");
+      // Deleted while a sync was queued or running — nothing to sync, nothing to report.
+      statusCallback?.(accountId, "removed");
+      return;
     }
 
     statusCallback?.(accountId, "syncing");
@@ -259,6 +263,10 @@ async function syncAccountInternal(accountId: string): Promise<void> {
 }
 
 async function runSync(accountIds: string[]): Promise<void> {
+  // An empty run would clear `syncPromise` before the assignment below stores it,
+  // leaving a settled promise behind that every later run would queue onto.
+  if (accountIds.length === 0) return;
+
   if (syncPromise) {
     // Queue these accounts, merging with any already-pending IDs
     const existing = new Set(pendingAccountIds ?? []);
@@ -302,16 +310,30 @@ export async function syncAccount(accountId: string): Promise<void> {
  */
 export function startBackgroundSync(accountIds: string[], skipImmediateSync = false): void {
   stopBackgroundSync();
+  backgroundAccountIds = [...accountIds];
 
   if (!skipImmediateSync) {
     // Immediate sync
-    runSync(accountIds);
+    runSync(backgroundAccountIds);
   }
 
   // Periodic sync
   syncTimer = setInterval(() => {
-    runSync(accountIds);
+    runSync(backgroundAccountIds);
   }, SYNC_INTERVAL_MS);
+}
+
+/**
+ * Stop syncing an account that was deleted. Drops it from the periodic timer
+ * and the queued run, and tells the status listener to forget any failure it
+ * remembers for it — otherwise the error icon would outlive the account.
+ */
+export function removeAccountFromSync(accountId: string): void {
+  backgroundAccountIds = backgroundAccountIds.filter((id) => id !== accountId);
+  if (pendingAccountIds) {
+    pendingAccountIds = pendingAccountIds.filter((id) => id !== accountId);
+  }
+  statusCallback?.(accountId, "removed");
 }
 
 /**

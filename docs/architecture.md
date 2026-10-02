@@ -71,7 +71,7 @@ maish/
 │   │   ├── tasks/            # TasksPage, TaskItem, TaskSidebar, TaskQuickAdd,
 │   │   │                     # AiTaskExtractDialog
 │   │   ├── help/             # HelpPage, HelpSidebar, HelpSearchBar,
-│   │   │                     # HelpCard, HelpCardGrid, HelpTooltip
+│   │   │                     # HelpCard, HelpCardGrid
 │   │   ├── labels/           # LabelForm
 │   │   ├── dnd/              # DndProvider (drag threads → sidebar labels)
 │   │   └── ui/               # EmptyState, Skeleton, ContextMenu, OfflineBanner, SyncIndicator, illustrations/
@@ -85,7 +85,6 @@ maish/
 │   │   ├── threading/        # JWZ threading engine for IMAP conversations
 │   │   ├── ai/               # AI service, 3 providers, categorization, Ask Inbox,
 │   │   │                     # writing style analysis, auto-drafts, task extraction
-│   │   ├── google/           # Google Calendar API
 │   │   ├── composer/         # Draft auto-save
 │   │   ├── search/           # Query parser, SQL builder
 │   │   ├── filters/          # Auto-apply filter engine
@@ -106,7 +105,7 @@ maish/
 │   │   └── globalShortcut.ts # System-wide compose shortcut
 │   ├── stores/               # Zustand stores (9): ui, account, thread,
 │   │                         # composer, label, contextMenu, shortcut, smartFolder, task
-│   ├── hooks/                # useKeyboardShortcuts, useClickOutside, useContextMenu
+│   ├── hooks/                # useKeyboardShortcuts, useClickOutside
 │   ├── utils/                # crypto, date, emailBuilder, sanitize, imageBlocker,
 │   │                         # mailtoParser, fileUtils, templateVariables, noReply
 │   ├── constants/            # Keyboard shortcuts, help content
@@ -154,7 +153,6 @@ All business logic lives in `src/services/` as plain async functions (except `Gm
 | `imap/` | IMAP sync, folder-to-label mapping, auto-discovery, Tauri command wrappers |
 | `threading/` | JWZ threading algorithm for IMAP message grouping |
 | `ai/` | AI service with 3 providers (selectable models), categorization, Ask Inbox, writing style analysis, auto-drafts, task extraction |
-| `google/` | Google Calendar API |
 | `calendar/` | CalendarProvider abstraction over Google Calendar and CalDAV, iCalendar parsing and in-place editing, recurrence expansion and rule editing, IANA time-zone conversion |
 | `composer/` | Draft auto-save (3s debounce) |
 | `search/` | Gmail-style query parser, SQL builder |
@@ -194,7 +192,7 @@ Zustand stores manage ephemeral UI state:
 
 SQLite via Tauri SQL plugin, at migration version 25.
 
-Key tables: `accounts` (with `provider`, IMAP/SMTP fields), `messages` (with FTS5 index, `auth_results`, IMAP headers, `imap_uid`, `imap_folder`), `threads` (with `is_pinned`, `is_muted`), `thread_labels`, `labels` (with `imap_folder_path`, `imap_special_use`), `contacts`, `attachments` (with `imap_part_id`), `filter_rules`, `scheduled_emails`, `templates`, `signatures`, `image_allowlist`, `settings`, `ai_cache`, `thread_categories`, `calendars`, `calendar_events` (with `ical_data`, and `rrule`/`recurrence_end` for recurring series), `follow_up_reminders`, `notification_vips`, `unsubscribe_actions`, `bundle_rules`, `bundled_threads`, `send_as_aliases`, `smart_folders`, `link_scan_results`, `phishing_allowlist`, `quick_steps`, `folder_sync_state` (IMAP sync tracking), `pending_operations` (offline action queue), `local_drafts` (offline draft persistence), `writing_style_profiles` (AI writing style per account), `tasks` (full task management with priorities, subtasks, recurrence), `task_tags` (custom task tag colors), `smart_label_rules` (AI-powered auto-labeling rules).
+Key tables: `accounts` (with `provider`, IMAP/SMTP fields), `messages` (with FTS5 index, `auth_results`, IMAP headers, `imap_uid`, `imap_folder`), `threads` (with `is_pinned`, `is_muted`), `thread_labels`, `labels` (with `imap_folder_path`, `imap_special_use`), `contacts`, `attachments` (with `imap_part_id`), `filter_rules`, `scheduled_emails`, `templates`, `signatures`, `image_allowlist`, `settings`, `ai_cache`, `thread_categories`, `calendars`, `calendar_events` (with `ical_data`, and `rrule`/`recurrence_end` for recurring series), `follow_up_reminders`, `notification_vips`, `unsubscribe_actions`, `bundle_rules`, `bundled_threads`, `send_as_aliases`, `smart_folders`, `link_scan_results`, `phishing_allowlist`, `quick_steps`, `folder_sync_state` (IMAP sync tracking), `pending_operations` (offline action queue), `writing_style_profiles` (AI writing style per account), `tasks` (full task management with priorities, subtasks, recurrence), `task_tags` (custom task tag colors), `smart_label_rules` (AI-powered auto-labeling rules).
 
 ## Startup Sequence
 

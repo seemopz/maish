@@ -1586,17 +1586,24 @@ fn extract_internal_date(line: &str) -> Option<i64> {
 /// Parse IMAP date format "16-Feb-2026 12:00:00 +0000" to Unix timestamp.
 fn parse_imap_date(s: &str) -> Option<i64> {
     // INTERNALDATE is an RFC 5322 date with "-" between day, month and year.
-    // Swap those for spaces (only in the date part, the zone keeps its sign).
-    let (date, rest) = s.trim().split_once(' ')?;
-    // mail-parser hashes the month name and accepts any three letters, so check it.
+    // mail-parser is lenient (any three letters pass as a month, any text as a
+    // number), so check the three date fields here and join them with spaces.
+    // Only the date part is split, the zone keeps its sign.
     const MONTHS: [&str; 12] = [
         "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
     ];
-    let month = date.split('-').nth(1)?;
-    if !MONTHS.iter().any(|m| m.eq_ignore_ascii_case(month)) {
+    let (date, rest) = s.trim().split_once(' ')?;
+    let mut fields = date.split('-');
+    let (day, month, year) = (fields.next()?, fields.next()?, fields.next()?);
+    let digits = |f: &str| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit());
+    if fields.next().is_some()
+        || !digits(day)
+        || !digits(year)
+        || !MONTHS.iter().any(|m| m.eq_ignore_ascii_case(month))
+    {
         return None;
     }
-    let dt = mail_parser::DateTime::parse_rfc822(&format!("{} {rest}", date.replace('-', " ")))?;
+    let dt = mail_parser::DateTime::parse_rfc822(&format!("{day} {month} {year} {rest}"))?;
     dt.is_valid().then(|| dt.to_timestamp())
 }
 
@@ -2375,6 +2382,11 @@ mod tests {
         assert_eq!(parse_imap_date(""), None);
         assert_eq!(parse_imap_date("not a date"), None);
         assert_eq!(parse_imap_date("16-Foo-2026 12:00:00 +0000"), None);
+        // day or year that is not a number, and a date with too many or too few fields
+        assert_eq!(parse_imap_date("x-Feb-2026 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb-yyyy 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb-2026-01 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb 12:00:00 +0000"), None);
     }
 
     #[test]

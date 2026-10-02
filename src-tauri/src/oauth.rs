@@ -118,7 +118,10 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
 
     drop(listener);
 
-    Ok(OAuthResult { code, state: returned_state })
+    Ok(OAuthResult {
+        code,
+        state: returned_state,
+    })
 }
 
 fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> {
@@ -166,10 +169,7 @@ fn urlencoding_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                &s[i + 1..i + 3],
-                16,
-            ) {
+            if let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
                 result.push(byte);
                 i += 3;
                 continue;

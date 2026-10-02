@@ -29,7 +29,6 @@ import {
   ExternalLink,
   Github,
   Scale,
-  Globe,
   Download,
   ChevronUp,
   ChevronDown,
@@ -1709,7 +1708,7 @@ function DemaishperTab() {
   );
 }
 
-function AboutTab() {
+export function AboutTab() {
   const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
@@ -1744,18 +1743,6 @@ function AboutTab() {
 
       <Section title="Links">
           <button
-            onClick={() => openExternal("https://maishmail.app")}
-            className="flex items-center gap-3 w-full hover:bg-bg-hover first:rounded-t-md last:rounded-b-md transition-colors text-left"
-          >
-            <Globe size={16} className="text-text-tertiary shrink-0" />
-            <div className="min-w-0 flex-1">
-              <span className="text-sm text-text-primary">Website</span>
-              <p className="text-xs text-text-tertiary">maishmail.app</p>
-            </div>
-            <ExternalLink size={14} className="text-text-tertiary shrink-0" />
-          </button>
-
-          <button
             onClick={() => openExternal("https://github.com/seemopz/maish")}
             className="flex items-center gap-3 w-full hover:bg-bg-hover first:rounded-t-md last:rounded-b-md transition-colors text-left"
           >
@@ -1763,18 +1750,6 @@ function AboutTab() {
             <div className="min-w-0 flex-1">
               <span className="text-sm text-text-primary">GitHub Repository</span>
               <p className="text-xs text-text-tertiary">seemopz/maish</p>
-            </div>
-            <ExternalLink size={14} className="text-text-tertiary shrink-0" />
-          </button>
-
-          <button
-            onClick={() => openExternal("mailto:info@maishmail.app")}
-            className="flex items-center gap-3 w-full hover:bg-bg-hover first:rounded-t-md last:rounded-b-md transition-colors text-left"
-          >
-            <Mail size={16} className="text-text-tertiary shrink-0" />
-            <div className="min-w-0 flex-1">
-              <span className="text-sm text-text-primary">Contact</span>
-              <p className="text-xs text-text-tertiary">info@maishmail.app</p>
             </div>
             <ExternalLink size={14} className="text-text-tertiary shrink-0" />
           </button>

@@ -12,7 +12,6 @@ import { createMockAiProvider } from "@/test/mocks";
 
 vi.mock("./providers/claudeProvider", () => ({
   createClaudeProvider: vi.fn(() => createMockAiProvider("claude response")),
-  clearClaudeProvider: vi.fn(),
 }));
 
 vi.mock("./providers/openaiProvider", () => ({
@@ -22,7 +21,6 @@ vi.mock("./providers/openaiProvider", () => ({
 
 vi.mock("./providers/geminiProvider", () => ({
   createGeminiProvider: vi.fn(() => createMockAiProvider("gemini response")),
-  clearGeminiProvider: vi.fn(),
 }));
 
 vi.mock("./providers/ollamaProvider", () => ({
@@ -36,7 +34,7 @@ vi.mock("./providers/copilotProvider", () => ({
 }));
 
 import { getSetting } from "@/services/db/settings";
-import { createClaudeProvider, clearClaudeProvider } from "./providers/claudeProvider";
+import { createClaudeProvider } from "./providers/claudeProvider";
 import { createOpenAIProvider } from "./providers/openaiProvider";
 import { createGeminiProvider } from "./providers/geminiProvider";
 import { createOllamaProvider } from "./providers/ollamaProvider";
@@ -313,7 +311,6 @@ describe("providerManager", () => {
       expect(createClaudeProvider).toHaveBeenCalledTimes(1);
 
       clearProviderClients();
-      expect(clearClaudeProvider).toHaveBeenCalled();
 
       await getActiveProvider();
       expect(createClaudeProvider).toHaveBeenCalledTimes(2);

@@ -14,11 +14,9 @@
     "flatpak": "flatpak-builder --force-clean --user --install --install-deps-from=flathub build-dir xyz.hochreiner.maish.yml"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.74.0",
     "@dnd-kit/core": "^6.3.1",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
-    "@google/generative-ai": "^0.24.1",
     "@tanstack/react-router": "^1.159.5",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-autostart": "^2.0.0",

@@ -258,9 +258,9 @@ mod tests {
     fn test_build_transport_rejects_unknown_security() {
         for value in ["", "ssl", "TLS", "starttls ", "stattls", "opportunistic"] {
             let result = build_transport(&config_with_security(value));
-            let err = result.err().unwrap_or_else(|| {
-                panic!("security {:?} must not produce a transport", value)
-            });
+            let err = result
+                .err()
+                .unwrap_or_else(|| panic!("security {:?} must not produce a transport", value));
             assert!(err.contains("Unknown SMTP security"), "got: {}", err);
         }
     }

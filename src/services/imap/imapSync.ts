@@ -420,8 +420,14 @@ async function fetchMessagesInBatches(
   folder: string,
   uids: number[],
   onBatch?: (fetched: number, total: number) => void,
-): Promise<{ messages: ImapMessage[]; lastUid: number; uidvalidity: number }> {
+): Promise<{
+  messages: ImapMessage[];
+  lastUid: number;
+  uidvalidity: number;
+  undeliveredUids: number[];
+}> {
   const allMessages: ImapMessage[] = [];
+  const undeliveredUids: number[] = [];
   let lastUid = 0;
   let uidvalidity = 0;
 
@@ -432,14 +438,67 @@ async function fetchMessagesInBatches(
     allMessages.push(...result.messages);
     uidvalidity = result.folder_status.uidvalidity;
 
+    const delivered = new Set<number>();
     for (const msg of result.messages) {
+      delivered.add(msg.uid);
       if (msg.uid > lastUid) lastUid = msg.uid;
+    }
+    // The Rust side drops a message it cannot read (a stream error, no body, a
+    // parse failure) with a log line only, so the batch comes back short
+    // without an error to catch.
+    for (const uid of batch) {
+      if (!delivered.has(uid)) undeliveredUids.push(uid);
     }
 
     onBatch?.(Math.min(i + BATCH_SIZE, uids.length), uids.length);
   }
 
-  return { messages: allMessages, lastUid, uidvalidity };
+  return { messages: allMessages, lastUid, uidvalidity, undeliveredUids };
+}
+
+/**
+ * How many delta syncs in a row a UID was listed by the server and not
+ * delivered, keyed by account, folder and UID. Held in memory: a restart
+ * simply tries again.
+ */
+const undeliveredUidAttempts = new Map<string, number>();
+
+/** A UID held back this many syncs is given up on, so one unreadable message cannot pin a folder. */
+const MAX_UNDELIVERED_ATTEMPTS = 3;
+
+export function resetUndeliveredUidAttempts(): void {
+  undeliveredUidAttempts.clear();
+}
+
+/**
+ * The UIDs of a folder that may hold its watermark back this time. Counts an
+ * attempt for each; once a UID has used them all it is let go.
+ */
+function uidsToRetry(accountId: string, folder: string, undelivered: number[]): number[] {
+  const retry: number[] = [];
+  const current = new Set(undelivered);
+
+  for (const key of [...undeliveredUidAttempts.keys()]) {
+    const [acc, fold, uidText] = key.split("\u0000");
+    // A UID delivered since is no longer a problem.
+    if (acc === accountId && fold === folder && !current.has(Number(uidText))) {
+      undeliveredUidAttempts.delete(key);
+    }
+  }
+
+  for (const uid of undelivered) {
+    const key = [accountId, folder, uid].join("\u0000");
+    const attempts = (undeliveredUidAttempts.get(key) ?? 0) + 1;
+    undeliveredUidAttempts.set(key, attempts);
+    if (attempts < MAX_UNDELIVERED_ATTEMPTS) {
+      retry.push(uid);
+    } else {
+      console.warn(
+        `[imapSync] Folder ${folder}: UID ${uid} was listed but not delivered ${attempts} syncs in a row, giving up on it`,
+      );
+    }
+  }
+  return retry;
 }
 
 // ---------------------------------------------------------------------------
@@ -903,14 +962,24 @@ export async function imapInitialSync(
 // Delta sync
 // ---------------------------------------------------------------------------
 
+interface FolderStateUpdate {
+  state: FolderSyncState;
+  /** last_uid may not be held below this. */
+  floor: number;
+  /** UIDs the server listed and the fetch did not deliver. */
+  undeliveredUids: number[];
+}
+
 /**
  * Write the folder sync states a delta sync has worked out, once its messages
  * are stored. A message that was fetched but not stored (its thread was skipped
  * for a pending local operation) holds the folder's last_uid just below its UID,
- * so the next delta fetches it again; it never goes below `floor`.
+ * so the next delta fetches it again; it never goes below `floor`. A UID the
+ * fetch left out holds it the same way, for a few syncs.
  */
 async function recordFolderStates(
-  folderStates: { state: FolderSyncState; floor: number }[],
+  accountId: string,
+  folderStates: FolderStateUpdate[],
   imapMsgByLocalId: Map<string, ImapMessage>,
   skippedMessageIds: Set<string>,
 ): Promise<void> {
@@ -922,13 +991,21 @@ async function recordFolderStates(
     if (lowest === undefined || msg.uid < lowest) lowestSkippedUid.set(msg.folder, msg.uid);
   }
 
-  for (const { state, floor } of folderStates) {
-    const lowest = lowestSkippedUid.get(state.folder_path);
+  for (const { state, floor, undeliveredUids } of folderStates) {
+    const lowestStored = lowestSkippedUid.get(state.folder_path);
+    const retry = uidsToRetry(accountId, state.folder_path, undeliveredUids);
+    const lowestUndelivered = retry.length > 0 ? Math.min(...retry) : undefined;
+    const lowest =
+      lowestStored === undefined
+        ? lowestUndelivered
+        : lowestUndelivered === undefined
+          ? lowestStored
+          : Math.min(lowestStored, lowestUndelivered);
     let lastUid = state.last_uid;
     if (lowest !== undefined && lowest - 1 < lastUid) {
       lastUid = Math.max(floor, lowest - 1);
       console.warn(
-        `[imapSync] Folder ${state.folder_path}: UID ${lowest} was fetched but not stored, holding last_uid at ${lastUid} instead of ${state.last_uid} so it is retried`,
+        `[imapSync] Folder ${state.folder_path}: UID ${lowest} was not stored, holding last_uid at ${lastUid} instead of ${state.last_uid} so it is retried`,
       );
     }
     await upsertFolderSyncState({ ...state, last_uid: lastUid });
@@ -965,7 +1042,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   // the messages are stored: last_uid is a watermark that the next delta
   // starts above, so recording it first turns any failure while storing
   // (a locked database, the app closing) into mail that is never fetched again.
-  const folderStates: { state: FolderSyncState; floor: number }[] = [];
+  const folderStates: FolderStateUpdate[] = [];
 
   // Separate folders into new (no saved state) vs existing (have saved state)
   const newFolders = syncableFolders.filter((f) => !syncStateMap.has(f.raw_path));
@@ -994,7 +1071,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
       if (searchResult.uids.length === 0) continue;
 
-      const { messages, lastUid } = await fetchMessagesInBatches(
+      const { messages, lastUid, undeliveredUids } = await fetchMessagesInBatches(
         config,
         folder.raw_path,
         searchResult.uids,
@@ -1021,6 +1098,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           last_sync_at: Math.floor(Date.now() / 1000),
         },
         floor: 0,
+        undeliveredUids,
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
@@ -1111,7 +1189,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           const searchResult = await imapSearchFolder(config, folder.raw_path, sinceDate);
           if (searchResult.uids.length === 0) continue;
 
-          const { messages, lastUid } = await fetchMessagesInBatches(
+          const { messages, lastUid, undeliveredUids } = await fetchMessagesInBatches(
             config,
             folder.raw_path,
             searchResult.uids,
@@ -1138,6 +1216,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
               last_sync_at: Math.floor(Date.now() / 1000),
             },
             floor: 0,
+            undeliveredUids,
           });
           continue;
         }
@@ -1145,7 +1224,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
         // Normal delta: fetch the new UIDs returned by delta check
         if (deltaResult.new_uids.length === 0) continue;
 
-        const { messages, lastUid, uidvalidity } = await fetchMessagesInBatches(
+        const { messages, lastUid, uidvalidity, undeliveredUids } = await fetchMessagesInBatches(
           config,
           folder.raw_path,
           deltaResult.new_uids,
@@ -1172,6 +1251,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
             last_sync_at: Math.floor(Date.now() / 1000),
           },
           floor: savedState.last_uid,
+          undeliveredUids,
         });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
@@ -1187,7 +1267,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   }
 
   if (allThreadable.length === 0) {
-    await recordFolderStates(folderStates, allImapMsgs, new Set());
+    await recordFolderStates(accountId, folderStates, allImapMsgs, new Set());
     return { messages: [] };
   }
 
@@ -1219,7 +1299,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   );
 
   // Only now is it safe to say these UIDs are synced
-  await recordFolderStates(folderStates, allImapMsgs, skippedMessageIds);
+  await recordFolderStates(accountId, folderStates, allImapMsgs, skippedMessageIds);
 
   // Update sync state timestamp
   await updateAccountSyncState(accountId, `imap-synced-${Date.now()}`);

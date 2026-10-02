@@ -44,7 +44,9 @@ fn build_transport(
                     .dangerous_accept_invalid_hostnames(true)
                     .build()
                     .map_err(|e| format!("SMTP TLS params error: {}", e))?;
-                builder = builder.tls(Tls::Required(tls_params));
+                // `relay()` set `Tls::Wrapper`; keep it. `Tls::Required` would
+                // switch to STARTTLS and never handshake on port 465.
+                builder = builder.tls(Tls::Wrapper(tls_params));
             }
 
             builder.build()
@@ -382,5 +384,110 @@ mod tests {
             1,
             "stripping first would lose the blind recipient entirely"
         );
+    }
+}
+
+/// Transport tests against a local TLS listener with a self-signed certificate.
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+
+    /// Self-signed certificate for `localhost` (test fixture, password `test`).
+    const SELF_SIGNED_P12: &[u8] = include_bytes!("testdata/self_signed.p12");
+
+    fn config(port: u16, security: &str, accept_invalid_certs: bool) -> SmtpConfig {
+        SmtpConfig {
+            host: "localhost".to_string(),
+            port,
+            security: security.to_string(),
+            username: "user".to_string(),
+            password: "secret".to_string(),
+            auth_method: "password".to_string(),
+            accept_invalid_certs,
+        }
+    }
+
+    /// Accepts one connection, expects a TLS handshake straight away (implicit
+    /// TLS, as on port 465) and then speaks just enough SMTP for
+    /// `test_connection`. Returns whether the handshake succeeded.
+    async fn serve_implicit_tls_once(listener: TcpListener) -> bool {
+        let identity = native_tls::Identity::from_pkcs12(SELF_SIGNED_P12, "test").unwrap();
+        let acceptor =
+            tokio_native_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity).unwrap());
+
+        let (socket, _) = listener.accept().await.unwrap();
+        let handshake = tokio::time::timeout(Duration::from_secs(5), acceptor.accept(socket));
+        let Ok(Ok(stream)) = handshake.await else {
+            return false;
+        };
+
+        let mut stream = BufReader::new(stream);
+        let _ = stream.get_mut().write_all(b"220 localhost ESMTP\r\n").await;
+        let mut line = String::new();
+        while let Ok(n) = stream.read_line(&mut line).await {
+            if n == 0 {
+                break;
+            }
+            let reply: &[u8] = if line.starts_with("EHLO") {
+                b"250-localhost\r\n250 AUTH PLAIN LOGIN\r\n"
+            } else if line.starts_with("AUTH") {
+                b"235 2.7.0 Authenticated\r\n"
+            } else if line.starts_with("QUIT") {
+                b"221 Bye\r\n"
+            } else {
+                b"250 OK\r\n"
+            };
+            let quit = line.starts_with("QUIT");
+            if stream.get_mut().write_all(reply).await.is_err() || quit {
+                break;
+            }
+            line.clear();
+        }
+        true
+    }
+
+    async fn probe(config: &SmtpConfig) -> Option<Result<SmtpSendResult, String>> {
+        tokio::time::timeout(Duration::from_secs(10), test_connection(config))
+            .await
+            .ok()
+    }
+
+    #[tokio::test]
+    async fn test_implicit_tls_accepts_self_signed_certificate_when_allowed() {
+        // Port 465 style: the server speaks TLS from the first byte. Before
+        // the fix the client downgraded to STARTTLS-required, waited for a
+        // plaintext greeting and never started a handshake.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(serve_implicit_tls_once(listener));
+
+        let result = probe(&config(port, "tls", true)).await;
+
+        assert!(
+            matches!(&result, Some(Ok(r)) if r.success),
+            "implicit TLS with accept_invalid_certs must connect, got: {:?}",
+            result.map(|r| r.map(|r| r.message))
+        );
+        assert!(server.await.unwrap(), "server never saw a TLS handshake");
+    }
+
+    #[tokio::test]
+    async fn test_implicit_tls_rejects_self_signed_certificate_by_default() {
+        // The opt-in is what allows the certificate; without it the same
+        // server must be refused.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(serve_implicit_tls_once(listener));
+
+        let result = probe(&config(port, "tls", false)).await;
+
+        assert!(
+            !matches!(&result, Some(Ok(r)) if r.success),
+            "a self-signed certificate must not be accepted without the opt-in"
+        );
+        server.abort();
     }
 }

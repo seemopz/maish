@@ -44,6 +44,7 @@ import {
   type ThreadGroup,
 } from "../threading/threadBuilder";
 import { getPendingOpsForResource } from "../db/pendingOperations";
+import { sha256Hex } from "../../utils/sha256";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -210,6 +211,7 @@ export function imapMessageToParsedMessage(
     subject: msg.subject,
     date: msg.date * 1000,
     fromAddress: msg.from_address,
+    contentKey: sha256Hex(msg.body_text ?? msg.body_html ?? ""),
   };
 
   return { parsed, threadable };

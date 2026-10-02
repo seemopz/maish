@@ -673,6 +673,7 @@ describe('buildThreads', () => {
       subject: 'Invoice',
       date: 1000,
       fromAddress: 'alice@example.com',
+      contentKey: 'body-a',
     };
 
     it('treats folder copies that agree on sender, date and subject as one message', () => {
@@ -704,6 +705,57 @@ describe('buildThreads', () => {
       const ids = buildThreads([base, other, copy]).flatMap((t) => t.messageIds);
 
       expect(ids.sort()).toEqual(['inbox-2', 'sent-1']);
+    });
+
+    it('collapses a copy of the second message, not only of the first', () => {
+      const other = { ...base, id: 'inbox-2', fromAddress: 'mallory@example.com' };
+      const copyOfOther = { ...other, id: 'sent-2' };
+
+      const ids = buildThreads([base, other, copyOfOther]).flatMap((t) => t.messageIds);
+
+      expect(ids.sort()).toEqual(['inbox-1', 'sent-2']);
+    });
+
+    it('keeps both messages when only the content differs', () => {
+      // A forged mail that copies sender, date and subject of a known message
+      const forged = { ...base, id: 'inbox-2', contentKey: 'body-forged' };
+
+      const ids = buildThreads([base, forged]).flatMap((t) => t.messageIds);
+
+      expect(ids.sort()).toEqual(['inbox-1', 'inbox-2']);
+    });
+
+    it('does not let a second message with the same ID move the first one', () => {
+      const other: ThreadableMessage = {
+        id: 'other',
+        messageId: 'other@host',
+        inReplyTo: null,
+        references: null,
+        subject: 'Unrelated',
+        date: 500,
+      };
+      const reply: ThreadableMessage = {
+        id: 'reply',
+        messageId: 'reply@host',
+        inReplyTo: 'dup@host',
+        references: 'dup@host',
+        subject: 'Re: Invoice',
+        date: 1500,
+      };
+      const hijack = {
+        ...base,
+        id: 'hijack',
+        contentKey: 'body-forged',
+        references: 'other@host',
+        inReplyTo: 'other@host',
+      };
+
+      const threads = buildThreads([other, base, reply, hijack]);
+      const threadOf = (id: string) => threads.find((t) => t.messageIds.includes(id))!;
+
+      expect(threadOf('inbox-1').messageIds).toContain('reply');
+      expect(threadOf('inbox-1').threadId).not.toBe(threadOf('other').threadId);
+      expect(threadOf('hijack')).toBe(threadOf('inbox-1'));
     });
   });
 });

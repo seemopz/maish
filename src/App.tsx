@@ -67,7 +67,6 @@ import { getIncompleteTaskCount } from "./services/db/tasks";
 import { useTaskStore } from "./stores/taskStore";
 import { ContextMenuPortal } from "./components/ui/ContextMenuPortal";
 import { MoveToFolderDialog } from "./components/email/MoveToFolderDialog";
-import { SyncIndicator } from "./components/ui/SyncIndicator";
 import { OfflineBanner } from "./components/ui/OfflineBanner";
 import { UpdateToast } from "./components/ui/UpdateToast";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
@@ -514,8 +513,6 @@ export default function App() {
           <Outlet />
         </DndProvider>
       </div>
-
-      <SyncIndicator />
 
       {showAddAccount && (
         <AddAccount

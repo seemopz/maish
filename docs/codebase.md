@@ -56,7 +56,7 @@ Component groups:
 - `help/` — HelpPage, HelpSidebar, HelpSearchBar, HelpCard, HelpCardGrid, HelpTooltip
 - `labels/` — LabelForm
 - `dnd/` — DndProvider (@dnd-kit drag-and-drop: threads → sidebar labels)
-- `ui/` — EmptyState, Skeleton, ContextMenu, ContextMenuPortal, OfflineBanner, SyncIndicator (bottom-left sync spinner / error icon, state in `uiStore.syncState`), illustrations/ (InboxClearIllustration, NoAccountIllustration, NoSearchResultsIllustration, ReadingPaneIllustration, GenericEmptyIllustration)
+- `ui/` — EmptyState, Skeleton, ContextMenu, ContextMenuPortal, OfflineBanner, SyncIndicator (sync spinner / error icon in the sidebar's bottom bar, state in `uiStore.syncState`), illustrations/ (InboxClearIllustration, NoAccountIllustration, NoSearchResultsIllustration, ReadingPaneIllustration, GenericEmptyIllustration)
 
 ### Multi-window support
 

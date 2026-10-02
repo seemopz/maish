@@ -3,7 +3,7 @@ import { useUIStore } from "@/stores/uiStore";
 
 /**
  * Unobtrusive sync state in the bottom-left corner: a spinner while syncing, an error icon after a failure.
- * Sits above the sidebar's bottom bar so it never covers the Settings or collapse buttons.
+ * Rendered inside the sidebar's bottom bar as a flex item, so it takes its own space instead of covering a button.
  */
 export function SyncIndicator() {
   const syncState = useUIStore((s) => s.syncState);
@@ -18,7 +18,7 @@ export function SyncIndicator() {
     <div
       role={isError ? "alert" : "status"}
       title={label}
-      className={`fixed bottom-14 left-2 z-40 flex items-center justify-center w-6 h-6 rounded-full bg-bg-primary border border-border-primary shadow-sm ${
+      className={`shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-bg-primary border border-border-primary ${
         isError ? "text-danger" : "text-text-tertiary"
       }`}
     >

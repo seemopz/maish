@@ -83,6 +83,7 @@ import { withTransaction } from "../db/connection";
 import { upsertMessage, updateMessageThreadIds, getMessagesForThread, deleteMessagesInFolder } from "../db/messages";
 import { upsertThread, deleteThread, setThreadLabels, getThreadLabelIds, deleteEmptyThreads } from "../db/threads";
 import { upsertAttachment } from "../db/attachments";
+import { buildThreads } from "../threading/threadBuilder";
 import { getPendingOpsForResource } from "../db/pendingOperations";
 import { getAllFolderSyncStates, upsertFolderSyncState } from "../db/folderSyncState";
 
@@ -1091,6 +1092,32 @@ describe("imapDeltaSync — last_uid is recorded only for messages that were sto
   const mockUpsertMessage = vi.mocked(upsertMessage);
   const mockGetPendingOps = vi.mocked(getPendingOpsForResource);
 
+  const mockImapSearchFolder = vi.mocked(imapSearchFolder);
+
+  /** One unrelated message, so each UID is a thread of its own. */
+  function inboxMessage(uid: number, folder = "INBOX") {
+    return createMockImapMessage({
+      uid,
+      folder,
+      message_id: `<m${uid}@${folder}.test>`,
+      subject: `Subject ${uid}`,
+      date: uid * 1000,
+    });
+  }
+
+  /** The thread ID the sync derives for a message that stands alone. */
+  function threadIdOf(uid: number, folder = "INBOX"): string {
+    const { threadable } = imapMessageToParsedMessage(inboxMessage(uid, folder), "acc-1", folder);
+    return buildThreads([threadable])[0]!.threadId;
+  }
+
+  /** Leave only these threads with a local operation in flight. */
+  function pendingOpsOn(...threadIds: string[]) {
+    mockGetPendingOps.mockImplementation(async (_account, resourceId) =>
+      threadIds.includes(resourceId) ? [{ id: 1 } as never] : [],
+    );
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpsertMessage.mockReset();
@@ -1113,18 +1140,8 @@ describe("imapDeltaSync — last_uid is recorded only for messages that were sto
     mockImapDeltaCheck.mockResolvedValue([
       { folder: "INBOX", uidvalidity: 1, new_uids: [5, 6, 7], uidvalidity_changed: false },
     ] as never);
-    // Three unrelated messages, so each one is a thread of its own.
     mockImapFetchMessages.mockResolvedValue(
-      createMockImapFetchResult(
-        [5, 6, 7].map((uid) =>
-          createMockImapMessage({
-            uid,
-            message_id: `<m${uid}@test>`,
-            subject: `Subject ${uid}`,
-            date: uid * 1000,
-          }),
-        ),
-      ),
+      createMockImapFetchResult([5, 6, 7].map((uid) => inboxMessage(uid))),
     );
   });
 
@@ -1153,24 +1170,84 @@ describe("imapDeltaSync — last_uid is recorded only for messages that were sto
   });
 
   it("holds last_uid below a message whose thread was skipped", async () => {
-    // The second thread has a local operation in flight, so it is not written.
-    mockGetPendingOps
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: 1 } as never])
-      .mockResolvedValueOnce([]);
+    pendingOpsOn(threadIdOf(6));
 
     await imapDeltaSync("acc-1");
 
     // UID 7 was stored, but 6 was not — the watermark may not pass it.
-    expect(mockUpsertFolderSyncState.mock.calls.at(-1)![0].last_uid).toBe(5);
+    expect(mockUpsertFolderSyncState).toHaveBeenCalledTimes(1);
+    expect(mockUpsertFolderSyncState.mock.calls[0]![0].last_uid).toBe(5);
   });
 
   it("keeps the previous last_uid when every thread was skipped", async () => {
-    mockGetPendingOps.mockResolvedValue([{ id: 1 } as never]);
+    pendingOpsOn(threadIdOf(5), threadIdOf(6), threadIdOf(7));
 
     await imapDeltaSync("acc-1");
 
-    const calls = mockUpsertFolderSyncState.mock.calls;
-    expect(calls.every(([state]) => state.last_uid <= 4)).toBe(true);
+    expect(mockUpsertFolderSyncState).toHaveBeenCalledTimes(1);
+    expect(mockUpsertFolderSyncState.mock.calls[0]![0].last_uid).toBe(4);
+  });
+
+  it("holds last_uid for a folder that has no sync state yet", async () => {
+    mockGetAllFolderSyncStates.mockResolvedValue([]);
+    mockImapSearchFolder.mockResolvedValue({
+      uids: [5, 6, 7],
+      folder_status: createMockImapFolderStatus({ uidvalidity: 1 }),
+    });
+    pendingOpsOn(threadIdOf(6));
+
+    await imapDeltaSync("acc-1");
+
+    expect(mockUpsertFolderSyncState).toHaveBeenCalledTimes(1);
+    expect(mockUpsertFolderSyncState.mock.calls[0]![0].last_uid).toBe(5);
+  });
+
+  it("holds last_uid for a folder whose UIDVALIDITY changed", async () => {
+    mockImapDeltaCheck.mockResolvedValue([
+      { folder: "INBOX", uidvalidity: 2, new_uids: [], uidvalidity_changed: true },
+    ] as never);
+    mockImapSearchFolder.mockResolvedValue({
+      uids: [5, 6, 7],
+      folder_status: createMockImapFolderStatus({ uidvalidity: 2 }),
+    });
+    pendingOpsOn(threadIdOf(6));
+
+    await imapDeltaSync("acc-1");
+
+    expect(mockUpsertFolderSyncState).toHaveBeenCalledTimes(1);
+    const state = mockUpsertFolderSyncState.mock.calls[0]![0];
+    expect(state.uidvalidity).toBe(2);
+    expect(state.last_uid).toBe(5);
+  });
+
+  it("holds back only the folder that has a skipped message", async () => {
+    mockImapListFolders.mockResolvedValue([
+      createMockImapFolder({ path: "INBOX", raw_path: "INBOX" }),
+      createMockImapFolder({ path: "Sent", raw_path: "Sent" }),
+    ]);
+    mockGetAllFolderSyncStates.mockResolvedValue(
+      ["INBOX", "Sent"].map((folder_path) => ({
+        account_id: "acc-1",
+        folder_path,
+        uidvalidity: 1,
+        last_uid: 1,
+        modseq: null,
+        last_sync_at: 0,
+      })) as never,
+    );
+    mockImapDeltaCheck.mockResolvedValue([
+      { folder: "INBOX", uidvalidity: 1, new_uids: [5, 6], uidvalidity_changed: false },
+      { folder: "Sent", uidvalidity: 1, new_uids: [8, 9], uidvalidity_changed: false },
+    ] as never);
+    mockImapFetchMessages.mockImplementation((async (_config: unknown, folder: string, uids: number[]) =>
+      createMockImapFetchResult(uids.map((uid) => inboxMessage(uid, folder)))) as never);
+    pendingOpsOn(threadIdOf(6, "INBOX"));
+
+    await imapDeltaSync("acc-1");
+
+    const lastUidOf = (folder: string) =>
+      mockUpsertFolderSyncState.mock.calls.find(([s]) => s.folder_path === folder)![0].last_uid;
+    expect(lastUidOf("INBOX")).toBe(5);
+    expect(lastUidOf("Sent")).toBe(9);
   });
 });

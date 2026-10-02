@@ -1,7 +1,10 @@
 import { Loader2, AlertCircle } from "lucide-react";
 import { useUIStore } from "@/stores/uiStore";
 
-/** Unobtrusive sync state in the bottom-left corner: a spinner while syncing, an error icon after a failure. */
+/**
+ * Unobtrusive sync state in the bottom-left corner: a spinner while syncing, an error icon after a failure.
+ * Sits above the sidebar's bottom bar so it never covers the Settings or collapse buttons.
+ */
 export function SyncIndicator() {
   const syncState = useUIStore((s) => s.syncState);
   const syncMessage = useUIStore((s) => s.syncMessage);
@@ -13,15 +16,14 @@ export function SyncIndicator() {
 
   return (
     <div
-      role="status"
-      aria-live="polite"
-      aria-label={label}
+      role={isError ? "alert" : "status"}
       title={label}
-      className={`fixed bottom-2 left-2 z-40 flex items-center justify-center w-6 h-6 rounded-full bg-bg-primary border border-border-primary shadow-sm ${
+      className={`fixed bottom-14 left-2 z-40 flex items-center justify-center w-6 h-6 rounded-full bg-bg-primary border border-border-primary shadow-sm ${
         isError ? "text-danger" : "text-text-tertiary"
       }`}
     >
-      {isError ? <AlertCircle size={14} /> : <Loader2 size={14} className="animate-spin" />}
+      {isError ? <AlertCircle size={14} aria-hidden="true" /> : <Loader2 size={14} className="animate-spin" aria-hidden="true" />}
+      <span className="sr-only">{label}</span>
     </div>
   );
 }

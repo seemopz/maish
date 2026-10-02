@@ -18,14 +18,15 @@ describe("SyncIndicator", () => {
     const { container } = render(<SyncIndicator />);
     const el = screen.getByRole("status");
     expect(el.getAttribute("title")).toBe("Syncing: 3/10 messages");
+    expect(el.textContent).toBe("Syncing: 3/10 messages");
     expect(container.querySelector("svg")?.getAttribute("class")).toContain("animate-spin");
   });
 
   it("keeps a failed sync visible with the error text", () => {
     useUIStore.setState({ syncState: "error", syncMessage: "Sync failed: timeout" });
     const { container } = render(<SyncIndicator />);
-    const el = screen.getByRole("status");
-    expect(el.getAttribute("aria-label")).toBe("Sync failed: timeout");
+    const el = screen.getByRole("alert");
+    expect(el.textContent).toBe("Sync failed: timeout");
     expect(el.className).toContain("text-danger");
     expect(container.querySelector("svg")?.getAttribute("class")).not.toContain("animate-spin");
   });

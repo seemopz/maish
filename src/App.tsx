@@ -72,6 +72,7 @@ import { OfflineBanner } from "./components/ui/OfflineBanner";
 import { UpdateToast } from "./components/ui/UpdateToast";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { formatSyncError } from "./utils/networkErrors";
+import { nextSyncDisplay } from "./utils/syncStatus";
 import { router } from "./router";
 import { getSelectedThreadId } from "./router/navigate";
 
@@ -373,23 +374,27 @@ export default function App() {
 
   // Listen for sync status updates
   const backfillDoneRef = useRef(false);
+  const syncErrorsRef = useRef(new Map<string, string>());
   useEffect(() => {
     const unsub = onSyncStatus((accountId, status, progress, error) => {
-      const { setSyncState } = useUIStore.getState();
+      const errors = syncErrorsRef.current;
+      let message: string | null = null;
       if (status === "syncing") {
-        if (progress) {
-          if (progress.phase === "messages") {
-            setSyncState("syncing", `Syncing: ${progress.current}/${progress.total} messages`);
-          } else if (progress.phase === "labels") {
-            setSyncState("syncing", "Syncing labels...");
-          } else if (progress.phase === "threads") {
-            setSyncState("syncing", `Building threads... (${progress.current}/${progress.total})`);
-          }
-        } else {
-          setSyncState("syncing", "Syncing...");
+        message = "Syncing...";
+        if (progress?.phase === "messages") {
+          message = `Syncing: ${progress.current}/${progress.total} messages`;
+        } else if (progress?.phase === "labels") {
+          message = "Syncing labels...";
+        } else if (progress?.phase === "threads") {
+          message = `Building threads... (${progress.current}/${progress.total})`;
         }
-      } else if (status === "done") {
-        setSyncState("idle");
+      } else if (status === "error") {
+        message = error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed";
+      }
+      const display = nextSyncDisplay(errors, accountId, status, message);
+      useUIStore.getState().setSyncState(display.state, display.message);
+
+      if (status === "done") {
         window.dispatchEvent(new Event("maish-sync-done"));
         updateBadgeCount();
 
@@ -401,9 +406,6 @@ export default function App() {
             .catch((err) => console.error("Backfill error:", err));
         }
       } else if (status === "error") {
-        // Stays visible until the next sync starts; the indicator is too small to be missed by a timeout
-        // clearing it unseen.
-        setSyncState("error", error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed");
         // Still dispatch sync-done so the UI refreshes with any partially stored data
         window.dispatchEvent(new Event("maish-sync-done"));
       }

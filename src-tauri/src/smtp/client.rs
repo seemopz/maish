@@ -68,7 +68,7 @@ fn build_transport(
 
             builder.build()
         }
-        _ => {
+        "none" => {
             // Plain / no encryption (typically port 25) — not recommended
             AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host)
                 .port(config.port)
@@ -76,6 +76,9 @@ fn build_transport(
                 .authentication(auth_mechanisms)
                 .build()
         }
+        // Never fall back to plaintext on a typo or a future setting: the
+        // credentials would go out unencrypted.
+        other => return Err(format!("Unknown SMTP security setting: {:?}", other)),
     };
 
     Ok(transport)
@@ -240,6 +243,40 @@ pub async fn test_connection(config: &SmtpConfig) -> Result<SmtpSendResult, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn config_with_security(security: &str) -> SmtpConfig {
+        SmtpConfig {
+            host: "smtp.example.com".to_string(),
+            port: 587,
+            security: security.to_string(),
+            username: "user".to_string(),
+            password: "secret".to_string(),
+            auth_method: "password".to_string(),
+            accept_invalid_certs: false,
+        }
+    }
+
+    #[test]
+    fn test_build_transport_rejects_unknown_security() {
+        for value in ["", "ssl", "TLS", "starttls ", "stattls", "opportunistic"] {
+            let result = build_transport(&config_with_security(value));
+            let err = result.err().unwrap_or_else(|| {
+                panic!("security {:?} must not produce a transport", value)
+            });
+            assert!(err.contains("Unknown SMTP security"), "got: {}", err);
+        }
+    }
+
+    #[test]
+    fn test_build_transport_accepts_known_security_values() {
+        for value in ["tls", "starttls", "none"] {
+            assert!(
+                build_transport(&config_with_security(value)).is_ok(),
+                "security {:?} should build",
+                value
+            );
+        }
+    }
 
     #[test]
     fn test_decode_base64url_valid() {

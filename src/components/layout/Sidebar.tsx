@@ -1,3 +1,4 @@
+import { SyncIndicator } from "../ui/SyncIndicator";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { AccountSwitcher } from "../accounts/AccountSwitcher";
@@ -622,6 +623,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
 
       {/* Bottom bar: Settings + collapse toggle */}
       <div className={`py-2 border-t border-border-primary flex ${collapsed ? "flex-col items-center gap-1 px-2" : "items-center gap-0.5 px-3"}`}>
+        <SyncIndicator />
         <button
           onClick={() => navigateToLabel("settings")}
           className={`flex items-center text-sm rounded-md transition-colors ${

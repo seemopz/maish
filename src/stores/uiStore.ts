@@ -10,6 +10,8 @@ export type MarkAsReadBehavior = "instant" | "2s" | "manual";
 export type FontScale = "small" | "default" | "large" | "xlarge";
 export type InboxViewMode = "unified" | "split";
 
+export type SyncState = "idle" | "syncing" | "error";
+
 export interface SidebarNavItem {
   id: string;
   visible: boolean;
@@ -34,6 +36,9 @@ interface UIState {
   isOnline: boolean;
   pendingOpsCount: number;
   isSyncingFolder: string | null;
+  syncState: SyncState;
+  /** Progress text while syncing, error text after a failed sync. */
+  syncMessage: string | null;
   setTheme: (theme: Theme) => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
@@ -56,6 +61,7 @@ interface UIState {
   setOnline: (online: boolean) => void;
   setPendingOpsCount: (count: number) => void;
   setSyncingFolder: (folder: string | null) => void;
+  setSyncState: (state: SyncState, message?: string | null) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -77,6 +83,8 @@ export const useUIStore = create<UIState>((set) => ({
   isOnline: true,
   pendingOpsCount: 0,
   isSyncingFolder: null,
+  syncState: "idle",
+  syncMessage: null,
 
   setTheme: (theme) => set({ theme }),
   toggleSidebar: () =>
@@ -148,4 +156,5 @@ export const useUIStore = create<UIState>((set) => ({
   setOnline: (isOnline) => set({ isOnline }),
   setPendingOpsCount: (pendingOpsCount) => set({ pendingOpsCount }),
   setSyncingFolder: (isSyncingFolder) => set({ isSyncingFolder }),
+  setSyncState: (syncState, syncMessage = null) => set({ syncState, syncMessage }),
 }));

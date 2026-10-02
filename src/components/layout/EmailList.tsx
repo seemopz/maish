@@ -2,6 +2,7 @@ import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { CSSTransition } from "react-transition-group";
 import { ThreadCard } from "../email/ThreadCard";
 import { CategoryTabs } from "../email/CategoryTabs";
+import { SyncNowButton } from "../email/SyncNowButton";
 import { SearchBar } from "../search/SearchBar";
 import { EmailListSkeleton } from "../ui/Skeleton";
 import { useThreadStore, type Thread } from "@/stores/threadStore";
@@ -502,16 +503,19 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       {/* Header */}
       <div className="px-4 py-3 border-b border-border-primary flex items-center justify-between">
         <div className="min-w-0">
-          <h2 className="text-[15px] font-medium tracking-tight text-text-primary capitalize flex items-center gap-1.5 leading-5">
-            {isSmartFolder && <FolderSearch size={14} className="text-text-tertiary shrink-0" />}
-            {isSmartFolder
-              ? activeSmartFolder?.name ?? "Smart Folder"
-              : activeLabel === "inbox" && inboxViewMode === "split" && activeCategory !== "All"
-                ? `Inbox — ${activeCategory}`
-                : LABEL_MAP[activeLabel] !== undefined
-                  ? activeLabel
-                  : userLabels.find((l) => l.id === activeLabel)?.name ?? activeLabel}
-          </h2>
+          <div className="flex items-center gap-1">
+            <h2 className="text-[15px] font-medium tracking-tight text-text-primary capitalize flex items-center gap-1.5 leading-5">
+              {isSmartFolder && <FolderSearch size={14} className="text-text-tertiary shrink-0" />}
+              {isSmartFolder
+                ? activeSmartFolder?.name ?? "Smart Folder"
+                : activeLabel === "inbox" && inboxViewMode === "split" && activeCategory !== "All"
+                  ? `Inbox — ${activeCategory}`
+                  : LABEL_MAP[activeLabel] !== undefined
+                    ? activeLabel
+                    : userLabels.find((l) => l.id === activeLabel)?.name ?? activeLabel}
+            </h2>
+            <SyncNowButton />
+          </div>
           <span className="font-mono text-[11px] tabular-nums text-text-tertiary">
             {filteredThreads.length} conversation{filteredThreads.length !== 1 ? "s" : ""}
           </span>

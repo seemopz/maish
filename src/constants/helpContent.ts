@@ -139,6 +139,8 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           { text: "Change the sync period (30 days to 1 year) in Settings > Accounts." },
           { text: "The app is fully usable during the initial sync." },
           { text: "Delta sync runs every 60 seconds after the first sync completes." },
+          { text: "A small spinner in the bottom-left corner shows a running sync; hover it for progress. If a sync fails, it turns into a red warning icon with the error as tooltip." },
+          { text: "Click the reload button next to the folder name to sync right away.", shortcut: "F5" },
           { text: "Gmail: if sync history expires (~30 days offline), the app auto-falls back to a full sync." },
           { text: "IMAP: if folder UIDVALIDITY changes, the app resyncs that folder automatically." },
         ],

@@ -44,7 +44,7 @@ Tauri v2 desktop app: Rust backend + React 19 frontend communicating via Tauri I
 
 Component groups:
 - `layout/` — Sidebar, EmailList, ReadingPane, TitleBar
-- `email/` — ThreadView, ThreadCard, MessageItem, EmailRenderer, ActionBar, AttachmentList, SnoozeDialog, ContactSidebar, FollowUpDialog, InlineAttachmentPreview, InlineReply, SmartReplySuggestions, ThreadSummary, AuthBadge, AuthWarningBanner, PhishingBanner, LinkConfirmDialog, CategoryTabs, MoveToFolderDialog
+- `email/` — ThreadView, ThreadCard, MessageItem, EmailRenderer, ActionBar, AttachmentList, SnoozeDialog, ContactSidebar, FollowUpDialog, InlineAttachmentPreview, InlineReply, SmartReplySuggestions, ThreadSummary, SyncNowButton, AuthBadge, AuthWarningBanner, PhishingBanner, LinkConfirmDialog, CategoryTabs, MoveToFolderDialog
 - `composer/` — Composer (TipTap v3 rich text editor), AddressInput, EditorToolbar, AttachmentPicker, ScheduleSendDialog, SignatureSelector, TemplatePicker, UndoSendToast, AiAssistPanel, FromSelector
 - `search/` — CommandPalette, SearchBar, ShortcutsHelp, AskInbox
 - `settings/` — SettingsPage, FilterEditor, LabelEditor, SignatureEditor, TemplateEditor, ContactEditor, SubscriptionManager, QuickStepEditor, SmartFolderEditor, CalDavSettings, CardDavSettings
@@ -56,7 +56,7 @@ Component groups:
 - `help/` — HelpPage, HelpSidebar, HelpSearchBar, HelpCard, HelpCardGrid, HelpTooltip
 - `labels/` — LabelForm
 - `dnd/` — DndProvider (@dnd-kit drag-and-drop: threads → sidebar labels)
-- `ui/` — EmptyState, Skeleton, ContextMenu, ContextMenuPortal, OfflineBanner, illustrations/ (InboxClearIllustration, NoAccountIllustration, NoSearchResultsIllustration, ReadingPaneIllustration, GenericEmptyIllustration)
+- `ui/` — EmptyState, Skeleton, ContextMenu, ContextMenuPortal, OfflineBanner, SyncIndicator (bottom-left sync spinner / error icon, state in `uiStore.syncState`), illustrations/ (InboxClearIllustration, NoAccountIllustration, NoSearchResultsIllustration, ReadingPaneIllustration, GenericEmptyIllustration)
 
 ### Multi-window support
 

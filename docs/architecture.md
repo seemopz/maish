@@ -74,7 +74,7 @@ maish/
 │   │   │                     # HelpCard, HelpCardGrid, HelpTooltip
 │   │   ├── labels/           # LabelForm
 │   │   ├── dnd/              # DndProvider (drag threads → sidebar labels)
-│   │   └── ui/               # EmptyState, Skeleton, ContextMenu, OfflineBanner, illustrations/
+│   │   └── ui/               # EmptyState, Skeleton, ContextMenu, OfflineBanner, SyncIndicator, illustrations/
 │   ├── services/             # Business logic layer
 │   │   ├── db/               # SQLite queries, migrations, FTS5
 │   │   ├── email/            # EmailProvider abstraction, providerFactory,

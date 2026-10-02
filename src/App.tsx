@@ -67,6 +67,7 @@ import { getIncompleteTaskCount } from "./services/db/tasks";
 import { useTaskStore } from "./stores/taskStore";
 import { ContextMenuPortal } from "./components/ui/ContextMenuPortal";
 import { MoveToFolderDialog } from "./components/email/MoveToFolderDialog";
+import { SyncIndicator } from "./components/ui/SyncIndicator";
 import { OfflineBanner } from "./components/ui/OfflineBanner";
 import { UpdateToast } from "./components/ui/UpdateToast";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
@@ -99,7 +100,6 @@ export default function App() {
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [initialized, setInitialized] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showAskInbox, setShowAskInbox] = useState(false);
@@ -375,23 +375,21 @@ export default function App() {
   const backfillDoneRef = useRef(false);
   useEffect(() => {
     const unsub = onSyncStatus((accountId, status, progress, error) => {
+      const { setSyncState } = useUIStore.getState();
       if (status === "syncing") {
         if (progress) {
           if (progress.phase === "messages") {
-            setSyncStatus(
-              `Syncing: ${progress.current}/${progress.total} messages`,
-            );
+            setSyncState("syncing", `Syncing: ${progress.current}/${progress.total} messages`);
           } else if (progress.phase === "labels") {
-            setSyncStatus("Syncing labels...");
+            setSyncState("syncing", "Syncing labels...");
           } else if (progress.phase === "threads") {
-            setSyncStatus(`Building threads... (${progress.current}/${progress.total})`);
+            setSyncState("syncing", `Building threads... (${progress.current}/${progress.total})`);
           }
         } else {
-          setSyncStatus("Syncing...");
+          setSyncState("syncing", "Syncing...");
         }
       } else if (status === "done") {
-        setSyncStatus("Sync complete");
-        setTimeout(() => setSyncStatus(null), 2_000);
+        setSyncState("idle");
         window.dispatchEvent(new Event("maish-sync-done"));
         updateBadgeCount();
 
@@ -403,11 +401,11 @@ export default function App() {
             .catch((err) => console.error("Backfill error:", err));
         }
       } else if (status === "error") {
-        setSyncStatus(error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed");
+        // Stays visible until the next sync starts; the indicator is too small to be missed by a timeout
+        // clearing it unseen.
+        setSyncState("error", error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed");
         // Still dispatch sync-done so the UI refreshes with any partially stored data
         window.dispatchEvent(new Event("maish-sync-done"));
-        // Auto-clear the error after 8 seconds
-        setTimeout(() => setSyncStatus(null), 8_000);
       }
     });
     return unsub;
@@ -515,16 +513,7 @@ export default function App() {
         </DndProvider>
       </div>
 
-      {/* Sync status bar */}
-      {syncStatus && (
-        <div
-          className={`fixed bottom-0 left-0 right-0 font-mono text-xs px-4 py-1.5 text-center z-40 animate-[slideUp_200ms_ease-out,fadeIn_200ms_ease-out] ${
-            syncStatus.startsWith("Sync failed") ? "bg-danger text-white" : "bg-accent text-on-accent"
-          }`}
-        >
-          {syncStatus}
-        </div>
-      )}
+      <SyncIndicator />
 
       {showAddAccount && (
         <AddAccount

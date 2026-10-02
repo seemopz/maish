@@ -42,47 +42,29 @@ export interface DbAccount {
   contacts_provider: string | null;
 }
 
+const ENCRYPTED_ACCOUNT_FIELDS = [
+  ["access_token", "access token"],
+  ["refresh_token", "refresh token"],
+  ["imap_password", "IMAP password"],
+  ["oauth_client_secret", "OAuth client secret"],
+  ["caldav_password", "CalDAV password"],
+  ["carddav_password", "CardDAV password"],
+] as const;
+
+/**
+ * Decrypts the credential columns of an account row. A value that cannot be
+ * decrypted is an error, not something to pass on: handing the ciphertext to a
+ * server as if it were the password only produces a misleading login failure.
+ */
 async function decryptAccountTokens(account: DbAccount): Promise<DbAccount> {
-  if (account.access_token && isEncrypted(account.access_token)) {
+  for (const [field, label] of ENCRYPTED_ACCOUNT_FIELDS) {
+    const value = account[field];
+    if (!value || !isEncrypted(value)) continue;
     try {
-      account.access_token = await decryptValue(account.access_token);
+      account[field] = await decryptValue(value);
     } catch (err) {
-      console.warn("Failed to decrypt access token, using raw value:", err);
-    }
-  }
-  if (account.refresh_token && isEncrypted(account.refresh_token)) {
-    try {
-      account.refresh_token = await decryptValue(account.refresh_token);
-    } catch (err) {
-      console.warn("Failed to decrypt refresh token, using raw value:", err);
-    }
-  }
-  if (account.imap_password && isEncrypted(account.imap_password)) {
-    try {
-      account.imap_password = await decryptValue(account.imap_password);
-    } catch (err) {
-      console.warn("Failed to decrypt IMAP password, using raw value:", err);
-    }
-  }
-  if (account.oauth_client_secret && isEncrypted(account.oauth_client_secret)) {
-    try {
-      account.oauth_client_secret = await decryptValue(account.oauth_client_secret);
-    } catch (err) {
-      console.warn("Failed to decrypt OAuth client secret, using raw value:", err);
-    }
-  }
-  if (account.caldav_password && isEncrypted(account.caldav_password)) {
-    try {
-      account.caldav_password = await decryptValue(account.caldav_password);
-    } catch (err) {
-      console.warn("Failed to decrypt CalDAV password, using raw value:", err);
-    }
-  }
-  if (account.carddav_password && isEncrypted(account.carddav_password)) {
-    try {
-      account.carddav_password = await decryptValue(account.carddav_password);
-    } catch (err) {
-      console.warn("Failed to decrypt CardDAV password, using raw value:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Could not decrypt the ${label} of ${account.email}: ${reason}`);
     }
   }
   return account;

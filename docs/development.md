@@ -37,18 +37,25 @@ trees on Linux and the same folder on macOS.
 | What | Linux | macOS |
 |---|---|---|
 | Database | `~/.config/xyz.hochreiner.maish/maish.db` | `~/Library/Application Support/xyz.hochreiner.maish/maish.db` |
-| Encryption key | `~/.local/share/xyz.hochreiner.maish/maish.key` | `~/Library/Application Support/xyz.hochreiner.maish/maish.key` |
+| Encryption key | Secret Service (KWallet / GNOME Keyring), service `xyz.hochreiner.maish` | Keychain, service `xyz.hochreiner.maish` |
 | Log | `~/.local/share/xyz.hochreiner.maish/logs/Maish.log` | `~/Library/Logs/xyz.hochreiner.maish/Maish.log` |
 
 Starting without them gives you an empty client: add the account again and let
-it sync. To carry an existing setup across, copy **both** files. The key alone
-is useless, and the database alone cannot be read — every stored password and
-token is encrypted with that key, and a missing key file is silently replaced by
-a fresh one, after which login fails without an error dialog.
+it sync. The database alone cannot be read on another machine — every stored
+password and token is encrypted with the key, which lives in the OS keychain
+(entry `credential-encryption-key` under service `xyz.hochreiner.maish`) and
+does not travel with the database. After copying the database, re-enter the
+account passwords; do not copy the key around.
 
-The key file is written lazily, on the first credential the app encrypts, so a
-fresh installation has none until an account is added. Put the copied key in
-place **before** the first start with the copied database, not after.
+The key is created on the first credential the app encrypts, so a fresh
+installation has none until an account is added. If it is missing while
+encrypted credentials are stored, the app raises an error instead of creating a
+new one, because a new key would make them all unreadable.
+
+An installation from before the keychain has the key in `maish.key` in the
+data directory. On the first start the app moves it into the keychain, decrypts
+a stored credential with it, and only then deletes the file; if that check
+fails the file stays and an error names the cause.
 
 Copy the database with SQLite rather than `cp`, so the write-ahead log is
 included — the WAL routinely holds several megabytes that the `.db` file does

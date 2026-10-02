@@ -29,6 +29,7 @@ vi.mock("@/utils/crypto", () => ({
 }));
 
 import { selectFirstBy } from "./connection";
+import { decryptValue } from "@/utils/crypto";
 
 const mockSelectFirstBy = vi.mocked(selectFirstBy);
 
@@ -132,6 +133,15 @@ describe("accounts", () => {
       const result = await getAllAccounts();
 
       expect(result[0]!.imap_password).toBe("secret-password");
+    });
+
+    it("throws instead of passing ciphertext on when a credential cannot be decrypted", async () => {
+      mockSelect.mockResolvedValue([createMockImapAccount()]);
+      vi.mocked(decryptValue).mockRejectedValueOnce(new Error("key missing"));
+
+      await expect(getAllAccounts()).rejects.toThrow(
+        /Could not decrypt the IMAP password of .*: key missing/,
+      );
     });
   });
 

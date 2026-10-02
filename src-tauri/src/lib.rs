@@ -7,6 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
 mod commands;
+mod credential_key;
 mod db_tx;
 mod imap;
 mod oauth;
@@ -113,6 +114,8 @@ pub fn run() {
             commands::imap_delta_check,
             commands::smtp_send_email,
             commands::smtp_test_connection,
+            credential_key::credential_key_get,
+            credential_key::credential_key_store,
             db_tx::db_tx_begin,
             db_tx::db_tx_commit,
             db_tx::db_tx_rollback,

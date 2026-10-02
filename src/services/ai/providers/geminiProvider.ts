@@ -1,39 +1,49 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { AiProviderClient, AiCompletionRequest } from "../types";
-import { createProviderFactory } from "../providerFactory";
 
-const factory = createProviderFactory(
-  (apiKey) => new GoogleGenerativeAI(apiKey),
-);
+const MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
-export function createGeminiProvider(apiKey: string, modelId: string): AiProviderClient {
-  const client = factory.getClient(apiKey);
+interface GenerateContentResponse {
+  candidates?: { content?: { parts?: { text?: string }[] } }[];
+  promptFeedback?: { blockReason?: string };
+}
 
+async function generateContent(
+  apiKey: string,
+  model: string,
+  userContent: string,
+  systemPrompt?: string,
+): Promise<string> {
+  const response = await fetch(`${MODELS_URL}/${encodeURIComponent(model)}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify({
+      ...(systemPrompt && { systemInstruction: { parts: [{ text: systemPrompt }] } }),
+      contents: [{ role: "user", parts: [{ text: userContent }] }],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Gemini API error ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  }
+  const data = (await response.json()) as GenerateContentResponse;
+  if (!data.candidates?.length) {
+    throw new Error(`Gemini returned no text: ${data.promptFeedback?.blockReason ?? "no candidates"}`);
+  }
+  return (data.candidates[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
+}
+
+export function createGeminiProvider(apiKey: string, model: string): AiProviderClient {
   return {
-    async complete(req: AiCompletionRequest): Promise<string> {
-      const model = client.getGenerativeModel({
-        model: modelId,
-        systemInstruction: req.systemPrompt,
-      });
-
-      const result = await model.generateContent(req.userContent);
-      return result.response.text();
+    complete(req: AiCompletionRequest): Promise<string> {
+      return generateContent(apiKey, model, req.userContent, req.systemPrompt);
     },
 
     async testConnection(): Promise<boolean> {
       try {
-        const model = client.getGenerativeModel({
-          model: modelId,
-        });
-        await model.generateContent("Say hi");
+        await generateContent(apiKey, model, "Say hi");
         return true;
       } catch {
         return false;
       }
     },
   };
-}
-
-export function clearGeminiProvider(): void {
-  factory.clear();
 }

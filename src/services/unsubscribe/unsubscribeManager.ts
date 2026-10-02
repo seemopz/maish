@@ -38,6 +38,15 @@ export function parseUnsubscribeHeaders(
   };
 }
 
+/** RFC 8058 §3.1 requires HTTPS for the one-click POST. */
+function isHttpsUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Execute unsubscribe using the best available method:
  * 1. RFC 8058 one-click POST (no browser needed)
@@ -57,13 +66,17 @@ export async function executeUnsubscribe(
   let method = "browser";
   let success = false;
 
-  // Method 1: RFC 8058 one-click HTTP POST
-  if (parsed.hasOneClick && parsed.httpUrl) {
+  // Method 1: RFC 8058 one-click HTTP POST. The URL comes from the sender, so
+  // it must be https, and redirects are not followed: the http plugin checks
+  // its scope only for the first URL, a 3xx could otherwise land the POST on
+  // a host in the local network. A 3xx answer counts as a failure.
+  if (parsed.hasOneClick && parsed.httpUrl && isHttpsUrl(parsed.httpUrl)) {
     try {
       const response = await fetch(parsed.httpUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new TextEncoder().encode("List-Unsubscribe=One-Click"),
+        maxRedirections: 0,
       });
       success = response.ok || response.status === 200 || response.status === 202;
       method = "http_post";

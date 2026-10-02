@@ -377,6 +377,10 @@ Modifications made in this fork, as required by section 4(b) of the License:
   plaintext `http://` to any host. Requests of the plugin bypass the webview
   CSP, so the scope is now `https://*` plus `http://localhost:*` and
   `http://127.0.0.1:*`, which is what a local Ollama or LM Studio server needs.
+- src-tauri/src/smtp/client.rs — an SMTP account with implicit TLS (port 465)
+  and "accept invalid certificates" keeps implicit TLS. It was switched to
+  STARTTLS-required, so the client waited for a plaintext greeting while the
+  server expected a TLS handshake and sending failed.
 
 "Velo" is the name of the upstream project and is used here only to identify the
 work this fork derives from.

@@ -82,13 +82,6 @@ pub struct ImapFetchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImapFolderSyncResult {
-    pub uids: Vec<u32>,
-    pub messages: Vec<ImapMessage>,
-    pub folder_status: ImapFolderStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImapFolderSearchResult {
     pub uids: Vec<u32>,
     pub folder_status: ImapFolderStatus,

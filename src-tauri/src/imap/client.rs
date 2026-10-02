@@ -428,24 +428,6 @@ pub async fn fetch_new_uids(
     Ok(result)
 }
 
-/// Search for all UIDs in a folder using `UID SEARCH ALL`.
-/// Returns real UIDs sorted ascending — avoids the sparse UID gap problem.
-pub async fn search_all_uids(session: &mut ImapSession, folder: &str) -> Result<Vec<u32>, String> {
-    tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
-        .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
-
-    let uids = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search("ALL"))
-        .await
-        .map_err(|_| format!("UID SEARCH ALL timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("UID SEARCH ALL failed: {e}"))?;
-
-    let mut result: Vec<u32> = uids.into_iter().collect();
-    result.sort();
-    Ok(result)
-}
-
 /// Set or remove flags on messages.
 ///
 /// `flag_op`: "+FLAGS" to add, "-FLAGS" to remove
@@ -898,8 +880,7 @@ pub async fn delta_check_folders(
 
 /// Search a folder: SELECT → UID SEARCH, returning UIDs and folder status without fetching bodies.
 ///
-/// This is a lightweight alternative to `sync_folder` for callers that want to
-/// fetch messages in smaller IPC-friendly chunks on the TypeScript side.
+/// Callers fetch the messages in smaller IPC-friendly chunks on the TypeScript side.
 pub async fn search_folder(
     session: &mut ImapSession,
     folder: &str,
@@ -940,141 +921,6 @@ pub async fn search_folder(
 
     Ok(ImapFolderSearchResult {
         uids,
-        folder_status,
-    })
-}
-
-/// Sync a folder in a single IMAP session: SELECT → UID SEARCH → batched UID FETCH.
-///
-/// When `since_date` is provided (format `DD-Mon-YYYY`), uses `UID SEARCH SINCE <date>`
-/// to only fetch messages from that date onward, avoiding timeouts on large folders.
-///
-/// This avoids creating multiple TCP connections per folder (one for search,
-/// one per batch for fetch) which causes connection storms on servers with
-/// many folders.
-pub async fn sync_folder(
-    session: &mut ImapSession,
-    folder: &str,
-    batch_size: u32,
-    since_date: Option<String>,
-) -> Result<ImapFolderSyncResult, String> {
-    // SELECT the folder
-    let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
-        .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
-
-    let folder_status = ImapFolderStatus {
-        uidvalidity: mailbox.uid_validity.unwrap_or(0),
-        uidnext: mailbox.uid_next.unwrap_or(0),
-        exists: mailbox.exists,
-        unseen: mailbox.unseen.unwrap_or(0),
-        highest_modseq: mailbox.highest_modseq,
-    };
-
-    // UID SEARCH with optional SINCE date filter (RFC 3501 §6.4.4)
-    let search_query = match &since_date {
-        Some(date) => format!("SINCE {date}"),
-        None => "ALL".to_string(),
-    };
-    let uids_raw = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&search_query))
-        .await
-        .map_err(|_| format!("UID SEARCH {search_query} {folder} timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("UID SEARCH {search_query} {folder} failed: {e}"))?;
-
-    let mut uids: Vec<u32> = uids_raw.into_iter().collect();
-    uids.sort();
-
-    log::info!(
-        "IMAP sync_folder {folder}: {} UIDs found (search={search_query}), uidvalidity={}, batch_size={}",
-        uids.len(),
-        folder_status.uidvalidity,
-        batch_size,
-    );
-
-    if uids.is_empty() {
-        return Ok(ImapFolderSyncResult {
-            uids,
-            messages: vec![],
-            folder_status,
-        });
-    }
-
-    // Fetch in batches on the SAME session
-    let parser = MessageParser::default();
-    let mut all_messages = Vec::new();
-    let bs = batch_size as usize;
-
-    for chunk in uids.chunks(bs) {
-        let uid_set: String = chunk
-            .iter()
-            .map(|u| u.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let fetches = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
-            let stream = session
-                .uid_fetch(&uid_set, "(UID FLAGS INTERNALDATE BODY.PEEK[])")
-                .await
-                .map_err(|e| format!("UID FETCH {folder} uids={uid_set} failed: {e}"))?;
-            Ok::<_, String>(stream.collect::<Vec<_>>().await)
-        })
-        .await
-        .map_err(|_| format!("UID FETCH {folder} timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?;
-
-        let raw_fetches: Vec<_> = fetches?;
-        for r in raw_fetches {
-            match r {
-                Ok(f) => {
-                    let uid = match f.uid {
-                        Some(u) => u,
-                        None => {
-                            log::warn!("IMAP sync_folder {folder}: response missing UID");
-                            continue;
-                        }
-                    };
-                    let raw = match f.body() {
-                        Some(b) => b,
-                        None => {
-                            log::warn!("IMAP sync_folder {folder}: UID {uid} has no body");
-                            continue;
-                        }
-                    };
-                    let raw_size = raw.len() as u32;
-                    let flags: Vec<_> = f.flags().collect();
-                    let is_read = flags.iter().any(|fl| matches!(fl, Flag::Seen));
-                    let is_starred = flags.iter().any(|fl| matches!(fl, Flag::Flagged));
-                    let is_draft = flags.iter().any(|fl| matches!(fl, Flag::Draft));
-                    let internal_date = f.internal_date().map(|dt| dt.timestamp());
-
-                    match parse_message(
-                        &parser,
-                        raw,
-                        uid,
-                        folder,
-                        raw_size,
-                        is_read,
-                        is_starred,
-                        is_draft,
-                        internal_date,
-                    ) {
-                        Ok(msg) => all_messages.push(msg),
-                        Err(e) => log::warn!("sync_folder: failed to parse UID {uid}: {e}"),
-                    }
-                }
-                Err(e) => log::warn!("IMAP sync_folder fetch stream error in {folder}: {e}"),
-            }
-        }
-    }
-
-    log::info!(
-        "IMAP sync_folder {folder}: fetched {} messages",
-        all_messages.len()
-    );
-
-    Ok(ImapFolderSyncResult {
-        uids,
-        messages: all_messages,
         folder_status,
     })
 }
@@ -1238,102 +1084,6 @@ pub async fn raw_fetch_messages(
         messages,
         folder_status,
     })
-}
-
-/// Raw IMAP diagnostic: connect via raw TCP/TLS (bypassing async-imap),
-/// authenticate, SELECT folder, FETCH, and return raw server response.
-/// This helps diagnose servers that async-imap can't parse.
-pub async fn raw_fetch_diagnostic(
-    config: &ImapConfig,
-    folder: &str,
-    uid_range: &str,
-) -> Result<String, String> {
-    // Connect and wrap in our ImapStream
-    let mut stream = if config.security == "starttls" {
-        raw_connect_starttls(config).await?
-    } else {
-        connect_stream(config).await?
-    };
-
-    let mut buf = vec![0u8; 16384];
-    let mut output = String::new();
-
-    // Read greeting (for non-STARTTLS)
-    if config.security != "starttls" {
-        let n = stream
-            .read(&mut buf)
-            .await
-            .map_err(|e| format!("greeting: {e}"))?;
-        output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
-    }
-
-    // LOGIN
-    let login_cmd = format!(
-        "a1 LOGIN {} {}\r\n",
-        imap_quote(&config.username)?,
-        imap_quote(&config.password)?
-    );
-    stream
-        .write_all(login_cmd.as_bytes())
-        .await
-        .map_err(|e| format!("LOGIN: {e}"))?;
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|e| format!("LOGIN read: {e}"))?;
-    output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
-
-    // SELECT
-    let select_cmd = format!("a2 SELECT {}\r\n", imap_quote(folder)?);
-    stream
-        .write_all(select_cmd.as_bytes())
-        .await
-        .map_err(|e| format!("SELECT: {e}"))?;
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|e| format!("SELECT read: {e}"))?;
-    output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
-
-    // UID FETCH — just get UID and FLAGS first (small response)
-    let fetch_cmd = format!("a3 UID FETCH {uid_range} (UID FLAGS)\r\n");
-    stream
-        .write_all(fetch_cmd.as_bytes())
-        .await
-        .map_err(|e| format!("FETCH: {e}"))?;
-
-    let mut fetch_response = String::new();
-    loop {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        match tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf)).await {
-            Ok(Ok(0)) => break,
-            Ok(Ok(n)) => {
-                fetch_response.push_str(&String::from_utf8_lossy(&buf[..n]));
-                if fetch_response.contains("a3 OK")
-                    || fetch_response.contains("a3 NO")
-                    || fetch_response.contains("a3 BAD")
-                {
-                    break;
-                }
-            }
-            Ok(Err(e)) => {
-                fetch_response.push_str(&format!("[read error: {e}]"));
-                break;
-            }
-            Err(_) => {
-                fetch_response.push_str("[timeout]");
-                break;
-            }
-        }
-    }
-    output.push_str(&format!("FETCH response:\n{fetch_response}"));
-
-    let _ = stream.write_all(b"a4 LOGOUT\r\n").await;
-
-    log::info!("RAW IMAP DIAGNOSTIC for {folder}:\n{output}");
-
-    Ok(output)
 }
 
 // ---------- Raw TCP helpers ----------

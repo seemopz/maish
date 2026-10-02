@@ -7,7 +7,6 @@ import type {
   ImapConfig,
   ImapFolderStatus,
   ImapFetchResult,
-  ImapFolderSyncResult,
 } from "@/services/imap/tauriCommands";
 import type { QuickStep } from "@/services/quickSteps/types";
 import type { SendAsAlias } from "@/services/db/sendAsAliases";
@@ -308,20 +307,6 @@ export function createMockImapFetchResult(
   statusOverrides: Partial<ImapFolderStatus> = {},
 ): ImapFetchResult {
   return {
-    messages,
-    folder_status: createMockImapFolderStatus({
-      exists: messages.length,
-      ...statusOverrides,
-    }),
-  };
-}
-
-export function createMockImapFolderSyncResult(
-  messages: ImapMessage[] = [],
-  statusOverrides: Partial<ImapFolderStatus> = {},
-): ImapFolderSyncResult {
-  return {
-    uids: messages.map((m) => m.uid),
     messages,
     folder_status: createMockImapFolderStatus({
       exists: messages.length,

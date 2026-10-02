@@ -44,6 +44,7 @@ import {
   type ThreadGroup,
 } from "../threading/threadBuilder";
 import { getPendingOpsForResource } from "../db/pendingOperations";
+import { sha256Hex } from "../../utils/sha256";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -145,6 +146,24 @@ function syntheticMessageId(accountId: string, folder: string, uid: number): str
 }
 
 /**
+ * Fingerprint of everything a reader sees of a message: text part, HTML part
+ * and attachment metadata. The threading step uses it to tell folder copies
+ * from different mails that reuse a Message-ID, so a part that is left out
+ * is a part a sender can swap. JSON keeps the fields apart ("ab"+"c" and
+ * "a"+"bc" differ). Attachment bytes are not part of an `ImapMessage`, so two
+ * attachments with the same name, type and size are indistinguishable here.
+ */
+function contentFingerprint(msg: ImapMessage): string {
+  return sha256Hex(
+    JSON.stringify([
+      msg.body_text,
+      msg.body_html,
+      msg.attachments.map((a) => [a.filename, a.mime_type, a.size, a.content_id, a.is_inline]),
+    ]),
+  );
+}
+
+/**
  * Convert an ImapMessage (from Tauri backend) to the ParsedMessage format
  * used throughout the app.
  */
@@ -209,6 +228,8 @@ export function imapMessageToParsedMessage(
     references: msg.references,
     subject: msg.subject,
     date: msg.date * 1000,
+    fromAddress: msg.from_address,
+    contentKey: contentFingerprint(msg),
   };
 
   return { parsed, threadable };

@@ -13,6 +13,8 @@ export interface ThreadableMessage {
   references: string | null; // space-separated list of Message-IDs
   subject: string | null;
   date: number; // unix timestamp
+  fromAddress?: string | null; // sender, used to tell folder copies from impostors
+  contentKey?: string | null; // fingerprint of the body; headers alone can be forged
 }
 
 export interface ThreadGroup {
@@ -28,6 +30,8 @@ export interface ThreadGroup {
 interface Container {
   messageId: string;
   message: ThreadableMessage | null;
+  // Messages that reuse this container's Message-ID with different content.
+  extraMessages: ThreadableMessage[];
   parent: Container | null;
   children: Container[];
 }
@@ -130,9 +134,26 @@ function createContainer(messageId: string): Container {
   return {
     messageId,
     message: null,
+    extraMessages: [],
     parent: null,
     children: [],
   };
+}
+
+/**
+ * Two messages sharing a Message-ID are copies of one mail (e.g. INBOX and
+ * Sent) only if sender, date, subject and body fingerprint agree. Anything
+ * else is a different message that happens to reuse the ID and must not
+ * displace the first one. Sender, date and subject are all copyable by whoever
+ * has seen the original, so the body has to take part in the comparison.
+ */
+function isSameMessage(a: ThreadableMessage, b: ThreadableMessage): boolean {
+  return (
+    (a.fromAddress ?? '').trim().toLowerCase() === (b.fromAddress ?? '').trim().toLowerCase() &&
+    a.date === b.date &&
+    (a.subject ?? '').trim() === (b.subject ?? '').trim() &&
+    (a.contentKey ?? '') === (b.contentKey ?? '')
+  );
 }
 
 /**
@@ -198,7 +219,26 @@ export function buildThreads(messages: ThreadableMessage[]): ThreadGroup[] {
   // Step 2: For each message, create/find containers and link parent-child
   for (const msg of messages) {
     const container = getOrCreateContainer(msg.messageId);
-    container.message = msg;
+    if (!container.message) {
+      container.message = msg;
+    } else {
+      if (isSameMessage(container.message, msg)) {
+        // Folder copy: the later one stands in for both, labels are merged by the caller
+        container.message = msg;
+      } else {
+        const copyIdx = container.extraMessages.findIndex((m) => isSameMessage(m, msg));
+        if (copyIdx >= 0) {
+          container.extraMessages[copyIdx] = msg;
+        } else {
+          container.extraMessages.push(msg);
+        }
+      }
+      // Only the first message with an ID places the container in the tree.
+      // Letting a later one re-link it would let a sender move the original
+      // and its replies into another thread by reusing the ID with its own
+      // References.
+      continue;
+    }
 
     // Build the reference chain: References + In-Reply-To
     const refIds = parseReferences(msg.references);
@@ -326,6 +366,7 @@ function collectMessages(
   if (container.message) {
     result.push(container.message);
   }
+  result.push(...container.extraMessages);
 
   for (const child of container.children) {
     collectMessages(child, result, visited);

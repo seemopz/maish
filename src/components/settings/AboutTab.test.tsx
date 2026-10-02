@@ -13,12 +13,23 @@ describe("AboutTab", () => {
     openUrl.mockClear();
   });
 
-  it("links only to the project's own repository", async () => {
+  it("opens the project's own repository", async () => {
     render(<AboutTab />);
-    const button = screen.getByRole("button", { name: /GitHub Repository/ });
-    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: /GitHub Repository/ }));
     await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(1));
     expect(openUrl).toHaveBeenCalledWith("https://github.com/seemopz/maish");
+  });
+
+  it("only links to the repository and the licence text", async () => {
+    render(<AboutTab />);
+    const buttons = screen.getAllByRole("button");
+    for (const [i, button] of buttons.entries()) {
+      fireEvent.click(button);
+      await waitFor(() => expect(openUrl).toHaveBeenCalledTimes(i + 1));
+    }
+    for (const [url] of openUrl.mock.calls) {
+      expect(url).toMatch(/^https:\/\/(github\.com\/seemopz\/maish|www\.apache\.org\/)/);
+    }
   });
 
   it("offers no website or contact row", () => {

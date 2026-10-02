@@ -49,6 +49,11 @@ pub struct ImapMessage {
     pub list_unsubscribe_post: Option<String>,
     pub auth_results: Option<String>,
     pub attachments: Vec<ImapAttachment>,
+    /// Hex SHA-256 over the text part, the HTML part and every attachment
+    /// (metadata and decoded bytes). Lets threading tell folder copies of one
+    /// message from different mails that reuse its Message-ID. Independent of
+    /// the MIME section numbers, which differ between folder copies.
+    pub content_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,6 +2,7 @@ use async_imap::{types::Flag, Authenticator, Client, Session};
 use base64::Engine;
 use futures::StreamExt;
 use mail_parser::{MessageParser, MimeHeaders};
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -1981,6 +1982,25 @@ fn parse_message(
         })
         .collect();
 
+    let content_hash = content_hash(
+        body_text.as_deref(),
+        body_html.as_deref(),
+        message.attachments.iter().filter_map(|&i| {
+            let part = message.parts.get(i)?;
+            Some(AttachmentContent {
+                filename: part.attachment_name().unwrap_or("attachment"),
+                content_type: part.content_type().map_or("", |ct| ct.ctype()),
+                content_subtype: part
+                    .content_type()
+                    .and_then(|ct| ct.subtype())
+                    .unwrap_or(""),
+                content_id: part.content_id().unwrap_or(""),
+                is_inline: part.content_disposition().is_some_and(|cd| cd.is_inline()),
+                bytes: part.contents(),
+            })
+        }),
+    );
+
     Ok(ImapMessage {
         uid,
         folder: folder.to_string(),
@@ -2006,7 +2026,65 @@ fn parse_message(
         list_unsubscribe_post,
         auth_results,
         attachments,
+        content_hash,
     })
+}
+
+/// What `content_hash` reads of one attachment.
+struct AttachmentContent<'a> {
+    filename: &'a str,
+    content_type: &'a str,
+    content_subtype: &'a str,
+    content_id: &'a str,
+    is_inline: bool,
+    bytes: &'a [u8],
+}
+
+/// SHA-256 (hex) of everything a reader sees of a message: the text part, the
+/// HTML part and each attachment's metadata and decoded bytes. The threading
+/// step compares it to tell folder copies from different mails that reuse a
+/// Message-ID, so a part that is left out is a part a sender can swap.
+///
+/// Every field is length-prefixed ("ab"+"c" and "a"+"bc" differ, and so do an
+/// absent part and an empty one). The attachment's MIME section is left out on
+/// purpose: a copy of the same mail in another folder can be structured
+/// differently and would otherwise never match.
+fn content_hash<'a>(
+    body_text: Option<&str>,
+    body_html: Option<&str>,
+    attachments: impl Iterator<Item = AttachmentContent<'a>>,
+) -> String {
+    fn field(hasher: &mut Sha256, bytes: &[u8]) {
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(bytes);
+    }
+    fn optional(hasher: &mut Sha256, value: Option<&str>) {
+        match value {
+            Some(v) => {
+                hasher.update([1u8]);
+                field(hasher, v.as_bytes());
+            }
+            None => hasher.update([0u8]),
+        }
+    }
+
+    let mut hasher = Sha256::new();
+    optional(&mut hasher, body_text);
+    optional(&mut hasher, body_html);
+    for att in attachments {
+        hasher.update([2u8]);
+        field(&mut hasher, att.filename.as_bytes());
+        field(&mut hasher, att.content_type.as_bytes());
+        field(&mut hasher, att.content_subtype.as_bytes());
+        field(&mut hasher, att.content_id.as_bytes());
+        hasher.update([att.is_inline as u8]);
+        field(&mut hasher, att.bytes);
+    }
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Build a mapping from mail-parser part index → IMAP MIME section path string.
@@ -2184,5 +2262,126 @@ mod tests {
             "a bare EXPUNGE removes every \\Deleted message in the mailbox, \
              including ones another client marked; use expunge_uid_set instead"
         );
+    }
+
+    // Messages that reuse one Message-ID are told apart by `content_hash`, so
+    // it has to cover everything a reader sees of a message: a part that is
+    // left out is a part a sender can swap while keeping the ID.
+
+    fn mime(text: &str, html: &str, attachments: &[(&str, &str, &str)]) -> Vec<u8> {
+        // attachments: (filename, content type, base64 body)
+        let mut out = String::from(
+            "From: a@example.com\r\nTo: b@example.com\r\nSubject: s\r\n\
+             Message-ID: <same@example.com>\r\nMIME-Version: 1.0\r\n\
+             Content-Type: multipart/mixed; boundary=\"outer\"\r\n\r\n\
+             --outer\r\nContent-Type: multipart/alternative; boundary=\"alt\"\r\n\r\n\
+             --alt\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n",
+        );
+        out.push_str(text);
+        out.push_str("\r\n--alt\r\nContent-Type: text/html; charset=utf-8\r\n\r\n");
+        out.push_str(html);
+        out.push_str("\r\n--alt--\r\n");
+        for (name, ctype, body) in attachments {
+            out.push_str(&format!(
+                "--outer\r\nContent-Type: {ctype}; name=\"{name}\"\r\n\
+                 Content-Disposition: attachment; filename=\"{name}\"\r\n\
+                 Content-Transfer-Encoding: base64\r\n\r\n{body}\r\n"
+            ));
+        }
+        out.push_str("--outer--\r\n");
+        out.into_bytes()
+    }
+
+    fn hash_of(raw: &[u8]) -> String {
+        let parser = MessageParser::default();
+        parse_message(
+            &parser,
+            raw,
+            1,
+            "INBOX",
+            raw.len() as u32,
+            false,
+            false,
+            false,
+            None,
+        )
+        .unwrap()
+        .content_hash
+    }
+
+    #[test]
+    fn content_hash_differs_when_only_attachment_bytes_differ() {
+        // Same name, type and size ("AAAA" and "BBBB" both decode to 3 bytes).
+        let a = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf", "application/pdf", "AAAA")],
+        );
+        let b = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf", "application/pdf", "BBBB")],
+        );
+        assert_ne!(hash_of(&a), hash_of(&b));
+    }
+
+    #[test]
+    fn content_hash_is_equal_for_identical_content() {
+        let a = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf", "application/pdf", "AAAA")],
+        );
+        assert_eq!(hash_of(&a), hash_of(&a.clone()));
+        assert_eq!(hash_of(&a).len(), 64);
+    }
+
+    #[test]
+    fn content_hash_differs_when_only_the_text_or_html_part_differs() {
+        let base = mime("pay to A", "<p>x</p>", &[]);
+        assert_ne!(hash_of(&base), hash_of(&mime("pay to B", "<p>x</p>", &[])));
+        assert_ne!(hash_of(&base), hash_of(&mime("pay to A", "<p>y</p>", &[])));
+    }
+
+    #[test]
+    fn content_hash_differs_when_only_the_attachment_name_differs() {
+        let a = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf", "application/pdf", "AAAA")],
+        );
+        let b = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf.exe", "application/pdf", "AAAA")],
+        );
+        assert_ne!(hash_of(&a), hash_of(&b));
+    }
+
+    #[test]
+    fn content_hash_keeps_text_and_html_apart() {
+        // "ab"+"c" and "a"+"bc" concatenate equally.
+        assert_ne!(
+            hash_of(&mime("ab", "c", &[])),
+            hash_of(&mime("a", "bc", &[]))
+        );
+    }
+
+    #[test]
+    fn content_hash_ignores_the_mime_section_of_an_attachment() {
+        // The same mail filed in another folder can have a different MIME
+        // structure, which gives the attachment another part id.
+        let flat = mime("t", "<p>t</p>", &[("a.pdf", "application/pdf", "AAAA")]);
+        let wrapped = b"From: a@example.com\r\nTo: b@example.com\r\nSubject: s\r\n\
+            Message-ID: <same@example.com>\r\nMIME-Version: 1.0\r\n\
+            Content-Type: multipart/mixed; boundary=\"top\"\r\n\r\n\
+            --top\r\nContent-Type: multipart/mixed; boundary=\"outer\"\r\n\r\n\
+            --outer\r\nContent-Type: multipart/alternative; boundary=\"alt\"\r\n\r\n\
+            --alt\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nt\r\n\
+            --alt\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>t</p>\r\n--alt--\r\n\
+            --outer\r\nContent-Type: application/pdf; name=\"a.pdf\"\r\n\
+            Content-Disposition: attachment; filename=\"a.pdf\"\r\n\
+            Content-Transfer-Encoding: base64\r\n\r\nAAAA\r\n--outer--\r\n--top--\r\n";
+        assert_eq!(hash_of(&flat), hash_of(wrapped));
     }
 }

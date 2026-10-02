@@ -108,54 +108,9 @@ describe("imapMessageToParsedMessage", () => {
     expect(parsed.attachments).toEqual([]);
   });
 
-  describe("content fingerprint", () => {
-    const keyOf = (overrides: Parameters<typeof createMockImapMessage>[0]) =>
-      imapMessageToParsedMessage(createMockImapMessage(overrides), "acc-1", "INBOX").threadable.contentKey;
-    const attachment = (filename: string, size = 10) => ({
-      part_id: "2",
-      filename,
-      mime_type: "application/pdf",
-      size,
-      content_id: null,
-      is_inline: false,
-    });
-
-    it("is equal for folder copies of one message", () => {
-      const inbox = createMockImapMessage({ uid: 1, folder: "INBOX", attachments: [attachment("a.pdf")] });
-      // A different MIME structure in the other folder gives the part another id
-      const sent = createMockImapMessage({
-        uid: 7,
-        folder: "Sent",
-        attachments: [{ ...attachment("a.pdf"), part_id: "1.2" }],
-      });
-
-      expect(imapMessageToParsedMessage(inbox, "acc-1", "INBOX").threadable.contentKey).toBe(
-        imapMessageToParsedMessage(sent, "acc-1", "SENT").threadable.contentKey,
-      );
-    });
-
-    it("differs when only the text part differs", () => {
-      expect(keyOf({ body_text: "pay to A" })).not.toBe(keyOf({ body_text: "pay to B" }));
-    });
-
-    it("differs when only the HTML part differs", () => {
-      expect(keyOf({ body_text: "same", body_html: "<p>pay to A</p>" })).not.toBe(
-        keyOf({ body_text: "same", body_html: "<p>pay to MALLORY</p>" }),
-      );
-    });
-
-    it("differs when only the attachments differ", () => {
-      expect(keyOf({ attachments: [attachment("invoice.pdf")] })).not.toBe(
-        keyOf({ attachments: [attachment("invoice.pdf.exe")] }),
-      );
-      expect(keyOf({ attachments: [attachment("invoice.pdf", 10)] })).not.toBe(
-        keyOf({ attachments: [attachment("invoice.pdf", 11)] }),
-      );
-    });
-
-    it("does not confuse text and HTML content that would concatenate equally", () => {
-      expect(keyOf({ body_text: "ab", body_html: "c" })).not.toBe(keyOf({ body_text: "a", body_html: "bc" }));
-    });
+  it("passes the backend's content hash on to threading", () => {
+    const msg = createMockImapMessage({ content_hash: "abc123" });
+    expect(imapMessageToParsedMessage(msg, "acc-1", "INBOX").threadable.contentKey).toBe("abc123");
   });
 
   it("generates stable message ID from account, folder, and uid", () => {

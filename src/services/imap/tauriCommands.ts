@@ -47,6 +47,8 @@ export interface ImapMessage {
   list_unsubscribe_post: string | null;
   auth_results: string | null;
   attachments: ImapAttachment[];
+  /** Hex SHA-256 over text, HTML and attachments (metadata and bytes), computed in Rust. */
+  content_hash: string;
 }
 
 export interface ImapAttachment {

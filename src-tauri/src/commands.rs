@@ -1,7 +1,7 @@
 use crate::imap::client as imap_client;
 use crate::imap::types::{
     DeltaCheckRequest, DeltaCheckResult, ImapConfig, ImapFetchResult, ImapFolder,
-    ImapFolderSearchResult, ImapFolderStatus, ImapFolderSyncResult, ImapMessage,
+    ImapFolderSearchResult, ImapFolderStatus, ImapMessage,
 };
 use crate::smtp::client as smtp_client;
 use crate::smtp::types::{SmtpConfig, SmtpSendResult};
@@ -61,14 +61,6 @@ pub async fn imap_fetch_new_uids(
 ) -> Result<Vec<u32>, String> {
     let mut session = imap_client::connect(&config).await?;
     let uids = imap_client::fetch_new_uids(&mut session, &folder, since_uid).await?;
-    let _ = session.logout().await;
-    Ok(uids)
-}
-
-#[tauri::command]
-pub async fn imap_search_all_uids(config: ImapConfig, folder: String) -> Result<Vec<u32>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let uids = imap_client::search_all_uids(&mut session, &folder).await?;
     let _ = session.logout().await;
     Ok(uids)
 }
@@ -248,28 +240,6 @@ pub async fn imap_search_folder(
     let result = imap_client::search_folder(&mut session, &folder, since_date).await;
     let _ = session.logout().await;
     result
-}
-
-#[tauri::command]
-pub async fn imap_sync_folder(
-    config: ImapConfig,
-    folder: String,
-    batch_size: u32,
-    since_date: Option<String>,
-) -> Result<ImapFolderSyncResult, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let result = imap_client::sync_folder(&mut session, &folder, batch_size, since_date).await;
-    let _ = session.logout().await;
-    result
-}
-
-#[tauri::command]
-pub async fn imap_raw_fetch_diagnostic(
-    config: ImapConfig,
-    folder: String,
-    uid_range: String,
-) -> Result<String, String> {
-    imap_client::raw_fetch_diagnostic(&config, &folder, &uid_range).await
 }
 
 #[tauri::command]

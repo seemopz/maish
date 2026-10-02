@@ -209,6 +209,7 @@ export function imapMessageToParsedMessage(
     references: msg.references,
     subject: msg.subject,
     date: msg.date * 1000,
+    fromAddress: msg.from_address,
   };
 
   return { parsed, threadable };

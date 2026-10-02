@@ -663,6 +663,49 @@ describe('buildThreads', () => {
     expect(threads).toHaveLength(1);
     expect(threads[0].messageIds).toHaveLength(2);
   });
+
+  describe('same Message-ID in one batch', () => {
+    const base: ThreadableMessage = {
+      id: 'inbox-1',
+      messageId: 'dup@host',
+      inReplyTo: null,
+      references: null,
+      subject: 'Invoice',
+      date: 1000,
+      fromAddress: 'alice@example.com',
+    };
+
+    it('treats folder copies that agree on sender, date and subject as one message', () => {
+      const copy = { ...base, id: 'sent-1', fromAddress: 'Alice@Example.com' };
+
+      const threads = buildThreads([base, copy]);
+
+      expect(threads).toHaveLength(1);
+      expect(threads[0].messageIds).toHaveLength(1);
+    });
+
+    it.each([
+      ['sender', { fromAddress: 'mallory@example.com' }],
+      ['date', { date: 2000 }],
+      ['subject', { subject: 'Something else' }],
+    ])('keeps both messages when the %s differs', (_field, override) => {
+      const other = { ...base, id: 'inbox-2', ...override };
+
+      const threads = buildThreads([base, other]);
+      const ids = threads.flatMap((t) => t.messageIds).sort();
+
+      expect(ids).toEqual(['inbox-1', 'inbox-2']);
+    });
+
+    it('keeps every message when three share a Message-ID and only two are copies', () => {
+      const copy = { ...base, id: 'sent-1' };
+      const other = { ...base, id: 'inbox-2', fromAddress: 'mallory@example.com' };
+
+      const ids = buildThreads([base, other, copy]).flatMap((t) => t.messageIds);
+
+      expect(ids.sort()).toEqual(['inbox-2', 'sent-1']);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -53,8 +53,9 @@ async fn with_conn<T, F>(state: &DbTxState, f: F) -> Result<T, String>
 where
     F: for<'a> FnOnce(
         &'a mut SqliteConnection,
-    )
-        -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send + 'a>>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<T, String>> + Send + 'a>,
+    >,
 {
     let mut guard = state.conn.lock().await;
 

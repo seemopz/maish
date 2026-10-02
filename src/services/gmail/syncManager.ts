@@ -37,6 +37,19 @@ export type SyncStatusCallback = (
 ) => void;
 
 let statusCallback: SyncStatusCallback | null = null;
+/** Accounts deleted this session. Account ids are random UUIDs, so they are never reused. */
+const removedAccountIds = new Set<string>();
+
+/**
+ * Report a status unless the account was deleted: a sync that was running when
+ * the account went away would otherwise report an error (or late progress) for
+ * an account that is never synced again, and nothing would clear it.
+ */
+function notify(...args: Parameters<SyncStatusCallback>): void {
+  const [accountId, status] = args;
+  if (removedAccountIds.has(accountId) && status !== "removed") return;
+  statusCallback?.(...args);
+}
 
 export function onSyncStatus(cb: SyncStatusCallback): () => void {
   statusCallback = cb;
@@ -68,7 +81,7 @@ async function syncGmailAccount(accountId: string): Promise<void> {
       if (message === "HISTORY_EXPIRED") {
         // Fallback to full sync
         await initialSync(client, accountId, syncDays, (progress) => {
-          statusCallback?.(accountId, "syncing", progress);
+          notify(accountId, "syncing", progress);
         });
       } else {
         throw err;
@@ -77,7 +90,7 @@ async function syncGmailAccount(accountId: string): Promise<void> {
   } else {
     // First time — full initial sync
     await initialSync(client, accountId, syncDays, (progress) => {
-      statusCallback?.(accountId, "syncing", progress);
+      notify(accountId, "syncing", progress);
     });
   }
 }
@@ -114,7 +127,7 @@ async function syncImapAccount(accountId: string): Promise<void> {
         await clearAccountHistoryId(accountId);
         await clearAllFolderSyncStates(accountId);
         await imapInitialSync(accountId, syncDays, (progress) => {
-          statusCallback?.(accountId, "syncing", {
+          notify(accountId, "syncing", {
             phase: mapImapPhase(progress.phase),
             current: progress.current,
             total: progress.total,
@@ -125,7 +138,7 @@ async function syncImapAccount(accountId: string): Promise<void> {
   } else {
     // First time — full initial sync
     await imapInitialSync(accountId, syncDays, (progress) => {
-      statusCallback?.(accountId, "syncing", {
+      notify(accountId, "syncing", {
         phase: mapImapPhase(progress.phase),
         current: progress.current,
         total: progress.total,
@@ -218,11 +231,11 @@ async function syncAccountInternal(accountId: string): Promise<void> {
 
     if (!account) {
       // Deleted while a sync was queued or running — nothing to sync, nothing to report.
-      statusCallback?.(accountId, "removed");
+      notify(accountId, "removed");
       return;
     }
 
-    statusCallback?.(accountId, "syncing");
+    notify(accountId, "syncing");
 
     console.log(`[syncManager] Syncing account ${accountId} (provider=${account.provider}, history_id=${account.history_id ?? "null"})`);
 
@@ -230,7 +243,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
       // DAV-only accounts carry no mailbox — sync what they do have.
       await syncCalendarForAccount(accountId);
       await syncContactsForAccount(accountId);
-      statusCallback?.(accountId, "done");
+      notify(accountId, "done");
       return;
     }
 
@@ -243,7 +256,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
     // Always emit "done" when an initial sync completes (clears the bar).
     // Also emit for delta syncs that fell back to initial (recovery re-sync)
     // since those emit progress via statusCallback inside syncImapAccount.
-    statusCallback?.(accountId, "done");
+    notify(accountId, "done");
 
     // Sync calendar alongside email (non-blocking — calendar errors don't affect email sync)
     syncCalendarForAccount(accountId).catch((err) => {
@@ -258,7 +271,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err ?? "Unknown error");
     console.error(`[syncManager] Sync failed for account ${accountId}:`, message);
-    statusCallback?.(accountId, "error", undefined, message);
+    notify(accountId, "error", undefined, message);
   }
 }
 
@@ -329,11 +342,12 @@ export function startBackgroundSync(accountIds: string[], skipImmediateSync = fa
  * remembers for it — otherwise the error icon would outlive the account.
  */
 export function removeAccountFromSync(accountId: string): void {
+  removedAccountIds.add(accountId);
   backgroundAccountIds = backgroundAccountIds.filter((id) => id !== accountId);
   if (pendingAccountIds) {
     pendingAccountIds = pendingAccountIds.filter((id) => id !== accountId);
   }
-  statusCallback?.(accountId, "removed");
+  notify(accountId, "removed");
 }
 
 /**

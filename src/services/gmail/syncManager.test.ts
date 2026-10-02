@@ -237,6 +237,45 @@ describe("syncManager", () => {
       expect(cb).not.toHaveBeenCalledWith("gone", "error", undefined, expect.anything());
     });
 
+    it("does not end in 'error' when the account is deleted while its sync runs", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("gone-running", "100"));
+      let fail: (e: Error) => void = () => {};
+      mockDeltaSync.mockImplementationOnce(() => new Promise<void>((_, reject) => { fail = reject; }));
+      const events: string[] = [];
+      const unsub = onSyncStatus((_id, status) => { events.push(status); });
+
+      const running = syncAccount("gone-running");
+      await wait(10);
+      removeAccountFromSync("gone-running");
+      fail(new Error("Account not found"));
+      await running;
+      unsub();
+
+      expect(events).toEqual(["syncing", "removed"]);
+    });
+
+    it("stays silent about a removed account's late progress", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("gone-late"));
+      let finish: () => void = () => {};
+      mockInitialSync.mockImplementationOnce((_client, _id, _days, onProgress) => new Promise<void>((resolve) => {
+        finish = () => {
+          onProgress?.({ phase: "messages", current: 1, total: 2 });
+          resolve();
+        };
+      }));
+      const events: string[] = [];
+      const unsub = onSyncStatus((_id, status) => { events.push(status); });
+
+      const running = syncAccount("gone-late");
+      await wait(10);
+      removeAccountFromSync("gone-late");
+      finish();
+      await running;
+      unsub();
+
+      expect(events).toEqual(["syncing", "removed"]);
+    });
+
     it("tells the status listener so a remembered error can be dropped", () => {
       const cb = vi.fn();
       const unsub = onSyncStatus(cb);

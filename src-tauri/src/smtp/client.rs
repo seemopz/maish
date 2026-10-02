@@ -17,9 +17,7 @@ fn decode_base64url(input: &str) -> Result<Vec<u8>, String> {
 }
 
 /// Build an async SMTP transport from the given config.
-fn build_transport(
-    config: &SmtpConfig,
-) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
+fn build_transport(config: &SmtpConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
     let credentials = Credentials::new(config.username.clone(), config.password.clone());
 
     // For OAuth2, force XOAUTH2 mechanism; for password, use default mechanisms
@@ -44,7 +42,9 @@ fn build_transport(
                     .dangerous_accept_invalid_hostnames(true)
                     .build()
                     .map_err(|e| format!("SMTP TLS params error: {}", e))?;
-                builder = builder.tls(Tls::Required(tls_params));
+                // `relay()` set `Tls::Wrapper`; keep it. `Tls::Required` would
+                // switch to STARTTLS and never handshake on port 465.
+                builder = builder.tls(Tls::Wrapper(tls_params));
             }
 
             builder.build()
@@ -68,7 +68,7 @@ fn build_transport(
 
             builder.build()
         }
-        _ => {
+        "none" => {
             // Plain / no encryption (typically port 25) — not recommended
             AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host)
                 .port(config.port)
@@ -76,6 +76,9 @@ fn build_transport(
                 .authentication(auth_mechanisms)
                 .build()
         }
+        // Never fall back to plaintext on a typo or a future setting: the
+        // credentials would go out unencrypted.
+        other => return Err(format!("Unknown SMTP security setting: {:?}", other)),
     };
 
     Ok(transport)
@@ -241,6 +244,40 @@ pub async fn test_connection(config: &SmtpConfig) -> Result<SmtpSendResult, Stri
 mod tests {
     use super::*;
 
+    fn config_with_security(security: &str) -> SmtpConfig {
+        SmtpConfig {
+            host: "smtp.example.com".to_string(),
+            port: 587,
+            security: security.to_string(),
+            username: "user".to_string(),
+            password: "secret".to_string(),
+            auth_method: "password".to_string(),
+            accept_invalid_certs: false,
+        }
+    }
+
+    #[test]
+    fn test_build_transport_rejects_unknown_security() {
+        for value in ["", "ssl", "TLS", "starttls ", "stattls", "opportunistic"] {
+            let result = build_transport(&config_with_security(value));
+            let err = result
+                .err()
+                .unwrap_or_else(|| panic!("security {:?} must not produce a transport", value));
+            assert!(err.contains("Unknown SMTP security"), "got: {}", err);
+        }
+    }
+
+    #[test]
+    fn test_build_transport_accepts_known_security_values() {
+        for value in ["tls", "starttls", "none"] {
+            assert!(
+                build_transport(&config_with_security(value)).is_ok(),
+                "security {:?} should build",
+                value
+            );
+        }
+    }
+
     #[test]
     fn test_decode_base64url_valid() {
         // "Hello" in base64url
@@ -373,7 +410,11 @@ mod tests {
         let raw = b"From: alice@example.com\r\nTo: bob@example.com\r\nBcc: secret@example.com\r\nSubject: Test\r\n\r\nBody";
 
         let envelope = extract_envelope(raw).unwrap();
-        assert_eq!(envelope.to().len(), 2, "bcc recipient belongs in the envelope");
+        assert_eq!(
+            envelope.to().len(),
+            2,
+            "bcc recipient belongs in the envelope"
+        );
 
         let stripped = strip_bcc_headers(raw);
         let envelope_after = extract_envelope(&stripped).unwrap();
@@ -382,5 +423,155 @@ mod tests {
             1,
             "stripping first would lose the blind recipient entirely"
         );
+    }
+}
+
+/// Transport tests against a local TLS listener with a self-signed certificate.
+#[cfg(test)]
+mod tls_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+
+    /// Create a throwaway self-signed certificate for `localhost` with the
+    /// `openssl` command line tool and return it as a PKCS#12 bundle (password
+    /// `test`). Generated per run so no key material lives in the repository.
+    #[rustfmt::skip]
+    fn self_signed_p12() -> Vec<u8> {
+        // Both tests call this concurrently, so each call gets its own directory.
+        static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("maish-smtp-tls-test-{}-{}", std::process::id(), n));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (key, cert, p12) = (dir.join("k.pem"), dir.join("c.pem"), dir.join("b.p12"));
+
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("openssl")
+                .args(args)
+                .output()
+                .expect("the openssl command line tool is required for this test");
+            assert!(
+                out.status.success(),
+                "openssl {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let path = |p: &std::path::Path| p.to_str().unwrap().to_string();
+
+        // Explicit config: LibreSSL (macOS /usr/bin/openssl) ships none.
+        let conf = dir.join("req.cnf");
+        std::fs::write(
+            &conf,
+            "[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n\
+             [dn]\nCN=localhost\n[ext]\nsubjectAltName=DNS:localhost\n",
+        )
+        .unwrap();
+        run(&[
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+            "-config", &path(&conf), "-keyout", &path(&key), "-out", &path(&cert),
+        ]);
+        run(&[
+            "pkcs12", "-export", "-inkey", &path(&key), "-in", &path(&cert),
+            "-passout", "pass:test", "-out", &path(&p12),
+        ]);
+
+        let bytes = std::fs::read(&p12).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        bytes
+    }
+
+    fn config(port: u16, security: &str, accept_invalid_certs: bool) -> SmtpConfig {
+        SmtpConfig {
+            host: "localhost".to_string(),
+            port,
+            security: security.to_string(),
+            username: "user".to_string(),
+            password: "secret".to_string(),
+            auth_method: "password".to_string(),
+            accept_invalid_certs,
+        }
+    }
+
+    /// Accepts one connection, expects a TLS handshake straight away (implicit
+    /// TLS, as on port 465) and then speaks just enough SMTP for
+    /// `test_connection`. Returns whether the handshake succeeded.
+    async fn serve_implicit_tls_once(listener: TcpListener) -> bool {
+        let identity = native_tls::Identity::from_pkcs12(&self_signed_p12(), "test").unwrap();
+        let acceptor =
+            tokio_native_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity).unwrap());
+
+        let (socket, _) = listener.accept().await.unwrap();
+        let handshake = tokio::time::timeout(Duration::from_secs(5), acceptor.accept(socket));
+        let Ok(Ok(stream)) = handshake.await else {
+            return false;
+        };
+
+        let mut stream = BufReader::new(stream);
+        let _ = stream.get_mut().write_all(b"220 localhost ESMTP\r\n").await;
+        let mut line = String::new();
+        while let Ok(n) = stream.read_line(&mut line).await {
+            if n == 0 {
+                break;
+            }
+            let reply: &[u8] = if line.starts_with("EHLO") {
+                b"250-localhost\r\n250 AUTH PLAIN LOGIN\r\n"
+            } else if line.starts_with("AUTH") {
+                b"235 2.7.0 Authenticated\r\n"
+            } else if line.starts_with("QUIT") {
+                b"221 Bye\r\n"
+            } else {
+                b"250 OK\r\n"
+            };
+            let quit = line.starts_with("QUIT");
+            if stream.get_mut().write_all(reply).await.is_err() || quit {
+                break;
+            }
+            line.clear();
+        }
+        true
+    }
+
+    async fn probe(config: &SmtpConfig) -> Option<Result<SmtpSendResult, String>> {
+        tokio::time::timeout(Duration::from_secs(10), test_connection(config))
+            .await
+            .ok()
+    }
+
+    #[tokio::test]
+    async fn test_implicit_tls_accepts_self_signed_certificate_when_allowed() {
+        // Port 465 style: the server speaks TLS from the first byte. Before
+        // the fix the client downgraded to STARTTLS-required, waited for a
+        // plaintext greeting and never started a handshake.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(serve_implicit_tls_once(listener));
+
+        let result = probe(&config(port, "tls", true)).await;
+
+        assert!(
+            matches!(&result, Some(Ok(r)) if r.success),
+            "implicit TLS with accept_invalid_certs must connect, got: {:?}",
+            result.map(|r| r.map(|r| r.message))
+        );
+        assert!(server.await.unwrap(), "server never saw a TLS handshake");
+    }
+
+    #[tokio::test]
+    async fn test_implicit_tls_rejects_self_signed_certificate_by_default() {
+        // The opt-in is what allows the certificate; without it the same
+        // server must be refused.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(serve_implicit_tls_once(listener));
+
+        let result = probe(&config(port, "tls", false)).await;
+
+        assert!(
+            !matches!(&result, Some(Ok(r)) if r.success),
+            "a self-signed certificate must not be accepted without the opt-in"
+        );
+        server.abort();
     }
 }

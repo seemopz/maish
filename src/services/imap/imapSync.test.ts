@@ -108,6 +108,11 @@ describe("imapMessageToParsedMessage", () => {
     expect(parsed.attachments).toEqual([]);
   });
 
+  it("passes the backend's content hash on to threading", () => {
+    const msg = createMockImapMessage({ content_hash: "abc123" });
+    expect(imapMessageToParsedMessage(msg, "acc-1", "INBOX").threadable.contentKey).toBe("abc123");
+  });
+
   it("generates stable message ID from account, folder, and uid", () => {
     const msg = createMockImapMessage({ uid: 99, folder: "Sent" });
     const { parsed } = imapMessageToParsedMessage(msg, "acc-2", "SENT");

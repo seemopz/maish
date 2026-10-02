@@ -2,6 +2,7 @@ use async_imap::{types::Flag, Authenticator, Client, Session};
 use base64::Engine;
 use futures::StreamExt;
 use mail_parser::{MessageParser, MimeHeaders};
+use sha2::{Digest, Sha256};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -135,7 +136,9 @@ fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_tls::TlsConn
         builder.danger_accept_invalid_certs(true);
         builder.danger_accept_invalid_hostnames(true);
     }
-    builder.build().map_err(|e| format!("Failed to create TLS connector: {e}"))
+    builder
+        .build()
+        .map_err(|e| format!("Failed to create TLS connector: {e}"))
 }
 
 // ---------- Public API ----------
@@ -177,7 +180,12 @@ async fn connect_inner(config: &ImapConfig) -> Result<ImapSession, String> {
 pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, String> {
     let names_stream = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.list(Some(""), Some("*")))
         .await
-        .map_err(|_| format!("LIST timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|_| {
+            format!(
+                "LIST timed out after {}s — check your server settings or network connection",
+                IMAP_CMD_TIMEOUT.as_secs()
+            )
+        })?
         .map_err(|e| format!("LIST failed: {e}"))?;
 
     let names: Vec<_> = tokio::time::timeout(IMAP_CMD_TIMEOUT, names_stream.collect::<Vec<_>>())
@@ -208,7 +216,9 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
         let (exists, unseen) = match tokio::time::timeout(
             IMAP_CMD_TIMEOUT,
             session.status(&raw_path, "(MESSAGES UNSEEN)"),
-        ).await {
+        )
+        .await
+        {
             Ok(Ok(mailbox)) => (mailbox.exists, mailbox.unseen.unwrap_or(0)),
             _ => (0, 0),
         };
@@ -271,8 +281,14 @@ pub async fn fetch_messages(
     let mut fetches = Vec::new();
     for r in raw_fetches {
         match r {
-            Ok(f) => { fetch_ok += 1; fetches.push(f); }
-            Err(e) => { fetch_err += 1; log::warn!("IMAP fetch stream error in {folder}: {e}"); }
+            Ok(f) => {
+                fetch_ok += 1;
+                fetches.push(f);
+            }
+            Err(e) => {
+                fetch_err += 1;
+                log::warn!("IMAP fetch stream error in {folder}: {e}");
+            }
         }
     }
     log::info!("IMAP FETCH {folder}: {fetch_ok} ok, {fetch_err} errors from uid_fetch");
@@ -289,12 +305,18 @@ pub async fn fetch_messages(
     for fetch in &fetches {
         let uid = match fetch.uid {
             Some(u) => u,
-            None => { log::warn!("IMAP FETCH {folder}: response missing UID"); continue; }
+            None => {
+                log::warn!("IMAP FETCH {folder}: response missing UID");
+                continue;
+            }
         };
 
         let raw = match fetch.body() {
             Some(b) => b,
-            None => { log::warn!("IMAP FETCH {folder}: UID {uid} has no body"); continue; }
+            None => {
+                log::warn!("IMAP FETCH {folder}: UID {uid} has no body");
+                continue;
+            }
         };
 
         let raw_size = raw.len() as u32;
@@ -308,7 +330,17 @@ pub async fn fetch_messages(
         // Extract INTERNALDATE as fallback for messages with unparseable Date headers
         let internal_date = fetch.internal_date().map(|dt| dt.timestamp());
 
-        match parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, internal_date) {
+        match parse_message(
+            &parser,
+            raw,
+            uid,
+            folder,
+            raw_size,
+            is_read,
+            is_starred,
+            is_draft,
+            internal_date,
+        ) {
             Ok(msg) => messages.push(msg),
             Err(e) => {
                 log::warn!("Failed to parse message UID {uid}: {e}");
@@ -363,7 +395,9 @@ pub async fn fetch_message_body(
     let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
 
     let parser = MessageParser::default();
-    parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, None)
+    parse_message(
+        &parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, None,
+    )
 }
 
 /// Get UIDs of messages newer than `last_uid`.
@@ -380,7 +414,12 @@ pub async fn fetch_new_uids(
     let query = format!("{}:*", last_uid + 1);
     let uids = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&query))
         .await
-        .map_err(|_| format!("UID SEARCH timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
+        .map_err(|_| {
+            format!(
+                "UID SEARCH timed out after {}s — check your server settings or network connection",
+                IMAP_SEARCH_TIMEOUT.as_secs()
+            )
+        })?
         .map_err(|e| format!("UID SEARCH failed: {e}"))?;
 
     // Filter out last_uid itself (IMAP returns it if it's the highest UID)
@@ -391,10 +430,7 @@ pub async fn fetch_new_uids(
 
 /// Search for all UIDs in a folder using `UID SEARCH ALL`.
 /// Returns real UIDs sorted ascending — avoids the sparse UID gap problem.
-pub async fn search_all_uids(
-    session: &mut ImapSession,
-    folder: &str,
-) -> Result<Vec<u32>, String> {
+pub async fn search_all_uids(session: &mut ImapSession, folder: &str) -> Result<Vec<u32>, String> {
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
@@ -436,7 +472,12 @@ pub async fn set_flags(
         Ok::<_, String>(())
     })
     .await
-    .map_err(|_| format!("UID STORE timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+    .map_err(|_| {
+        format!(
+            "UID STORE timed out after {}s — check your server settings or network connection",
+            IMAP_CMD_TIMEOUT.as_secs()
+        )
+    })?
 }
 
 /// Move messages between folders.
@@ -619,10 +660,18 @@ pub async fn append_message(
     flags: Option<&str>,
     raw_message: &[u8],
 ) -> Result<(), String> {
-    tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.append(folder, flags, None, raw_message))
-        .await
-        .map_err(|_| format!("APPEND timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("APPEND failed: {e}"))
+    tokio::time::timeout(
+        IMAP_FETCH_TIMEOUT,
+        session.append(folder, flags, None, raw_message),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "APPEND timed out after {}s — check your server settings or network connection",
+            IMAP_FETCH_TIMEOUT.as_secs()
+        )
+    })?
+    .map_err(|e| format!("APPEND failed: {e}"))
 }
 
 /// Get folder status (UIDVALIDITY, UIDNEXT, MESSAGES, UNSEEN).
@@ -635,7 +684,12 @@ pub async fn get_folder_status(
         session.status(folder, "(UIDVALIDITY UIDNEXT MESSAGES UNSEEN)"),
     )
     .await
-    .map_err(|_| format!("STATUS timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+    .map_err(|_| {
+        format!(
+            "STATUS timed out after {}s — check your server settings or network connection",
+            IMAP_CMD_TIMEOUT.as_secs()
+        )
+    })?
     .map_err(|e| format!("STATUS failed: {e}"))?;
 
     Ok(ImapFolderStatus {
@@ -718,7 +772,9 @@ pub async fn fetch_attachment(
             msg.raw_message.as_ref().to_vec()
         }
         mail_parser::PartType::Multipart(_) => {
-            return Err(format!("Part {part_id} is a multipart container, not a leaf part"));
+            return Err(format!(
+                "Part {part_id} is a multipart container, not a leaf part"
+            ));
         }
     };
 
@@ -775,17 +831,22 @@ pub async fn delta_check_folders(
     let mut results = Vec::with_capacity(folders.len());
 
     for req in folders {
-        let mailbox = match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(&req.folder)).await {
-            Ok(Ok(m)) => m,
-            Ok(Err(e)) => {
-                log::warn!("delta_check: SELECT {} failed: {e}", req.folder);
-                continue;
-            }
-            Err(_) => {
-                log::warn!("delta_check: SELECT {} timed out after {}s", req.folder, IMAP_CMD_TIMEOUT.as_secs());
-                continue;
-            }
-        };
+        let mailbox =
+            match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(&req.folder)).await {
+                Ok(Ok(m)) => m,
+                Ok(Err(e)) => {
+                    log::warn!("delta_check: SELECT {} failed: {e}", req.folder);
+                    continue;
+                }
+                Err(_) => {
+                    log::warn!(
+                        "delta_check: SELECT {} timed out after {}s",
+                        req.folder,
+                        IMAP_CMD_TIMEOUT.as_secs()
+                    );
+                    continue;
+                }
+            };
 
         let current_uidvalidity = mailbox.uid_validity.unwrap_or(0);
         let uidvalidity_changed = req.uidvalidity != 0 && current_uidvalidity != req.uidvalidity;
@@ -802,7 +863,9 @@ pub async fn delta_check_folders(
 
         // UID SEARCH for messages newer than last_uid
         let query = format!("{}:*", req.last_uid + 1);
-        let new_uids = match tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&query)).await {
+        let new_uids = match tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&query))
+            .await
+        {
             Ok(Ok(uids)) => {
                 let mut result: Vec<u32> = uids.into_iter().filter(|&u| u > req.last_uid).collect();
                 result.sort();
@@ -813,7 +876,11 @@ pub async fn delta_check_folders(
                 vec![]
             }
             Err(_) => {
-                log::warn!("delta_check: UID SEARCH {} timed out after {}s", req.folder, IMAP_SEARCH_TIMEOUT.as_secs());
+                log::warn!(
+                    "delta_check: UID SEARCH {} timed out after {}s",
+                    req.folder,
+                    IMAP_SEARCH_TIMEOUT.as_secs()
+                );
                 vec![]
             }
         };
@@ -961,11 +1028,17 @@ pub async fn sync_folder(
                 Ok(f) => {
                     let uid = match f.uid {
                         Some(u) => u,
-                        None => { log::warn!("IMAP sync_folder {folder}: response missing UID"); continue; }
+                        None => {
+                            log::warn!("IMAP sync_folder {folder}: response missing UID");
+                            continue;
+                        }
                     };
                     let raw = match f.body() {
                         Some(b) => b,
-                        None => { log::warn!("IMAP sync_folder {folder}: UID {uid} has no body"); continue; }
+                        None => {
+                            log::warn!("IMAP sync_folder {folder}: UID {uid} has no body");
+                            continue;
+                        }
                     };
                     let raw_size = raw.len() as u32;
                     let flags: Vec<_> = f.flags().collect();
@@ -974,7 +1047,17 @@ pub async fn sync_folder(
                     let is_draft = flags.iter().any(|fl| matches!(fl, Flag::Draft));
                     let internal_date = f.internal_date().map(|dt| dt.timestamp());
 
-                    match parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, internal_date) {
+                    match parse_message(
+                        &parser,
+                        raw,
+                        uid,
+                        folder,
+                        raw_size,
+                        is_read,
+                        is_starred,
+                        is_draft,
+                        internal_date,
+                    ) {
                         Ok(msg) => all_messages.push(msg),
                         Err(e) => log::warn!("sync_folder: failed to parse UID {uid}: {e}"),
                     }
@@ -984,7 +1067,10 @@ pub async fn sync_folder(
         }
     }
 
-    log::info!("IMAP sync_folder {folder}: fetched {} messages", all_messages.len());
+    log::info!(
+        "IMAP sync_folder {folder}: fetched {} messages",
+        all_messages.len()
+    );
 
     Ok(ImapFolderSyncResult {
         uids,
@@ -1006,8 +1092,12 @@ pub async fn test_connection(config: &ImapConfig) -> Result<String, String> {
         Ok::<_, String>(names.collect::<Vec<_>>().await.len())
     })
     .await
-    .map_err(|_| format!("LIST timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
-    ?;
+    .map_err(|_| {
+        format!(
+            "LIST timed out after {}s — check your server settings or network connection",
+            IMAP_CMD_TIMEOUT.as_secs()
+        )
+    })??;
 
     let _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.logout()).await;
 
@@ -1027,7 +1117,11 @@ pub async fn raw_fetch_messages(
     folder: &str,
     uid_range: &str,
 ) -> Result<ImapFetchResult, String> {
-    log::info!("RAW IMAP FETCH: connecting to {}:{} for folder {folder}, UIDs {uid_range}", config.host, config.port);
+    log::info!(
+        "RAW IMAP FETCH: connecting to {}:{} for folder {folder}, UIDs {uid_range}",
+        config.host,
+        config.port
+    );
 
     // Connect
     let stream = if config.security == "starttls" {
@@ -1041,14 +1135,23 @@ pub async fn raw_fetch_messages(
     // Read greeting (for non-STARTTLS)
     if config.security != "starttls" {
         let mut line = String::new();
-        reader.read_line(&mut line).await.map_err(|e| format!("greeting: {e}"))?;
+        reader
+            .read_line(&mut line)
+            .await
+            .map_err(|e| format!("greeting: {e}"))?;
     }
 
     // LOGIN
     let login_cmd = if config.auth_method == "oauth2" {
         // XOAUTH2: AUTHENTICATE XOAUTH2 <base64>
-        let xoauth2 = format!("user={}\x01auth=Bearer {}\x01\x01", config.username, config.password);
-        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, xoauth2.as_bytes());
+        let xoauth2 = format!(
+            "user={}\x01auth=Bearer {}\x01\x01",
+            config.username, config.password
+        );
+        let b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            xoauth2.as_bytes(),
+        );
         format!("a1 AUTHENTICATE XOAUTH2 {b64}\r\n")
     } else {
         format!(
@@ -1093,13 +1196,19 @@ pub async fn raw_fetch_messages(
 
     // UID FETCH with full body
     let fetch_cmd = format!("a3 UID FETCH {uid_range} (UID FLAGS INTERNALDATE BODY.PEEK[])\r\n");
-    reader.get_mut().write_all(fetch_cmd.as_bytes()).await
+    reader
+        .get_mut()
+        .write_all(fetch_cmd.as_bytes())
+        .await
         .map_err(|e| format!("FETCH write: {e}"))?;
 
     // Parse FETCH responses with literal handling
     let raw_messages = raw_parse_fetch_responses(&mut reader, "a3").await?;
 
-    log::info!("RAW IMAP FETCH {folder}: parsed {} raw messages", raw_messages.len());
+    log::info!(
+        "RAW IMAP FETCH {folder}: parsed {} raw messages",
+        raw_messages.len()
+    );
 
     // Parse each raw message
     let parser = MessageParser::default();
@@ -1125,7 +1234,10 @@ pub async fn raw_fetch_messages(
     // LOGOUT
     let _ = reader.get_mut().write_all(b"a4 LOGOUT\r\n").await;
 
-    Ok(ImapFetchResult { messages, folder_status })
+    Ok(ImapFetchResult {
+        messages,
+        folder_status,
+    })
 }
 
 /// Raw IMAP diagnostic: connect via raw TCP/TLS (bypassing async-imap),
@@ -1148,7 +1260,10 @@ pub async fn raw_fetch_diagnostic(
 
     // Read greeting (for non-STARTTLS)
     if config.security != "starttls" {
-        let n = stream.read(&mut buf).await.map_err(|e| format!("greeting: {e}"))?;
+        let n = stream
+            .read(&mut buf)
+            .await
+            .map_err(|e| format!("greeting: {e}"))?;
         output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
     }
 
@@ -1158,20 +1273,35 @@ pub async fn raw_fetch_diagnostic(
         imap_quote(&config.username)?,
         imap_quote(&config.password)?
     );
-    stream.write_all(login_cmd.as_bytes()).await.map_err(|e| format!("LOGIN: {e}"))?;
-    let n = stream.read(&mut buf).await.map_err(|e| format!("LOGIN read: {e}"))?;
+    stream
+        .write_all(login_cmd.as_bytes())
+        .await
+        .map_err(|e| format!("LOGIN: {e}"))?;
+    let n = stream
+        .read(&mut buf)
+        .await
+        .map_err(|e| format!("LOGIN read: {e}"))?;
     output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
 
     // SELECT
     let select_cmd = format!("a2 SELECT {}\r\n", imap_quote(folder)?);
-    stream.write_all(select_cmd.as_bytes()).await.map_err(|e| format!("SELECT: {e}"))?;
+    stream
+        .write_all(select_cmd.as_bytes())
+        .await
+        .map_err(|e| format!("SELECT: {e}"))?;
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let n = stream.read(&mut buf).await.map_err(|e| format!("SELECT read: {e}"))?;
+    let n = stream
+        .read(&mut buf)
+        .await
+        .map_err(|e| format!("SELECT read: {e}"))?;
     output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
 
     // UID FETCH — just get UID and FLAGS first (small response)
     let fetch_cmd = format!("a3 UID FETCH {uid_range} (UID FLAGS)\r\n");
-    stream.write_all(fetch_cmd.as_bytes()).await.map_err(|e| format!("FETCH: {e}"))?;
+    stream
+        .write_all(fetch_cmd.as_bytes())
+        .await
+        .map_err(|e| format!("FETCH: {e}"))?;
 
     let mut fetch_response = String::new();
     loop {
@@ -1180,12 +1310,21 @@ pub async fn raw_fetch_diagnostic(
             Ok(Ok(0)) => break,
             Ok(Ok(n)) => {
                 fetch_response.push_str(&String::from_utf8_lossy(&buf[..n]));
-                if fetch_response.contains("a3 OK") || fetch_response.contains("a3 NO") || fetch_response.contains("a3 BAD") {
+                if fetch_response.contains("a3 OK")
+                    || fetch_response.contains("a3 NO")
+                    || fetch_response.contains("a3 BAD")
+                {
                     break;
                 }
             }
-            Ok(Err(e)) => { fetch_response.push_str(&format!("[read error: {e}]")); break; }
-            Err(_) => { fetch_response.push_str("[timeout]"); break; }
+            Ok(Err(e)) => {
+                fetch_response.push_str(&format!("[read error: {e}]"));
+                break;
+            }
+            Err(_) => {
+                fetch_response.push_str("[timeout]");
+                break;
+            }
         }
     }
     output.push_str(&format!("FETCH response:\n{fetch_response}"));
@@ -1222,7 +1361,9 @@ async fn raw_connect_starttls(config: &ImapConfig) -> Result<ImapStream, String>
     configure_tcp_socket(&tcp);
     let mut tmp = vec![0u8; 4096];
     let _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut tmp)).await; // consume greeting
-    tcp.write_all(b"a0 STARTTLS\r\n").await.map_err(|e| format!("STARTTLS: {e}"))?;
+    tcp.write_all(b"a0 STARTTLS\r\n")
+        .await
+        .map_err(|e| format!("STARTTLS: {e}"))?;
     let n = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut tmp))
         .await
         .map_err(|_| format!(
@@ -1238,10 +1379,12 @@ async fn raw_connect_starttls(config: &ImapConfig) -> Result<ImapStream, String>
     let tc = tokio_native_tls::TlsConnector::from(nc);
     let tls = tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, tc.connect(&config.host, tcp))
         .await
-        .map_err(|_| format!(
+        .map_err(|_| {
+            format!(
             "TLS handshake timed out after {}s — check your server settings or network connection",
             TLS_HANDSHAKE_TIMEOUT.as_secs()
-        ))?
+        )
+        })?
         .map_err(|e| format!("TLS: {e}"))?;
     Ok(ImapStream::Tls(tls))
 }
@@ -1252,7 +1395,10 @@ async fn raw_send_and_wait(
     cmd: &[u8],
     tag: &str,
 ) -> Result<String, String> {
-    reader.get_mut().write_all(cmd).await
+    reader
+        .get_mut()
+        .write_all(cmd)
+        .await
         .map_err(|e| format!("{tag} write: {e}"))?;
 
     let mut response = String::new();
@@ -1265,7 +1411,9 @@ async fn raw_send_and_wait(
         match tokio::time::timeout(
             std::time::Duration::from_secs(30),
             reader.read_line(&mut line),
-        ).await {
+        )
+        .await
+        {
             Ok(Ok(0)) => return Err(format!("{tag}: connection closed")),
             Ok(Ok(_)) => {
                 response.push_str(&line);
@@ -1328,7 +1476,9 @@ async fn raw_parse_fetch_responses(
         match tokio::time::timeout(
             std::time::Duration::from_secs(60),
             reader.read_line(&mut line),
-        ).await {
+        )
+        .await
+        {
             Ok(Ok(0)) => return Err("Connection closed during FETCH".to_string()),
             Ok(Ok(_)) => {
                 // Check for tagged response (end of FETCH)
@@ -1351,7 +1501,9 @@ async fn raw_parse_fetch_responses(
                     // Still need to consume any literal
                     if let Some(literal_size) = extract_literal_size(&line) {
                         let mut discard = vec![0u8; literal_size];
-                        reader.read_exact(&mut discard).await
+                        reader
+                            .read_exact(&mut discard)
+                            .await
                             .map_err(|e| format!("discard literal: {e}"))?;
                     }
                     continue;
@@ -1370,7 +1522,9 @@ async fn raw_parse_fetch_responses(
                 if let Some(literal_size) = extract_literal_size(&line) {
                     // Read exactly `literal_size` bytes
                     let mut body = vec![0u8; literal_size];
-                    reader.read_exact(&mut body).await
+                    reader
+                        .read_exact(&mut body)
+                        .await
                         .map_err(|e| format!("read literal for UID {uid}: {e}"))?;
 
                     // Read the closing ")\r\n" after the literal
@@ -1400,7 +1554,9 @@ fn extract_fetch_uid(line: &str) -> Option<u32> {
     // Look for "UID " followed by a number
     let uid_idx = line.find("UID ")?;
     let after_uid = &line[uid_idx + 4..];
-    let end = after_uid.find(|c: char| !c.is_ascii_digit()).unwrap_or(after_uid.len());
+    let end = after_uid
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(after_uid.len());
     after_uid[..end].parse().ok()
 }
 
@@ -1430,24 +1586,39 @@ fn extract_internal_date(line: &str) -> Option<i64> {
 /// Parse IMAP date format "16-Feb-2026 12:00:00 +0000" to Unix timestamp.
 fn parse_imap_date(s: &str) -> Option<i64> {
     let parts: Vec<&str> = s.split_whitespace().collect();
-    if parts.len() < 2 { return None; }
+    if parts.len() < 2 {
+        return None;
+    }
 
     // "16-Feb-2026"
     let date_parts: Vec<&str> = parts[0].split('-').collect();
-    if date_parts.len() != 3 { return None; }
+    if date_parts.len() != 3 {
+        return None;
+    }
 
     let day: u32 = date_parts[0].parse().ok()?;
     let month = match date_parts[1].to_lowercase().as_str() {
-        "jan" => 1u32, "feb" => 2, "mar" => 3, "apr" => 4,
-        "may" => 5, "jun" => 6, "jul" => 7, "aug" => 8,
-        "sep" => 9, "oct" => 10, "nov" => 11, "dec" => 12,
+        "jan" => 1u32,
+        "feb" => 2,
+        "mar" => 3,
+        "apr" => 4,
+        "may" => 5,
+        "jun" => 6,
+        "jul" => 7,
+        "aug" => 8,
+        "sep" => 9,
+        "oct" => 10,
+        "nov" => 11,
+        "dec" => 12,
         _ => return None,
     };
     let year: i64 = date_parts[2].parse().ok()?;
 
     // "12:00:00"
     let time_parts: Vec<&str> = parts.get(1)?.split(':').collect();
-    if time_parts.len() != 3 { return None; }
+    if time_parts.len() != 3 {
+        return None;
+    }
     let hour: i64 = time_parts[0].parse().ok()?;
     let minute: i64 = time_parts[1].parse().ok()?;
     let second: i64 = time_parts[2].parse().ok()?;
@@ -1460,8 +1631,12 @@ fn parse_imap_date(s: &str) -> Option<i64> {
             let tz_h: i64 = tz_num[..2].parse().unwrap_or(0);
             let tz_m: i64 = tz_num[2..].parse().unwrap_or(0);
             sign * (tz_h * 3600 + tz_m * 60)
-        } else { 0 }
-    } else { 0 };
+        } else {
+            0
+        }
+    } else {
+        0
+    };
 
     // Convert to Unix timestamp (days since epoch)
     // Simplified: use a basic calendar calculation
@@ -1472,7 +1647,9 @@ fn parse_imap_date(s: &str) -> Option<i64> {
     let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     for m in 1..month {
         days += month_days[m as usize] as i64;
-        if m == 2 && is_leap_year(year) { days += 1; }
+        if m == 2 && is_leap_year(year) {
+            days += 1;
+        }
     }
     days += day as i64 - 1;
 
@@ -1651,14 +1828,12 @@ fn detect_special_use(name: &async_imap::types::Name) -> Option<String> {
     let lower = name.name().to_lowercase();
     match lower.as_str() {
         "inbox" => Some("\\Inbox".to_string()),
-        "sent" | "sent messages" | "sent items" | "[gmail]/sent mail" => {
-            Some("\\Sent".to_string())
-        }
+        "sent" | "sent messages" | "sent items" | "[gmail]/sent mail" => Some("\\Sent".to_string()),
         "trash" | "deleted" | "deleted items" | "deleted messages" | "bin" | "corbeille"
-        | "unsolbox" | "[gmail]/trash" => {
-            Some("\\Trash".to_string())
+        | "unsolbox" | "[gmail]/trash" => Some("\\Trash".to_string()),
+        "drafts" | "draft" | "draftbox" | "brouillons" | "[gmail]/drafts" => {
+            Some("\\Drafts".to_string())
         }
-        "drafts" | "draft" | "draftbox" | "brouillons" | "[gmail]/drafts" => Some("\\Drafts".to_string()),
         "junk" | "spam" | "junk e-mail" | "[gmail]/spam" => Some("\\Junk".to_string()),
         "archive" | "archives" | "[gmail]/all mail" => Some("\\Archive".to_string()),
         _ => None,
@@ -1669,6 +1844,7 @@ fn detect_special_use(name: &async_imap::types::Name) -> Option<String> {
 ///
 /// `internal_date`: optional INTERNALDATE timestamp from the IMAP server,
 /// used as fallback when the Date header cannot be parsed.
+#[allow(clippy::too_many_arguments)]
 fn parse_message(
     parser: &MessageParser,
     raw: &[u8],
@@ -1704,7 +1880,12 @@ fn parse_message(
             if list.is_empty() {
                 None
             } else {
-                Some(list.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(" "))
+                Some(
+                    list.iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                )
             }
         }
         _ => None,
@@ -1737,15 +1918,16 @@ fn parse_message(
     });
 
     // List-Unsubscribe headers
-    let list_unsubscribe = extract_header_text(message.header(mail_parser::HeaderName::ListUnsubscribe));
-    let list_unsubscribe_post = extract_header_text(
-        message.header(mail_parser::HeaderName::Other("List-Unsubscribe-Post".into())),
-    );
+    let list_unsubscribe =
+        extract_header_text(message.header(mail_parser::HeaderName::ListUnsubscribe));
+    let list_unsubscribe_post = extract_header_text(message.header(
+        mail_parser::HeaderName::Other("List-Unsubscribe-Post".into()),
+    ));
 
     // Authentication-Results header
-    let auth_results = extract_header_text(
-        message.header(mail_parser::HeaderName::Other("Authentication-Results".into())),
-    );
+    let auth_results = extract_header_text(message.header(mail_parser::HeaderName::Other(
+        "Authentication-Results".into(),
+    )));
 
     // Build a map from mail-parser part index → IMAP MIME section path.
     // IMAP numbers children of multipart containers starting at 1 (e.g. "1", "2", "1.2.3").
@@ -1795,10 +1977,29 @@ fn parse_message(
                 mime_type,
                 size: att.len() as u32,
                 content_id: att.content_id().map(|s| s.to_string()),
-                is_inline: att.content_disposition().map_or(false, |cd| cd.is_inline()),
+                is_inline: att.content_disposition().is_some_and(|cd| cd.is_inline()),
             })
         })
         .collect();
+
+    let content_hash = content_hash(
+        body_text.as_deref(),
+        body_html.as_deref(),
+        message.attachments.iter().filter_map(|&i| {
+            let part = message.parts.get(i)?;
+            Some(AttachmentContent {
+                filename: part.attachment_name().unwrap_or("attachment"),
+                content_type: part.content_type().map_or("", |ct| ct.ctype()),
+                content_subtype: part
+                    .content_type()
+                    .and_then(|ct| ct.subtype())
+                    .unwrap_or(""),
+                content_id: part.content_id().unwrap_or(""),
+                is_inline: part.content_disposition().is_some_and(|cd| cd.is_inline()),
+                bytes: part.contents(),
+            })
+        }),
+    );
 
     Ok(ImapMessage {
         uid,
@@ -1825,7 +2026,65 @@ fn parse_message(
         list_unsubscribe_post,
         auth_results,
         attachments,
+        content_hash,
     })
+}
+
+/// What `content_hash` reads of one attachment.
+struct AttachmentContent<'a> {
+    filename: &'a str,
+    content_type: &'a str,
+    content_subtype: &'a str,
+    content_id: &'a str,
+    is_inline: bool,
+    bytes: &'a [u8],
+}
+
+/// SHA-256 (hex) of everything a reader sees of a message: the text part, the
+/// HTML part and each attachment's metadata and decoded bytes. The threading
+/// step compares it to tell folder copies from different mails that reuse a
+/// Message-ID, so a part that is left out is a part a sender can swap.
+///
+/// Every field is length-prefixed ("ab"+"c" and "a"+"bc" differ, and so do an
+/// absent part and an empty one). The attachment's MIME section is left out on
+/// purpose: a copy of the same mail in another folder can be structured
+/// differently and would otherwise never match.
+fn content_hash<'a>(
+    body_text: Option<&str>,
+    body_html: Option<&str>,
+    attachments: impl Iterator<Item = AttachmentContent<'a>>,
+) -> String {
+    fn field(hasher: &mut Sha256, bytes: &[u8]) {
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(bytes);
+    }
+    fn optional(hasher: &mut Sha256, value: Option<&str>) {
+        match value {
+            Some(v) => {
+                hasher.update([1u8]);
+                field(hasher, v.as_bytes());
+            }
+            None => hasher.update([0u8]),
+        }
+    }
+
+    let mut hasher = Sha256::new();
+    optional(&mut hasher, body_text);
+    optional(&mut hasher, body_html);
+    for att in attachments {
+        hasher.update([2u8]);
+        field(&mut hasher, att.filename.as_bytes());
+        field(&mut hasher, att.content_type.as_bytes());
+        field(&mut hasher, att.content_subtype.as_bytes());
+        field(&mut hasher, att.content_id.as_bytes());
+        hasher.update([att.is_inline as u8]);
+        field(&mut hasher, att.bytes);
+    }
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// Build a mapping from mail-parser part index → IMAP MIME section path string.
@@ -1833,7 +2092,9 @@ fn parse_message(
 /// IMAP section numbering: children of a multipart container are numbered 1, 2, 3, ...
 /// Nested multipart children get dot-separated paths (e.g., "1.2" for the 2nd child of the 1st child).
 /// For non-multipart messages, the single body is section "1".
-fn build_imap_section_map(message: &mail_parser::Message) -> std::collections::HashMap<usize, String> {
+fn build_imap_section_map(
+    message: &mail_parser::Message,
+) -> std::collections::HashMap<usize, String> {
     use mail_parser::PartType;
 
     let mut map = std::collections::HashMap::new();
@@ -1879,17 +2140,18 @@ fn build_imap_section_map(message: &mail_parser::Message) -> std::collections::H
 fn extract_header_text(hv: Option<&mail_parser::HeaderValue>) -> Option<String> {
     match hv {
         Some(mail_parser::HeaderValue::Text(t)) => Some(t.to_string()),
-        Some(mail_parser::HeaderValue::TextList(list)) => {
-            Some(list.iter().map(|s| s.as_ref()).collect::<Vec<_>>().join(", "))
-        }
+        Some(mail_parser::HeaderValue::TextList(list)) => Some(
+            list.iter()
+                .map(|s| s.as_ref())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
         _ => None,
     }
 }
 
 /// Extract the first address (email, display name) from an Address field.
-fn extract_first_address(
-    addr: Option<&mail_parser::Address>,
-) -> (Option<String>, Option<String>) {
+fn extract_first_address(addr: Option<&mail_parser::Address>) -> (Option<String>, Option<String>) {
     let addr = match addr {
         Some(a) => a,
         None => return (None, None),
@@ -1906,10 +2168,7 @@ fn extract_first_address(
 
 /// Format an address list as a comma-separated string of "Name <email>" or "email".
 fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
-    let addr = match addr {
-        Some(a) => a,
-        None => return None,
-    };
+    let addr = addr?;
 
     let parts: Vec<String> = addr
         .iter()
@@ -1956,7 +2215,10 @@ mod tests {
 
     #[test]
     fn quotes_an_ordinary_value() {
-        assert_eq!(imap_quote("simon@hochreiner.xyz").unwrap(), "\"simon@hochreiner.xyz\"");
+        assert_eq!(
+            imap_quote("simon@hochreiner.xyz").unwrap(),
+            "\"simon@hochreiner.xyz\""
+        );
     }
 
     #[test]
@@ -2000,5 +2262,126 @@ mod tests {
             "a bare EXPUNGE removes every \\Deleted message in the mailbox, \
              including ones another client marked; use expunge_uid_set instead"
         );
+    }
+
+    // Messages that reuse one Message-ID are told apart by `content_hash`, so
+    // it has to cover everything a reader sees of a message: a part that is
+    // left out is a part a sender can swap while keeping the ID.
+
+    fn mime(text: &str, html: &str, attachments: &[(&str, &str, &str)]) -> Vec<u8> {
+        // attachments: (filename, content type, base64 body)
+        let mut out = String::from(
+            "From: a@example.com\r\nTo: b@example.com\r\nSubject: s\r\n\
+             Message-ID: <same@example.com>\r\nMIME-Version: 1.0\r\n\
+             Content-Type: multipart/mixed; boundary=\"outer\"\r\n\r\n\
+             --outer\r\nContent-Type: multipart/alternative; boundary=\"alt\"\r\n\r\n\
+             --alt\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n",
+        );
+        out.push_str(text);
+        out.push_str("\r\n--alt\r\nContent-Type: text/html; charset=utf-8\r\n\r\n");
+        out.push_str(html);
+        out.push_str("\r\n--alt--\r\n");
+        for (name, ctype, body) in attachments {
+            out.push_str(&format!(
+                "--outer\r\nContent-Type: {ctype}; name=\"{name}\"\r\n\
+                 Content-Disposition: attachment; filename=\"{name}\"\r\n\
+                 Content-Transfer-Encoding: base64\r\n\r\n{body}\r\n"
+            ));
+        }
+        out.push_str("--outer--\r\n");
+        out.into_bytes()
+    }
+
+    fn hash_of(raw: &[u8]) -> String {
+        let parser = MessageParser::default();
+        parse_message(
+            &parser,
+            raw,
+            1,
+            "INBOX",
+            raw.len() as u32,
+            false,
+            false,
+            false,
+            None,
+        )
+        .unwrap()
+        .content_hash
+    }
+
+    #[test]
+    fn content_hash_differs_when_only_attachment_bytes_differ() {
+        // Same name, type and size ("AAAA" and "BBBB" both decode to 3 bytes).
+        let a = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf", "application/pdf", "AAAA")],
+        );
+        let b = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf", "application/pdf", "BBBB")],
+        );
+        assert_ne!(hash_of(&a), hash_of(&b));
+    }
+
+    #[test]
+    fn content_hash_is_equal_for_identical_content() {
+        let a = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf", "application/pdf", "AAAA")],
+        );
+        assert_eq!(hash_of(&a), hash_of(&a.clone()));
+        assert_eq!(hash_of(&a).len(), 64);
+    }
+
+    #[test]
+    fn content_hash_differs_when_only_the_text_or_html_part_differs() {
+        let base = mime("pay to A", "<p>x</p>", &[]);
+        assert_ne!(hash_of(&base), hash_of(&mime("pay to B", "<p>x</p>", &[])));
+        assert_ne!(hash_of(&base), hash_of(&mime("pay to A", "<p>y</p>", &[])));
+    }
+
+    #[test]
+    fn content_hash_differs_when_only_the_attachment_name_differs() {
+        let a = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf", "application/pdf", "AAAA")],
+        );
+        let b = mime(
+            "t",
+            "<p>t</p>",
+            &[("invoice.pdf.exe", "application/pdf", "AAAA")],
+        );
+        assert_ne!(hash_of(&a), hash_of(&b));
+    }
+
+    #[test]
+    fn content_hash_keeps_text_and_html_apart() {
+        // "ab"+"c" and "a"+"bc" concatenate equally.
+        assert_ne!(
+            hash_of(&mime("ab", "c", &[])),
+            hash_of(&mime("a", "bc", &[]))
+        );
+    }
+
+    #[test]
+    fn content_hash_ignores_the_mime_section_of_an_attachment() {
+        // The same mail filed in another folder can have a different MIME
+        // structure, which gives the attachment another part id.
+        let flat = mime("t", "<p>t</p>", &[("a.pdf", "application/pdf", "AAAA")]);
+        let wrapped = b"From: a@example.com\r\nTo: b@example.com\r\nSubject: s\r\n\
+            Message-ID: <same@example.com>\r\nMIME-Version: 1.0\r\n\
+            Content-Type: multipart/mixed; boundary=\"top\"\r\n\r\n\
+            --top\r\nContent-Type: multipart/mixed; boundary=\"outer\"\r\n\r\n\
+            --outer\r\nContent-Type: multipart/alternative; boundary=\"alt\"\r\n\r\n\
+            --alt\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nt\r\n\
+            --alt\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>t</p>\r\n--alt--\r\n\
+            --outer\r\nContent-Type: application/pdf; name=\"a.pdf\"\r\n\
+            Content-Disposition: attachment; filename=\"a.pdf\"\r\n\
+            Content-Transfer-Encoding: base64\r\n\r\nAAAA\r\n--outer--\r\n--top--\r\n";
+        assert_eq!(hash_of(&flat), hash_of(wrapped));
     }
 }

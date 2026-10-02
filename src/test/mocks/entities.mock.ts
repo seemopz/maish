@@ -255,6 +255,7 @@ export function createMockImapMessage(
     list_unsubscribe_post: null,
     auth_results: null,
     attachments: [],
+    content_hash: "hash-of-hello",
     ...overrides,
   };
 }

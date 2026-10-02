@@ -38,4 +38,29 @@ describe("nextSyncDisplay", () => {
     nextSyncDisplay(errors, "a", "error", "Sync failed: A");
     expect(nextSyncDisplay(errors, "b", "removed", null)).toEqual({ state: "error", message: "Sync failed: A" });
   });
+
+  it("leaves the display alone when a removed account was not the one syncing", () => {
+    const errors = new Map<string, string>();
+    const syncing = new Set<string>();
+    nextSyncDisplay(errors, "a", "syncing", "Syncing...", syncing);
+    expect(nextSyncDisplay(errors, "b", "removed", null, syncing)).toBeNull();
+  });
+
+  it("goes idle when the account that was syncing is removed", () => {
+    const errors = new Map<string, string>();
+    const syncing = new Set<string>();
+    nextSyncDisplay(errors, "a", "syncing", "Syncing: 1/2 messages", syncing);
+    expect(nextSyncDisplay(errors, "a", "removed", null, syncing)).toEqual({ state: "idle", message: null });
+  });
+
+  it("stops counting an account as syncing once it is done or failed", () => {
+    const errors = new Map<string, string>();
+    const syncing = new Set<string>();
+    nextSyncDisplay(errors, "a", "syncing", "Syncing...", syncing);
+    nextSyncDisplay(errors, "a", "done", null, syncing);
+    expect(nextSyncDisplay(errors, "b", "removed", null, syncing)).toEqual({ state: "idle", message: null });
+    nextSyncDisplay(errors, "c", "syncing", "Syncing...", syncing);
+    nextSyncDisplay(errors, "c", "error", "Sync failed: C", syncing);
+    expect(nextSyncDisplay(errors, "b", "removed", null, syncing)).toEqual({ state: "error", message: "Sync failed: C" });
+  });
 });

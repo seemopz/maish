@@ -374,6 +374,7 @@ export default function App() {
   // Listen for sync status updates
   const backfillDoneRef = useRef(false);
   const syncErrorsRef = useRef(new Map<string, string>());
+  const syncingRef = useRef(new Set<string>());
   useEffect(() => {
     const unsub = onSyncStatus((accountId, status, progress, error) => {
       const errors = syncErrorsRef.current;
@@ -390,11 +391,8 @@ export default function App() {
       } else if (status === "error") {
         message = error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed";
       }
-      const display = nextSyncDisplay(errors, accountId, status, message);
-      // A deletion comes from the settings page, not from the sync loop: leave the
-      // spinner alone while another account is still syncing.
-      if (status === "removed" && useUIStore.getState().syncState === "syncing") return;
-      useUIStore.getState().setSyncState(display.state, display.message);
+      const display = nextSyncDisplay(errors, accountId, status, message, syncingRef.current);
+      if (display) useUIStore.getState().setSyncState(display.state, display.message);
 
       if (status === "removed") return;
 

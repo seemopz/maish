@@ -17,6 +17,11 @@
           "path": "src-tauri/Cargo.toml"
         },
         {
+          "type": "toml",
+          "path": "src-tauri/Cargo.lock",
+          "jsonpath": "$.package[?(@.name.value=='maish')].version"
+        },
+        {
           "type": "generic",
           "path": "xyz.hochreiner.maish.metainfo.xml"
         },

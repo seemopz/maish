@@ -51,11 +51,6 @@ function getFormatter(tzid: string): Intl.DateTimeFormat | null {
   return formatter;
 }
 
-/** True when the runtime can resolve this TZID. */
-export function isKnownTimeZone(tzid: string): boolean {
-  return getFormatter(tzid) !== null;
-}
-
 export function epochToWallClock(epochSeconds: number, tzid: string | null): WallClock {
   const date = new Date(epochSeconds * 1000);
   const formatter = tzid ? getFormatter(tzid) : null;

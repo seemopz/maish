@@ -134,17 +134,6 @@ export async function upsertMessage(msg: {
   );
 }
 
-export async function deleteMessage(
-  accountId: string,
-  messageId: string,
-): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "DELETE FROM messages WHERE account_id = $1 AND id = $2",
-    [accountId, messageId],
-  );
-}
-
 export async function updateMessageThreadIds(
   accountId: string,
   messageIds: string[],

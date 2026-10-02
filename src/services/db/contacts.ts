@@ -468,15 +468,6 @@ function earliest(a: number | null, b: number | null): number | null {
   return Math.min(a, b);
 }
 
-export async function getContactsForAddressBook(addressBookId: string): Promise<DbContact[]> {
-  const db = await getDb();
-  return db.select<DbContact[]>(
-    `SELECT * FROM contacts WHERE address_book_id = $1
-     ORDER BY display_name ASC, email ASC`,
-    [addressBookId],
-  );
-}
-
 export async function getContactById(id: string): Promise<DbContact | null> {
   return selectFirstBy<DbContact>("SELECT * FROM contacts WHERE id = $1", [id]);
 }

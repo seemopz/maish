@@ -2384,4 +2384,42 @@ mod tests {
             Content-Transfer-Encoding: base64\r\n\r\nAAAA\r\n--outer--\r\n--top--\r\n";
         assert_eq!(hash_of(&flat), hash_of(wrapped));
     }
+
+    // INTERNALDATE as the raw fetch path reads it (RFC 3501 §2.3.3,
+    // date-time = date-day-fixed "-" date-month "-" date-year SP time SP zone).
+    #[test]
+    fn imap_date_converts_to_unix_time() {
+        assert_eq!(parse_imap_date("16-Feb-2026 12:00:00 +0000"), Some(1771243200));
+        assert_eq!(parse_imap_date("01-Jan-1970 00:00:00 +0000"), Some(0));
+        // leap day and a century leap year
+        assert_eq!(parse_imap_date("29-Feb-2024 23:59:59 +0000"), Some(1709251199));
+        assert_eq!(parse_imap_date("01-Mar-2000 00:00:00 +0000"), Some(951868800));
+    }
+
+    #[test]
+    fn imap_date_applies_the_zone_offset() {
+        assert_eq!(parse_imap_date("16-Feb-2026 12:00:00 +0100"), Some(1771239600));
+        assert_eq!(parse_imap_date("16-Feb-2026 12:00:00 -0500"), Some(1771261200));
+        assert_eq!(parse_imap_date("31-Dec-2025 23:59:59 +0530"), Some(1767205799));
+    }
+
+    #[test]
+    fn imap_date_accepts_a_space_padded_day() {
+        // date-day-fixed pads a single digit day with a space
+        assert_eq!(parse_imap_date(" 1-Feb-2026 00:00:00 +0000"), Some(1769904000));
+    }
+
+    #[test]
+    fn imap_date_rejects_garbage() {
+        assert_eq!(parse_imap_date(""), None);
+        assert_eq!(parse_imap_date("not a date"), None);
+        assert_eq!(parse_imap_date("16-Foo-2026 12:00:00 +0000"), None);
+    }
+
+    #[test]
+    fn internal_date_is_read_from_a_fetch_line() {
+        let line = "* 1 FETCH (UID 7 INTERNALDATE \"16-Feb-2026 12:00:00 +0000\" FLAGS (\\Seen))";
+        assert_eq!(extract_internal_date(line), Some(1771243200));
+        assert_eq!(extract_internal_date("* 1 FETCH (UID 7)"), None);
+    }
 }

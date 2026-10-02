@@ -27,6 +27,14 @@ describe("uiStore", () => {
     expect(state.readingPanePosition).toBe("right");
   });
 
+  it("should keep a startup error until it is cleared", () => {
+    expect(useUIStore.getState().startupError).toBeNull();
+    useUIStore.getState().setStartupError("Could not decrypt the IMAP password");
+    expect(useUIStore.getState().startupError).toBe("Could not decrypt the IMAP password");
+    useUIStore.getState().setStartupError(null);
+    expect(useUIStore.getState().startupError).toBeNull();
+  });
+
   it("should set theme", () => {
     useUIStore.getState().setTheme("dark");
     expect(useUIStore.getState().theme).toBe("dark");

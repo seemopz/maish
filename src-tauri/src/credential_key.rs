@@ -5,6 +5,8 @@
 //! exists yet. Replacing or deleting it is deliberately not exposed: losing the
 //! key makes every stored credential unreadable.
 
+use std::sync::Mutex;
+
 use keyring::{Entry, Error};
 
 const SERVICE: &str = "xyz.hochreiner.maish";
@@ -12,6 +14,10 @@ const ACCOUNT: &str = "credential-encryption-key";
 
 /// A base64-encoded 32-byte key is 44 characters, the last being padding.
 const KEY_B64_LEN: usize = 44;
+
+/// Held across the check and the write in `store_key`: every window has its own
+/// copy of the webview-side key cache, so two of them can race on a first-ever key.
+static STORE_LOCK: Mutex<()> = Mutex::new(());
 
 fn entry() -> Result<Entry, String> {
     Entry::new(SERVICE, ACCOUNT).map_err(|e| format!("OS keychain unavailable: {e}"))
@@ -43,6 +49,8 @@ fn read_key() -> Result<Option<String>, String> {
 
 fn store_key(key: &str) -> Result<(), String> {
     validate_key(key)?;
+    // The guard protects no data, so a poisoned lock is still safe to use.
+    let _guard = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let entry = entry()?;
     match entry.get_password() {
         Ok(_) => {

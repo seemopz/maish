@@ -68,6 +68,7 @@ import { useTaskStore } from "./stores/taskStore";
 import { ContextMenuPortal } from "./components/ui/ContextMenuPortal";
 import { MoveToFolderDialog } from "./components/email/MoveToFolderDialog";
 import { OfflineBanner } from "./components/ui/OfflineBanner";
+import { StartupErrorBanner } from "./components/ui/StartupErrorBanner";
 import { UpdateToast } from "./components/ui/UpdateToast";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { formatSyncError } from "./utils/networkErrors";
@@ -287,6 +288,10 @@ export default function App() {
         await useShortcutStore.getState().loadKeyMap();
 
         const dbAccounts = await getAllAccounts();
+        const credentialErrors = dbAccounts.flatMap((a) => (a.credentialError ? [a.credentialError] : []));
+        if (credentialErrors.length > 0) {
+          ui.setStartupError(credentialErrors.join(" "));
+        }
         const mapped = dbAccounts.map((a) => ({
           id: a.id,
           email: a.email,
@@ -299,7 +304,11 @@ export default function App() {
         useAccountStore.getState().setAccounts(mapped, savedAccountId);
 
         // Initialize Gmail clients for existing accounts
-        await initializeClients();
+        try {
+          await initializeClients();
+        } catch (err) {
+          ui.setStartupError(err instanceof Error ? err.message : String(err));
+        }
 
         // Fetch send-as aliases for each active email account (skip CalDAV-only)
         const activeIds = mapped.filter((a) => a.isActive).map((a) => a.id);
@@ -344,12 +353,14 @@ export default function App() {
           const count = await getIncompleteTaskCount(activeAcct);
           useTaskStore.getState().setIncompleteCount(count);
         }
-
-        // Start auto-update checker
-        startUpdateChecker();
       } catch (err) {
         console.error("Failed to initialize:", err);
+        useUIStore.getState().setStartupError(
+          `Maish could not finish starting: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
+      // Whatever went wrong above, a fix has to be able to arrive as an update.
+      startUpdateChecker();
       setInitialized(true);
       invoke("close_splashscreen").catch(() => {});
     }
@@ -504,6 +515,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen overflow-hidden text-text-primary">
       <OfflineBanner />
+      <StartupErrorBanner />
       <TitleBar />
       <div className="flex flex-1 min-w-0 overflow-hidden">
         <DndProvider>

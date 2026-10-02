@@ -20,7 +20,9 @@ export async function setSetting(key: string, value: string): Promise<void> {
 
 /**
  * Get a setting that is stored encrypted. Transparently decrypts the value.
- * Falls back to returning the raw value if decryption fails (e.g. not yet encrypted).
+ * A value that is not in the encrypted format is returned as is (plaintext from
+ * before encryption was introduced). An encrypted value that cannot be
+ * decrypted is an error: returning the ciphertext would send it on as an API key.
  */
 export async function getSecureSetting(key: string): Promise<string | null> {
   const raw = await getSetting(key);
@@ -29,9 +31,9 @@ export async function getSecureSetting(key: string): Promise<string | null> {
   if (isEncrypted(raw)) {
     try {
       return await decryptValue(raw);
-    } catch {
-      // If decryption fails, the value may be plaintext (pre-encryption migration)
-      return raw;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Could not decrypt the setting ${key}: ${reason}`);
     }
   }
   return raw;

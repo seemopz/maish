@@ -40,6 +40,8 @@ export interface DbAccount {
   carddav_principal_url: string | null;
   carddav_home_url: string | null;
   contacts_provider: string | null;
+  /** Not a column: set when a credential could not be decrypted (the field is then null). */
+  credentialError?: string;
 }
 
 const ENCRYPTED_ACCOUNT_FIELDS = [
@@ -53,10 +55,13 @@ const ENCRYPTED_ACCOUNT_FIELDS = [
 
 /**
  * Decrypts the credential columns of an account row. A value that cannot be
- * decrypted is an error, not something to pass on: handing the ciphertext to a
- * server as if it were the password only produces a misleading login failure.
+ * decrypted is never passed on: handing the ciphertext to a server as if it were
+ * the password only produces a misleading login failure. The field is cleared
+ * and the reason recorded in `credentialError`, so one bad row does not take
+ * the other accounts down.
  */
 async function decryptAccountTokens(account: DbAccount): Promise<DbAccount> {
+  const errors: string[] = [];
   for (const [field, label] of ENCRYPTED_ACCOUNT_FIELDS) {
     const value = account[field];
     if (!value || !isEncrypted(value)) continue;
@@ -64,9 +69,17 @@ async function decryptAccountTokens(account: DbAccount): Promise<DbAccount> {
       account[field] = await decryptValue(value);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(`Could not decrypt the ${label} of ${account.email}: ${reason}`);
+      account[field] = null;
+      errors.push(`Could not decrypt the ${label} of ${account.email}: ${reason}`);
     }
   }
+  if (errors.length > 0) account.credentialError = errors.join("; ");
+  return account;
+}
+
+/** For callers that are about to use the credentials: fail loudly instead of with empty ones. */
+function requireCredentials(account: DbAccount): DbAccount {
+  if (account.credentialError) throw new Error(account.credentialError);
   return account;
 }
 
@@ -83,7 +96,7 @@ export async function getAccount(id: string): Promise<DbAccount | null> {
     "SELECT * FROM accounts WHERE id = $1",
     [id],
   );
-  return account ? decryptAccountTokens(account) : null;
+  return account ? requireCredentials(await decryptAccountTokens(account)) : null;
 }
 
 export async function getAccountByEmail(
@@ -93,7 +106,7 @@ export async function getAccountByEmail(
     "SELECT * FROM accounts WHERE email = $1",
     [email],
   );
-  return account ? decryptAccountTokens(account) : null;
+  return account ? requireCredentials(await decryptAccountTokens(account)) : null;
 }
 
 export async function insertAccount(account: {

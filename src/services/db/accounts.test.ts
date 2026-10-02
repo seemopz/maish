@@ -39,6 +39,15 @@ describe("accounts", () => {
   });
 
   describe("getAccount", () => {
+    it("throws instead of returning an account whose credential cannot be decrypted", async () => {
+      mockSelectFirstBy.mockResolvedValue(createMockImapAccount());
+      vi.mocked(decryptValue).mockRejectedValueOnce(new Error("key missing"));
+
+      await expect(getAccount("acc-imap")).rejects.toThrow(
+        /Could not decrypt the IMAP password of .*: key missing/,
+      );
+    });
+
     it("returns null for non-existent account", async () => {
       mockSelectFirstBy.mockResolvedValue(null);
 
@@ -135,13 +144,22 @@ describe("accounts", () => {
       expect(result[0]!.imap_password).toBe("secret-password");
     });
 
-    it("throws instead of passing ciphertext on when a credential cannot be decrypted", async () => {
-      mockSelect.mockResolvedValue([createMockImapAccount()]);
+    it("keeps the list readable and flags only the account whose credential cannot be decrypted", async () => {
+      const bad = createMockImapAccount({ id: "acc-bad", email: "bad@example.com" });
+      const good = createMockImapAccount({ id: "acc-good", email: "good@example.com" });
+      mockSelect.mockResolvedValue([bad, good]);
       vi.mocked(decryptValue).mockRejectedValueOnce(new Error("key missing"));
 
-      await expect(getAllAccounts()).rejects.toThrow(
-        /Could not decrypt the IMAP password of .*: key missing/,
+      const result = await getAllAccounts();
+
+      expect(result).toHaveLength(2);
+      expect(result[0]!.credentialError).toMatch(
+        /Could not decrypt the IMAP password of bad@example.com: key missing/,
       );
+      // The ciphertext must not be handed on as if it were the password.
+      expect(result[0]!.imap_password).toBeNull();
+      expect(result[1]!.credentialError).toBeUndefined();
+      expect(result[1]!.imap_password).toBe("secret-password");
     });
   });
 

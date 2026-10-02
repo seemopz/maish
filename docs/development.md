@@ -57,6 +57,17 @@ data directory. On the first start the app moves it into the keychain, decrypts
 a stored credential with it, and only then deletes the file; if that check
 fails the file stays and an error names the cause.
 
+When the key cannot be read — the keychain prompt was denied, or Linux has no
+Secret Service provider running (there is no file fallback) — the app shows the
+cause in a banner at the top, the affected accounts do not sync, and the other
+accounts and the update check keep working.
+
+macOS release builds are signed ad hoc (`signingIdentity: "-"`), and the login
+keychain ties access to an item to the code identity that created it. Untested
+on a real update: each new build may therefore be asked for the login password
+before it can read the key. Denying that prompt leads to the banner above;
+choosing *Always Allow* is only remembered for that one build.
+
 Copy the database with SQLite rather than `cp`, so the write-ahead log is
 included — the WAL routinely holds several megabytes that the `.db` file does
 not:

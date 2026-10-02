@@ -122,7 +122,12 @@ describe("imapMessageToParsedMessage", () => {
 
     it("is equal for folder copies of one message", () => {
       const inbox = createMockImapMessage({ uid: 1, folder: "INBOX", attachments: [attachment("a.pdf")] });
-      const sent = createMockImapMessage({ uid: 7, folder: "Sent", attachments: [attachment("a.pdf")] });
+      // A different MIME structure in the other folder gives the part another id
+      const sent = createMockImapMessage({
+        uid: 7,
+        folder: "Sent",
+        attachments: [{ ...attachment("a.pdf"), part_id: "1.2" }],
+      });
 
       expect(imapMessageToParsedMessage(inbox, "acc-1", "INBOX").threadable.contentKey).toBe(
         imapMessageToParsedMessage(sent, "acc-1", "SENT").threadable.contentKey,

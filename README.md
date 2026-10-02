@@ -74,13 +74,15 @@ Most email clients are slow, bloated, or send your data to someone else's server
 
 ### AI
 
-Three providers with selectable models -- choose one or mix and match:
+Five providers with selectable models -- choose one or mix and match:
 
 | Provider | Models |
 |----------|--------|
 | **Anthropic Claude** | Haiku 4.5, Sonnet 4, Opus 4 |
 | **OpenAI** | GPT-4o Mini, GPT-4o, GPT-4.1 Nano, GPT-4.1 Mini, GPT-4.1 |
 | **Google Gemini** | 2.5 Flash, 2.5 Pro |
+| **GitHub Copilot** (GitHub Models) | GPT-4o Mini, GPT-4o, GPT-4.1 Nano, GPT-4.1 Mini, GPT-4.1 |
+| **Ollama** (local) | Any model installed on your Ollama server |
 
 Thread summaries, smart reply suggestions, AI compose & reply, text transform (improve/shorten/formalize), Ask My Inbox (natural language search). Pick which model to use per provider in Settings. All results cached locally.
 
@@ -119,7 +121,7 @@ Google Calendar sync with month, week, and day views. Create events without leav
 
 Download the latest release for your platform:
 
-**[Download Maish](https://github.com/avihaymenahem/velo/releases/latest)** -- Windows `.msi` / `.exe` &nbsp;&bull;&nbsp; macOS `.dmg` &nbsp;&bull;&nbsp; Linux `.deb` / `.AppImage`
+**[Download Maish](https://github.com/seemopz/maish/releases/latest)** -- Windows `.msi` / `.exe` &nbsp;&bull;&nbsp; macOS `.dmg` &nbsp;&bull;&nbsp; Linux `.deb` / `.AppImage`
 
 No build tools or programming knowledge required -- just download, install, and run.
 
@@ -129,15 +131,15 @@ No build tools or programming knowledge required -- just download, install, and 
 
 **IMAP/SMTP:** Click "Add IMAP Account" in the account switcher. Enter your email and password -- Maish auto-discovers server settings for popular providers (Outlook, Yahoo, iCloud, Fastmail, etc.). For other providers, enter IMAP/SMTP server details manually. No Google Cloud project needed.
 
-**AI (optional):** Add an API key for [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [Google Gemini](https://aistudio.google.com/) in Settings. Then select which model to use for each provider.
+**AI (optional):** Add an API key for [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [Google Gemini](https://aistudio.google.com/), or a GitHub token for [GitHub Models](https://github.com/marketplace/models) (Copilot), in Settings -- or point Maish at a local [Ollama](https://ollama.com/) server. Then select which model to use for each provider.
 
 ### Building from source
 
 For developers who want to build Maish themselves or contribute:
 
 ```bash
-git clone https://github.com/avihaymenahem/velo.git
-cd velo
+git clone https://github.com/seemopz/maish.git
+cd maish
 npm install
 npm run tauri dev
 ```
@@ -154,11 +156,11 @@ See [Development Guide](docs/development.md) for all commands, testing, and buil
 |--|--|
 | **Framework** | Tauri v2 (Rust) + React 19 + TypeScript |
 | **Styling** | Tailwind CSS v4 |
-| **State** | Zustand 5 (8 stores) |
+| **State** | Zustand 5 (9 stores) |
 | **Editor** | TipTap v3 |
 | **Email** | Gmail API, IMAP/SMTP (via async-imap + lettre in Rust) |
-| **Database** | SQLite + FTS5 (33 tables) |
-| **AI** | Claude, GPT, Gemini |
+| **Database** | SQLite + FTS5 (37 tables) |
+| **AI** | Claude, GPT, Gemini, GitHub Copilot, Ollama |
 | **Testing** | Vitest + Testing Library |
 
 See [Architecture](docs/architecture.md) for detailed design, data flow, and project structure.
@@ -183,5 +185,5 @@ npm run tauri build
 
 <p align="center">
   Built with Rust and React.<br />
-  Made by <a href="https://github.com/avihaymenahem">Avihay</a>.
+  Made by <a href="https://github.com/seemopz">Seemops1337</a>.
 </p>

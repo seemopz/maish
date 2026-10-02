@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import DOMPurify from "dompurify";
 import { escapeHtml, sanitizeHtml } from "./sanitize";
 
 describe("escapeHtml", () => {
@@ -104,5 +105,25 @@ describe("sanitizeHtml", () => {
 
   it("handles empty string", () => {
     expect(sanitizeHtml("")).toBe("");
+  });
+
+  it("strips javascript: URIs from links", () => {
+    const html = '<a href="javascript:alert(1)">Click</a>';
+    const result = sanitizeHtml(html);
+    expect(result).not.toContain("javascript:");
+    expect(result).toContain("Click");
+  });
+
+  it("neutralizes mXSS via namespace confusion", () => {
+    const html =
+      '<svg></p><style><a id="</style><img src=1 onerror=alert(1)>">';
+    const result = sanitizeHtml(html);
+    expect(result).not.toContain("onerror");
+  });
+
+  it("uses a DOMPurify release without the known advisories (> 3.4.12)", () => {
+    const [major, minor, patch] = DOMPurify.version.split(".").map(Number);
+    const atLeast = major > 3 || (major === 3 && (minor > 4 || (minor === 4 && patch > 12)));
+    expect(atLeast).toBe(true);
   });
 });

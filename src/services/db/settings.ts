@@ -18,14 +18,6 @@ export async function setSetting(key: string, value: string): Promise<void> {
   );
 }
 
-export async function getAllSettings(): Promise<Record<string, string>> {
-  const db = await getDb();
-  const rows = await db.select<{ key: string; value: string }[]>(
-    "SELECT key, value FROM settings",
-  );
-  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
-}
-
 /**
  * Get a setting that is stored encrypted. Transparently decrypts the value.
  * Falls back to returning the raw value if decryption fails (e.g. not yet encrypted).

@@ -395,8 +395,50 @@ mod tls_tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::TcpListener;
 
-    /// Self-signed certificate for `localhost` (test fixture, password `test`).
-    const SELF_SIGNED_P12: &[u8] = include_bytes!("testdata/self_signed.p12");
+    /// Create a throwaway self-signed certificate for `localhost` with the
+    /// `openssl` command line tool and return it as a PKCS#12 bundle (password
+    /// `test`). Generated per run so no key material lives in the repository.
+    #[rustfmt::skip]
+    fn self_signed_p12() -> Vec<u8> {
+        let dir = std::env::temp_dir().join(format!("maish-smtp-tls-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (key, cert, p12) = (dir.join("k.pem"), dir.join("c.pem"), dir.join("b.p12"));
+
+        let run = |args: &[&str]| {
+            let out = std::process::Command::new("openssl")
+                .args(args)
+                .output()
+                .expect("the openssl command line tool is required for this test");
+            assert!(
+                out.status.success(),
+                "openssl {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let path = |p: &std::path::Path| p.to_str().unwrap().to_string();
+
+        // Explicit config: LibreSSL (macOS /usr/bin/openssl) ships none.
+        let conf = dir.join("req.cnf");
+        std::fs::write(
+            &conf,
+            "[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n\
+             [dn]\nCN=localhost\n[ext]\nsubjectAltName=DNS:localhost\n",
+        )
+        .unwrap();
+        run(&[
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2",
+            "-config", &path(&conf), "-keyout", &path(&key), "-out", &path(&cert),
+        ]);
+        run(&[
+            "pkcs12", "-export", "-inkey", &path(&key), "-in", &path(&cert),
+            "-passout", "pass:test", "-out", &path(&p12),
+        ]);
+
+        let bytes = std::fs::read(&p12).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        bytes
+    }
 
     fn config(port: u16, security: &str, accept_invalid_certs: bool) -> SmtpConfig {
         SmtpConfig {
@@ -414,7 +456,7 @@ mod tls_tests {
     /// TLS, as on port 465) and then speaks just enough SMTP for
     /// `test_connection`. Returns whether the handshake succeeded.
     async fn serve_implicit_tls_once(listener: TcpListener) -> bool {
-        let identity = native_tls::Identity::from_pkcs12(SELF_SIGNED_P12, "test").unwrap();
+        let identity = native_tls::Identity::from_pkcs12(&self_signed_p12(), "test").unwrap();
         let acceptor =
             tokio_native_tls::TlsAcceptor::from(native_tls::TlsAcceptor::new(identity).unwrap());
 

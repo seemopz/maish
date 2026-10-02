@@ -35,7 +35,9 @@ fn read_key() -> Result<Option<String>, String> {
     match entry()?.get_password() {
         Ok(key) => Ok(Some(key)),
         Err(Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("could not read the credential key from the OS keychain: {e}")),
+        Err(e) => Err(format!(
+            "could not read the credential key from the OS keychain: {e}"
+        )),
     }
 }
 

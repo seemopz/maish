@@ -45,27 +45,18 @@ You just implemented or modified a feature. Now add or update its documentation 
 
 4. **Valid `relatedSettingsTab` values:** `general`, `composing`, `labels`, `filters`, `smart-folders`, `quickSteps`, `contacts`, `accounts`, `sync`, `shortcuts`, `ai`, `subscriptions`, `developer`
 
-5. **If adding a contextual tip** (for `?` tooltips in the UI), add an entry to the `CONTEXTUAL_TIPS` record:
-   ```ts
-   "tip-id": {
-     title: "Short title",
-     body: "One sentence explaining the setting or feature.",
-     helpTopic: "category-id",  // must match a category ID
-   }
-   ```
-
-6. **Run the help content tests** to validate your additions:
+5. **Run the help content tests** to validate your additions:
    ```bash
    npx vitest run src/constants/helpContent.test.ts
    ```
-   The tests check: unique IDs, non-empty titles/descriptions, valid settings tab references, valid contextual tip topic references.
+   The tests check: unique IDs, non-empty titles/descriptions, valid settings tab references.
 
-7. **Run type-check** to make sure icon imports are correct:
+6. **Run type-check** to make sure icon imports are correct:
    ```bash
    npx tsc --noEmit
    ```
 
-8. **Update project docs** if the feature affects them. Check each file and update as needed:
+7. **Update project docs** if the feature affects them. Check each file and update as needed:
    - `docs/architecture.md` — Update if the feature adds new component groups, services, stores, database tables, or changes the project structure tree. Keep counts accurate (component groups, file counts, table counts).
    - `docs/development.md` — Update if test counts change or new development workflows are introduced.
    - `docs/keyboard-shortcuts.md` — Update if the feature adds or changes keyboard shortcuts.

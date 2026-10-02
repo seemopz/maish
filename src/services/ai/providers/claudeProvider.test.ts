@@ -52,6 +52,12 @@ describe("claudeProvider", () => {
     expect(await createClaudeProvider("k", "m").complete({ systemPrompt: "s", userContent: "u" })).toBe("");
   });
 
+  it("aborts a request after a timeout", async () => {
+    mockFetch.mockResolvedValue(ok({ content: [{ type: "text", text: "x" }] }));
+    await createClaudeProvider("k", "m").complete({ systemPrompt: "s", userContent: "u" });
+    expect(mockFetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+  });
+
   it("throws with the status when the API answers with an error", async () => {
     mockFetch.mockResolvedValue(new Response("invalid x-api-key", { status: 401 }));
     await expect(

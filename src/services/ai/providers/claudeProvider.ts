@@ -1,6 +1,7 @@
 import type { AiProviderClient, AiCompletionRequest } from "../types";
 
 const MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+const TIMEOUT_MS = 60_000;
 
 async function createMessage(apiKey: string, body: object): Promise<string> {
   const response = await fetch(MESSAGES_URL, {
@@ -13,6 +14,7 @@ async function createMessage(apiKey: string, body: object): Promise<string> {
       "anthropic-dangerous-direct-browser-access": "true",
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`Claude API error ${response.status}: ${(await response.text()).slice(0, 200)}`);

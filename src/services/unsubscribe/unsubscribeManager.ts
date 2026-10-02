@@ -182,18 +182,3 @@ export async function getSubscriptions(accountId: string): Promise<SubscriptionE
     [accountId],
   );
 }
-
-/**
- * Get unsubscribe status for a specific sender.
- */
-export async function getUnsubscribeStatus(
-  accountId: string,
-  fromAddress: string,
-): Promise<string | null> {
-  const db = await getDb();
-  const rows = await db.select<{ status: string }[]>(
-    "SELECT status FROM unsubscribe_actions WHERE account_id = $1 AND from_address = $2",
-    [accountId, normalizeEmail(fromAddress)],
-  );
-  return rows[0]?.status ?? null;
-}

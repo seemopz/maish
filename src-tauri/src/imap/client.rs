@@ -1335,79 +1335,26 @@ fn extract_internal_date(line: &str) -> Option<i64> {
 
 /// Parse IMAP date format "16-Feb-2026 12:00:00 +0000" to Unix timestamp.
 fn parse_imap_date(s: &str) -> Option<i64> {
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    if parts.len() < 2 {
+    // INTERNALDATE is an RFC 5322 date with "-" between day, month and year.
+    // mail-parser is lenient (any three letters pass as a month, any text as a
+    // number), so check the three date fields here and join them with spaces.
+    // Only the date part is split, the zone keeps its sign.
+    const MONTHS: [&str; 12] = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    let (date, rest) = s.trim().split_once(' ')?;
+    let mut fields = date.split('-');
+    let (day, month, year) = (fields.next()?, fields.next()?, fields.next()?);
+    let digits = |f: &str| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit());
+    if fields.next().is_some()
+        || !digits(day)
+        || !digits(year)
+        || !MONTHS.iter().any(|m| m.eq_ignore_ascii_case(month))
+    {
         return None;
     }
-
-    // "16-Feb-2026"
-    let date_parts: Vec<&str> = parts[0].split('-').collect();
-    if date_parts.len() != 3 {
-        return None;
-    }
-
-    let day: u32 = date_parts[0].parse().ok()?;
-    let month = match date_parts[1].to_lowercase().as_str() {
-        "jan" => 1u32,
-        "feb" => 2,
-        "mar" => 3,
-        "apr" => 4,
-        "may" => 5,
-        "jun" => 6,
-        "jul" => 7,
-        "aug" => 8,
-        "sep" => 9,
-        "oct" => 10,
-        "nov" => 11,
-        "dec" => 12,
-        _ => return None,
-    };
-    let year: i64 = date_parts[2].parse().ok()?;
-
-    // "12:00:00"
-    let time_parts: Vec<&str> = parts.get(1)?.split(':').collect();
-    if time_parts.len() != 3 {
-        return None;
-    }
-    let hour: i64 = time_parts[0].parse().ok()?;
-    let minute: i64 = time_parts[1].parse().ok()?;
-    let second: i64 = time_parts[2].parse().ok()?;
-
-    // Timezone offset "+0000" (optional)
-    let tz_offset_secs: i64 = if let Some(tz) = parts.get(2) {
-        let sign = if tz.starts_with('-') { -1i64 } else { 1i64 };
-        let tz_num = tz.trim_start_matches(['+', '-']);
-        if tz_num.len() == 4 {
-            let tz_h: i64 = tz_num[..2].parse().unwrap_or(0);
-            let tz_m: i64 = tz_num[2..].parse().unwrap_or(0);
-            sign * (tz_h * 3600 + tz_m * 60)
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-
-    // Convert to Unix timestamp (days since epoch)
-    // Simplified: use a basic calendar calculation
-    let mut days: i64 = 0;
-    for y in 1970..year {
-        days += if is_leap_year(y) { 366 } else { 365 };
-    }
-    let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    for m in 1..month {
-        days += month_days[m as usize] as i64;
-        if m == 2 && is_leap_year(year) {
-            days += 1;
-        }
-    }
-    days += day as i64 - 1;
-
-    Some(days * 86400 + hour * 3600 + minute * 60 + second - tz_offset_secs)
-}
-
-fn is_leap_year(y: i64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+    let dt = mail_parser::DateTime::parse_rfc822(&format!("{day} {month} {year} {rest}"))?;
+    dt.is_valid().then(|| dt.to_timestamp())
 }
 
 /// Extract literal size from a line ending with {1234}\r\n
@@ -2133,5 +2080,69 @@ mod tests {
             Content-Disposition: attachment; filename=\"a.pdf\"\r\n\
             Content-Transfer-Encoding: base64\r\n\r\nAAAA\r\n--outer--\r\n--top--\r\n";
         assert_eq!(hash_of(&flat), hash_of(wrapped));
+    }
+
+    // INTERNALDATE as the raw fetch path reads it (RFC 3501 §2.3.3,
+    // date-time = date-day-fixed "-" date-month "-" date-year SP time SP zone).
+    #[test]
+    fn imap_date_converts_to_unix_time() {
+        assert_eq!(
+            parse_imap_date("16-Feb-2026 12:00:00 +0000"),
+            Some(1771243200)
+        );
+        assert_eq!(parse_imap_date("01-Jan-1970 00:00:00 +0000"), Some(0));
+        // leap day and a century leap year
+        assert_eq!(
+            parse_imap_date("29-Feb-2024 23:59:59 +0000"),
+            Some(1709251199)
+        );
+        assert_eq!(
+            parse_imap_date("01-Mar-2000 00:00:00 +0000"),
+            Some(951868800)
+        );
+    }
+
+    #[test]
+    fn imap_date_applies_the_zone_offset() {
+        assert_eq!(
+            parse_imap_date("16-Feb-2026 12:00:00 +0100"),
+            Some(1771239600)
+        );
+        assert_eq!(
+            parse_imap_date("16-Feb-2026 12:00:00 -0500"),
+            Some(1771261200)
+        );
+        assert_eq!(
+            parse_imap_date("31-Dec-2025 23:59:59 +0530"),
+            Some(1767205799)
+        );
+    }
+
+    #[test]
+    fn imap_date_accepts_a_space_padded_day() {
+        // date-day-fixed pads a single digit day with a space
+        assert_eq!(
+            parse_imap_date(" 1-Feb-2026 00:00:00 +0000"),
+            Some(1769904000)
+        );
+    }
+
+    #[test]
+    fn imap_date_rejects_garbage() {
+        assert_eq!(parse_imap_date(""), None);
+        assert_eq!(parse_imap_date("not a date"), None);
+        assert_eq!(parse_imap_date("16-Foo-2026 12:00:00 +0000"), None);
+        // day or year that is not a number, and a date with too many or too few fields
+        assert_eq!(parse_imap_date("x-Feb-2026 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb-yyyy 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb-2026-01 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb 12:00:00 +0000"), None);
+    }
+
+    #[test]
+    fn internal_date_is_read_from_a_fetch_line() {
+        let line = "* 1 FETCH (UID 7 INTERNALDATE \"16-Feb-2026 12:00:00 +0000\" FLAGS (\\Seen))";
+        assert_eq!(extract_internal_date(line), Some(1771243200));
+        assert_eq!(extract_internal_date("* 1 FETCH (UID 7)"), None);
     }
 }

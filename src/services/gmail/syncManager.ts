@@ -52,6 +52,13 @@ const syncOutcomes = new Map<string, string | null>();
  * after the wipe, and the resync would degrade to a plain delta sync.
  */
 const prepareHooks = new Map<string, () => Promise<void>>();
+/**
+ * How the sync that ran an account's prepare hook ended (`null` for success).
+ * A resync reads its verdict from here, not from `syncOutcomes`: another run may
+ * pick up the hook, and a later plain sync of the same account would overwrite
+ * a failed wipe with its own success.
+ */
+const prepareOutcomes = new Map<string, string | null>();
 
 /** Accounts deleted this session. Account ids are random UUIDs, so they are never reused. */
 const removedAccountIds = new Set<string>();
@@ -242,9 +249,14 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
  * Routes to Gmail or IMAP sync based on account provider.
  */
 async function syncAccountInternal(accountId: string): Promise<void> {
+  const prepare = prepareHooks.get(accountId);
+  prepareHooks.delete(accountId);
+  await syncAccountRun(accountId, prepare);
+  if (prepare) prepareOutcomes.set(accountId, syncOutcomes.get(accountId) ?? null);
+}
+
+async function syncAccountRun(accountId: string, prepare?: () => Promise<void>): Promise<void> {
   try {
-    const prepare = prepareHooks.get(accountId);
-    prepareHooks.delete(accountId);
     await prepare?.();
 
     const account = await getAccount(accountId);
@@ -415,12 +427,10 @@ async function runSyncOrThrow(
       await prepare(id);
     });
   }
-  // A background run that is still in flight may write its own outcome first;
-  // the run queued below finishes later and overwrites it.
-  for (const id of accountIds) syncOutcomes.delete(id);
+  for (const id of accountIds) prepareOutcomes.delete(id);
   await runSync(accountIds, options.onQueued);
   const failures = accountIds.flatMap((id) => {
-    const error = syncOutcomes.get(id);
+    const error = prepareOutcomes.get(id);
     return error ? [error] : [];
   });
   if (failures.length > 0) throw new Error(failures.join("; "));
@@ -443,9 +453,11 @@ export async function forceFullSync(accountIds: string[], options: ResyncOptions
 export async function resyncAccount(accountId: string, options: ResyncOptions = {}): Promise<void> {
   logToFile("info", `[syncManager] Resync of account ${accountId}`);
   await runSyncOrThrow([accountId], options, async (id) => {
-    await deleteAllThreadsForAccount(id);
-    await deleteAllMessagesForAccount(id);
+    // Sync state first: if a later step fails, the next run starts from scratch
+    // instead of a delta sync over mail that is already gone.
     await clearAccountHistoryId(id);
     await clearAllFolderSyncStates(id);
+    await deleteAllThreadsForAccount(id);
+    await deleteAllMessagesForAccount(id);
   });
 }

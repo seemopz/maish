@@ -54,13 +54,24 @@ const LOG_FRONTEND_MAX_BYTES: usize = 4096;
 
 /// Keep a webview message to one bounded log line: cut it at
 /// `LOG_FRONTEND_MAX_BYTES` (on a char boundary) and escape CR and LF, so a
-/// multi-line server response cannot forge extra log entries.
+/// multi-line server response cannot forge extra log entries. Other control
+/// characters (ESC and the like) are escaped too, so `tail` on the log cannot
+/// run terminal sequences from a server.
 fn sanitize_log_message(message: &str) -> String {
     let mut end = message.len().min(LOG_FRONTEND_MAX_BYTES);
     while !message.is_char_boundary(end) {
         end -= 1;
     }
-    let mut out = message[..end].replace('\r', "\\r").replace('\n', "\\n");
+    let mut out = String::with_capacity(end);
+    for c in message[..end].chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push(c),
+            c if c.is_control() => out.extend(c.escape_unicode()),
+            c => out.push(c),
+        }
+    }
     if end < message.len() {
         out.push_str(" [truncated]");
     }
@@ -320,6 +331,14 @@ mod tests {
     #[test]
     fn log_message_escapes_line_breaks() {
         assert_eq!(sanitize_log_message("a\r\nb\nc"), "a\\r\\nb\\nc");
+    }
+
+    #[test]
+    fn log_message_escapes_terminal_sequences() {
+        assert_eq!(
+            sanitize_log_message("a\x1b[2Kb\u{85}"),
+            "a\\u{1b}[2Kb\\u{85}"
+        );
     }
 
     #[test]

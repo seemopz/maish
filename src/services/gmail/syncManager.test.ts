@@ -519,6 +519,39 @@ describe("syncManager", () => {
       expect(mockInitialSync).not.toHaveBeenCalled();
     });
 
+    it("a failing wipe consumed by the in-flight run is not masked by the queued rerun", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id, "100"));
+      let release: () => void = () => {};
+      mockDeltaSync.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+      vi.mocked(deleteAllThreadsForAccount).mockRejectedValueOnce(new Error("disk full"));
+      vi.mocked(clearAccountHistoryId).mockResolvedValue(undefined);
+
+      const background = triggerSync(["x1", "x2"]);
+      await wait(10);
+      const resync = resyncAccount("x2");
+      const settled = vi.fn();
+      resync.then(() => settled("resolved"), (e: Error) => settled(`rejected: ${e.message}`));
+      await wait(10);
+      release();
+      await background;
+      await wait(10);
+
+      expect(settled).toHaveBeenCalledWith("rejected: disk full");
+    });
+
+    it("resyncAccount clears the sync state before deleting mail", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id));
+      const order: string[] = [];
+      vi.mocked(clearAccountHistoryId).mockImplementationOnce(async () => { order.push("history"); });
+      vi.mocked(clearAllFolderSyncStates).mockImplementationOnce(async () => { order.push("folders"); });
+      vi.mocked(deleteAllThreadsForAccount).mockImplementationOnce(async () => { order.push("threads"); });
+      vi.mocked(deleteAllMessagesForAccount).mockImplementationOnce(async () => { order.push("messages"); });
+
+      await resyncAccount("o1");
+
+      expect(order).toEqual(["history", "folders", "threads", "messages"]);
+    });
+
     it("does not call onQueued when nothing else runs", async () => {
       mockGetAccount.mockResolvedValue(makeGmailAccount("nq"));
       const onQueued = vi.fn();

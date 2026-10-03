@@ -428,24 +428,6 @@ pub async fn fetch_new_uids(
     Ok(result)
 }
 
-/// Search for all UIDs in a folder using `UID SEARCH ALL`.
-/// Returns real UIDs sorted ascending — avoids the sparse UID gap problem.
-pub async fn search_all_uids(session: &mut ImapSession, folder: &str) -> Result<Vec<u32>, String> {
-    tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
-        .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
-
-    let uids = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search("ALL"))
-        .await
-        .map_err(|_| format!("UID SEARCH ALL timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("UID SEARCH ALL failed: {e}"))?;
-
-    let mut result: Vec<u32> = uids.into_iter().collect();
-    result.sort();
-    Ok(result)
-}
-
 /// Set or remove flags on messages.
 ///
 /// `flag_op`: "+FLAGS" to add, "-FLAGS" to remove
@@ -898,8 +880,7 @@ pub async fn delta_check_folders(
 
 /// Search a folder: SELECT → UID SEARCH, returning UIDs and folder status without fetching bodies.
 ///
-/// This is a lightweight alternative to `sync_folder` for callers that want to
-/// fetch messages in smaller IPC-friendly chunks on the TypeScript side.
+/// Callers fetch the messages in smaller IPC-friendly chunks on the TypeScript side.
 pub async fn search_folder(
     session: &mut ImapSession,
     folder: &str,
@@ -940,141 +921,6 @@ pub async fn search_folder(
 
     Ok(ImapFolderSearchResult {
         uids,
-        folder_status,
-    })
-}
-
-/// Sync a folder in a single IMAP session: SELECT → UID SEARCH → batched UID FETCH.
-///
-/// When `since_date` is provided (format `DD-Mon-YYYY`), uses `UID SEARCH SINCE <date>`
-/// to only fetch messages from that date onward, avoiding timeouts on large folders.
-///
-/// This avoids creating multiple TCP connections per folder (one for search,
-/// one per batch for fetch) which causes connection storms on servers with
-/// many folders.
-pub async fn sync_folder(
-    session: &mut ImapSession,
-    folder: &str,
-    batch_size: u32,
-    since_date: Option<String>,
-) -> Result<ImapFolderSyncResult, String> {
-    // SELECT the folder
-    let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
-        .await
-        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
-
-    let folder_status = ImapFolderStatus {
-        uidvalidity: mailbox.uid_validity.unwrap_or(0),
-        uidnext: mailbox.uid_next.unwrap_or(0),
-        exists: mailbox.exists,
-        unseen: mailbox.unseen.unwrap_or(0),
-        highest_modseq: mailbox.highest_modseq,
-    };
-
-    // UID SEARCH with optional SINCE date filter (RFC 3501 §6.4.4)
-    let search_query = match &since_date {
-        Some(date) => format!("SINCE {date}"),
-        None => "ALL".to_string(),
-    };
-    let uids_raw = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&search_query))
-        .await
-        .map_err(|_| format!("UID SEARCH {search_query} {folder} timed out after {}s — check your server settings or network connection", IMAP_SEARCH_TIMEOUT.as_secs()))?
-        .map_err(|e| format!("UID SEARCH {search_query} {folder} failed: {e}"))?;
-
-    let mut uids: Vec<u32> = uids_raw.into_iter().collect();
-    uids.sort();
-
-    log::info!(
-        "IMAP sync_folder {folder}: {} UIDs found (search={search_query}), uidvalidity={}, batch_size={}",
-        uids.len(),
-        folder_status.uidvalidity,
-        batch_size,
-    );
-
-    if uids.is_empty() {
-        return Ok(ImapFolderSyncResult {
-            uids,
-            messages: vec![],
-            folder_status,
-        });
-    }
-
-    // Fetch in batches on the SAME session
-    let parser = MessageParser::default();
-    let mut all_messages = Vec::new();
-    let bs = batch_size as usize;
-
-    for chunk in uids.chunks(bs) {
-        let uid_set: String = chunk
-            .iter()
-            .map(|u| u.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let fetches = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
-            let stream = session
-                .uid_fetch(&uid_set, "(UID FLAGS INTERNALDATE BODY.PEEK[])")
-                .await
-                .map_err(|e| format!("UID FETCH {folder} uids={uid_set} failed: {e}"))?;
-            Ok::<_, String>(stream.collect::<Vec<_>>().await)
-        })
-        .await
-        .map_err(|_| format!("UID FETCH {folder} timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?;
-
-        let raw_fetches: Vec<_> = fetches?;
-        for r in raw_fetches {
-            match r {
-                Ok(f) => {
-                    let uid = match f.uid {
-                        Some(u) => u,
-                        None => {
-                            log::warn!("IMAP sync_folder {folder}: response missing UID");
-                            continue;
-                        }
-                    };
-                    let raw = match f.body() {
-                        Some(b) => b,
-                        None => {
-                            log::warn!("IMAP sync_folder {folder}: UID {uid} has no body");
-                            continue;
-                        }
-                    };
-                    let raw_size = raw.len() as u32;
-                    let flags: Vec<_> = f.flags().collect();
-                    let is_read = flags.iter().any(|fl| matches!(fl, Flag::Seen));
-                    let is_starred = flags.iter().any(|fl| matches!(fl, Flag::Flagged));
-                    let is_draft = flags.iter().any(|fl| matches!(fl, Flag::Draft));
-                    let internal_date = f.internal_date().map(|dt| dt.timestamp());
-
-                    match parse_message(
-                        &parser,
-                        raw,
-                        uid,
-                        folder,
-                        raw_size,
-                        is_read,
-                        is_starred,
-                        is_draft,
-                        internal_date,
-                    ) {
-                        Ok(msg) => all_messages.push(msg),
-                        Err(e) => log::warn!("sync_folder: failed to parse UID {uid}: {e}"),
-                    }
-                }
-                Err(e) => log::warn!("IMAP sync_folder fetch stream error in {folder}: {e}"),
-            }
-        }
-    }
-
-    log::info!(
-        "IMAP sync_folder {folder}: fetched {} messages",
-        all_messages.len()
-    );
-
-    Ok(ImapFolderSyncResult {
-        uids,
-        messages: all_messages,
         folder_status,
     })
 }
@@ -1238,102 +1084,6 @@ pub async fn raw_fetch_messages(
         messages,
         folder_status,
     })
-}
-
-/// Raw IMAP diagnostic: connect via raw TCP/TLS (bypassing async-imap),
-/// authenticate, SELECT folder, FETCH, and return raw server response.
-/// This helps diagnose servers that async-imap can't parse.
-pub async fn raw_fetch_diagnostic(
-    config: &ImapConfig,
-    folder: &str,
-    uid_range: &str,
-) -> Result<String, String> {
-    // Connect and wrap in our ImapStream
-    let mut stream = if config.security == "starttls" {
-        raw_connect_starttls(config).await?
-    } else {
-        connect_stream(config).await?
-    };
-
-    let mut buf = vec![0u8; 16384];
-    let mut output = String::new();
-
-    // Read greeting (for non-STARTTLS)
-    if config.security != "starttls" {
-        let n = stream
-            .read(&mut buf)
-            .await
-            .map_err(|e| format!("greeting: {e}"))?;
-        output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
-    }
-
-    // LOGIN
-    let login_cmd = format!(
-        "a1 LOGIN {} {}\r\n",
-        imap_quote(&config.username)?,
-        imap_quote(&config.password)?
-    );
-    stream
-        .write_all(login_cmd.as_bytes())
-        .await
-        .map_err(|e| format!("LOGIN: {e}"))?;
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|e| format!("LOGIN read: {e}"))?;
-    output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
-
-    // SELECT
-    let select_cmd = format!("a2 SELECT {}\r\n", imap_quote(folder)?);
-    stream
-        .write_all(select_cmd.as_bytes())
-        .await
-        .map_err(|e| format!("SELECT: {e}"))?;
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|e| format!("SELECT read: {e}"))?;
-    output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
-
-    // UID FETCH — just get UID and FLAGS first (small response)
-    let fetch_cmd = format!("a3 UID FETCH {uid_range} (UID FLAGS)\r\n");
-    stream
-        .write_all(fetch_cmd.as_bytes())
-        .await
-        .map_err(|e| format!("FETCH: {e}"))?;
-
-    let mut fetch_response = String::new();
-    loop {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        match tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut buf)).await {
-            Ok(Ok(0)) => break,
-            Ok(Ok(n)) => {
-                fetch_response.push_str(&String::from_utf8_lossy(&buf[..n]));
-                if fetch_response.contains("a3 OK")
-                    || fetch_response.contains("a3 NO")
-                    || fetch_response.contains("a3 BAD")
-                {
-                    break;
-                }
-            }
-            Ok(Err(e)) => {
-                fetch_response.push_str(&format!("[read error: {e}]"));
-                break;
-            }
-            Err(_) => {
-                fetch_response.push_str("[timeout]");
-                break;
-            }
-        }
-    }
-    output.push_str(&format!("FETCH response:\n{fetch_response}"));
-
-    let _ = stream.write_all(b"a4 LOGOUT\r\n").await;
-
-    log::info!("RAW IMAP DIAGNOSTIC for {folder}:\n{output}");
-
-    Ok(output)
 }
 
 // ---------- Raw TCP helpers ----------
@@ -1585,79 +1335,26 @@ fn extract_internal_date(line: &str) -> Option<i64> {
 
 /// Parse IMAP date format "16-Feb-2026 12:00:00 +0000" to Unix timestamp.
 fn parse_imap_date(s: &str) -> Option<i64> {
-    let parts: Vec<&str> = s.split_whitespace().collect();
-    if parts.len() < 2 {
+    // INTERNALDATE is an RFC 5322 date with "-" between day, month and year.
+    // mail-parser is lenient (any three letters pass as a month, any text as a
+    // number), so check the three date fields here and join them with spaces.
+    // Only the date part is split, the zone keeps its sign.
+    const MONTHS: [&str; 12] = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    let (date, rest) = s.trim().split_once(' ')?;
+    let mut fields = date.split('-');
+    let (day, month, year) = (fields.next()?, fields.next()?, fields.next()?);
+    let digits = |f: &str| !f.is_empty() && f.bytes().all(|b| b.is_ascii_digit());
+    if fields.next().is_some()
+        || !digits(day)
+        || !digits(year)
+        || !MONTHS.iter().any(|m| m.eq_ignore_ascii_case(month))
+    {
         return None;
     }
-
-    // "16-Feb-2026"
-    let date_parts: Vec<&str> = parts[0].split('-').collect();
-    if date_parts.len() != 3 {
-        return None;
-    }
-
-    let day: u32 = date_parts[0].parse().ok()?;
-    let month = match date_parts[1].to_lowercase().as_str() {
-        "jan" => 1u32,
-        "feb" => 2,
-        "mar" => 3,
-        "apr" => 4,
-        "may" => 5,
-        "jun" => 6,
-        "jul" => 7,
-        "aug" => 8,
-        "sep" => 9,
-        "oct" => 10,
-        "nov" => 11,
-        "dec" => 12,
-        _ => return None,
-    };
-    let year: i64 = date_parts[2].parse().ok()?;
-
-    // "12:00:00"
-    let time_parts: Vec<&str> = parts.get(1)?.split(':').collect();
-    if time_parts.len() != 3 {
-        return None;
-    }
-    let hour: i64 = time_parts[0].parse().ok()?;
-    let minute: i64 = time_parts[1].parse().ok()?;
-    let second: i64 = time_parts[2].parse().ok()?;
-
-    // Timezone offset "+0000" (optional)
-    let tz_offset_secs: i64 = if let Some(tz) = parts.get(2) {
-        let sign = if tz.starts_with('-') { -1i64 } else { 1i64 };
-        let tz_num = tz.trim_start_matches(['+', '-']);
-        if tz_num.len() == 4 {
-            let tz_h: i64 = tz_num[..2].parse().unwrap_or(0);
-            let tz_m: i64 = tz_num[2..].parse().unwrap_or(0);
-            sign * (tz_h * 3600 + tz_m * 60)
-        } else {
-            0
-        }
-    } else {
-        0
-    };
-
-    // Convert to Unix timestamp (days since epoch)
-    // Simplified: use a basic calendar calculation
-    let mut days: i64 = 0;
-    for y in 1970..year {
-        days += if is_leap_year(y) { 366 } else { 365 };
-    }
-    let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    for m in 1..month {
-        days += month_days[m as usize] as i64;
-        if m == 2 && is_leap_year(year) {
-            days += 1;
-        }
-    }
-    days += day as i64 - 1;
-
-    Some(days * 86400 + hour * 3600 + minute * 60 + second - tz_offset_secs)
-}
-
-fn is_leap_year(y: i64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+    let dt = mail_parser::DateTime::parse_rfc822(&format!("{day} {month} {year} {rest}"))?;
+    dt.is_valid().then(|| dt.to_timestamp())
 }
 
 /// Extract literal size from a line ending with {1234}\r\n
@@ -2383,5 +2080,69 @@ mod tests {
             Content-Disposition: attachment; filename=\"a.pdf\"\r\n\
             Content-Transfer-Encoding: base64\r\n\r\nAAAA\r\n--outer--\r\n--top--\r\n";
         assert_eq!(hash_of(&flat), hash_of(wrapped));
+    }
+
+    // INTERNALDATE as the raw fetch path reads it (RFC 3501 §2.3.3,
+    // date-time = date-day-fixed "-" date-month "-" date-year SP time SP zone).
+    #[test]
+    fn imap_date_converts_to_unix_time() {
+        assert_eq!(
+            parse_imap_date("16-Feb-2026 12:00:00 +0000"),
+            Some(1771243200)
+        );
+        assert_eq!(parse_imap_date("01-Jan-1970 00:00:00 +0000"), Some(0));
+        // leap day and a century leap year
+        assert_eq!(
+            parse_imap_date("29-Feb-2024 23:59:59 +0000"),
+            Some(1709251199)
+        );
+        assert_eq!(
+            parse_imap_date("01-Mar-2000 00:00:00 +0000"),
+            Some(951868800)
+        );
+    }
+
+    #[test]
+    fn imap_date_applies_the_zone_offset() {
+        assert_eq!(
+            parse_imap_date("16-Feb-2026 12:00:00 +0100"),
+            Some(1771239600)
+        );
+        assert_eq!(
+            parse_imap_date("16-Feb-2026 12:00:00 -0500"),
+            Some(1771261200)
+        );
+        assert_eq!(
+            parse_imap_date("31-Dec-2025 23:59:59 +0530"),
+            Some(1767205799)
+        );
+    }
+
+    #[test]
+    fn imap_date_accepts_a_space_padded_day() {
+        // date-day-fixed pads a single digit day with a space
+        assert_eq!(
+            parse_imap_date(" 1-Feb-2026 00:00:00 +0000"),
+            Some(1769904000)
+        );
+    }
+
+    #[test]
+    fn imap_date_rejects_garbage() {
+        assert_eq!(parse_imap_date(""), None);
+        assert_eq!(parse_imap_date("not a date"), None);
+        assert_eq!(parse_imap_date("16-Foo-2026 12:00:00 +0000"), None);
+        // day or year that is not a number, and a date with too many or too few fields
+        assert_eq!(parse_imap_date("x-Feb-2026 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb-yyyy 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb-2026-01 12:00:00 +0000"), None);
+        assert_eq!(parse_imap_date("16-Feb 12:00:00 +0000"), None);
+    }
+
+    #[test]
+    fn internal_date_is_read_from_a_fetch_line() {
+        let line = "* 1 FETCH (UID 7 INTERNALDATE \"16-Feb-2026 12:00:00 +0000\" FLAGS (\\Seen))";
+        assert_eq!(extract_internal_date(line), Some(1771243200));
+        assert_eq!(extract_internal_date("* 1 FETCH (UID 7)"), None);
     }
 }

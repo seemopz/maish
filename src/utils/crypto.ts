@@ -1,18 +1,24 @@
 /**
- * Application-level AES-GCM encryption using a device-derived key.
- * Key is randomly generated on first launch and stored in a separate file
- * via Tauri's filesystem in the app data directory.
+ * Application-level AES-GCM encryption using a device-bound key.
+ * The key is a random AES-256 key held in the OS keychain (macOS Keychain,
+ * Windows Credential Manager, Secret Service on Linux) through the
+ * `credential_key_*` commands in `src-tauri/src/credential_key.rs`.
+ *
+ * Installs from before the keychain kept the key in `maish.key` next to the
+ * database. That file is moved into the keychain on first use and deleted once
+ * the stored credentials are shown to decrypt with the moved key.
  */
 
-import { exists, readTextFile, writeTextFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
+import { exists, readTextFile, remove, BaseDirectory } from "@tauri-apps/plugin-fs";
 
-const KEY_FILE_NAME = "maish.key";
+const LEGACY_KEY_FILE_NAME = "maish.key";
 const ALGORITHM = "AES-GCM";
 const KEY_LENGTH = 256;
 const IV_LENGTH = 12;
 const FS_OPTIONS = { baseDir: BaseDirectory.AppData };
 
-let cachedKey: CryptoKey | null = null;
+let keyPromise: Promise<CryptoKey> | null = null;
 
 function base64Encode(bytes: Uint8Array): string {
   let binary = "";
@@ -31,14 +37,6 @@ function base64Decode(str: string): Uint8Array {
   return bytes;
 }
 
-async function ensureAppDataDir(): Promise<void> {
-  try {
-    await mkdir("", { ...FS_OPTIONS, recursive: true });
-  } catch {
-    // directory may already exist
-  }
-}
-
 // Web Crypto API accepts BufferSource (ArrayBuffer | ArrayBufferView).
 // TypeScript's ES2021 lib types are strict about Uint8Array<ArrayBufferLike> vs ArrayBufferView<ArrayBuffer>.
 // This cast satisfies the type checker while passing the Uint8Array directly to the API.
@@ -46,32 +44,155 @@ function asBufferSource(arr: Uint8Array): BufferSource {
   return arr as unknown as BufferSource;
 }
 
-async function getOrCreateKey(): Promise<CryptoKey> {
-  if (cachedKey) return cachedKey;
-
-  let rawKeyB64: string;
-  if (await exists(KEY_FILE_NAME, FS_OPTIONS)) {
-    rawKeyB64 = (await readTextFile(KEY_FILE_NAME, FS_OPTIONS)).trim();
-  } else {
-    // Generate a new random key
-    const rawKey = new Uint8Array(KEY_LENGTH / 8);
-    crypto.getRandomValues(rawKey);
-    rawKeyB64 = base64Encode(rawKey);
-
-    await ensureAppDataDir();
-    await writeTextFile(KEY_FILE_NAME, rawKeyB64, FS_OPTIONS);
+async function importKey(rawKeyB64: string): Promise<CryptoKey> {
+  let rawKey: Uint8Array;
+  try {
+    rawKey = base64Decode(rawKeyB64);
+  } catch {
+    throw new Error("The credential encryption key is not valid base64");
   }
-
-  const rawKey = base64Decode(rawKeyB64);
-  cachedKey = await crypto.subtle.importKey(
+  if (rawKey.length !== KEY_LENGTH / 8) {
+    throw new Error(
+      `The credential encryption key has ${rawKey.length} bytes, expected ${KEY_LENGTH / 8}`,
+    );
+  }
+  return crypto.subtle.importKey(
     "raw",
     asBufferSource(rawKey),
     { name: ALGORITHM },
     false,
     ["encrypt", "decrypt"],
   );
+}
 
-  return cachedKey;
+async function readLegacyKey(): Promise<string | null> {
+  if (!(await exists(LEGACY_KEY_FILE_NAME, FS_OPTIONS))) return null;
+  return (await readTextFile(LEGACY_KEY_FILE_NAME, FS_OPTIONS)).trim();
+}
+
+/**
+ * Every stored value that looks encrypted. They are the only way to tell
+ * whether a key is the one the data was written with: GCM authenticates, so a
+ * wrong key fails instead of producing garbage.
+ */
+async function storedCiphertexts(): Promise<string[]> {
+  // Imported on demand: the db modules import this one.
+  const { getDb } = await import("@/services/db/connection");
+  const db = await getDb();
+  const accountRows = await db.select<Record<string, string | null>[]>(
+    `SELECT access_token, refresh_token, imap_password, oauth_client_secret,
+            caldav_password, carddav_password FROM accounts`,
+  );
+  const settingRows = await db.select<{ value: string | null }[]>(
+    "SELECT value FROM settings",
+  );
+  const values = [
+    ...accountRows.flatMap((row) => Object.values(row)),
+    ...settingRows.map((row) => row.value),
+  ];
+  return values.filter((v): v is string => typeof v === "string" && isEncrypted(v));
+}
+
+async function decryptWith(key: CryptoKey, encrypted: string): Promise<string> {
+  const parts = encrypted.split(":");
+  if (parts.length !== 2) {
+    throw new Error("Invalid encrypted value format");
+  }
+  const [ivB64, ciphertextB64] = parts;
+  if (!ivB64 || !ciphertextB64) {
+    throw new Error("Invalid encrypted value format");
+  }
+
+  const iv = base64Decode(ivB64);
+  const ciphertext = base64Decode(ciphertextB64);
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: ALGORITHM, iv: asBufferSource(iv) },
+    key,
+    asBufferSource(ciphertext),
+  );
+  return new TextDecoder().decode(decrypted);
+}
+
+/** True when there is nothing stored to check against, or the key opens one of the values. */
+async function keyMatchesStoredData(key: CryptoKey): Promise<boolean> {
+  const samples = await storedCiphertexts();
+  if (samples.length === 0) return true;
+  for (const sample of samples) {
+    try {
+      await decryptWith(key, sample);
+      return true;
+    } catch {
+      // try the next one; a value that merely looks encrypted must not veto the key
+    }
+  }
+  return false;
+}
+
+/** Delete maish.key, but only once the key is known to open the stored credentials. */
+async function retireLegacyFile(key: CryptoKey): Promise<void> {
+  if (!(await keyMatchesStoredData(key))) {
+    throw new Error(
+      `The credential key in ${LEGACY_KEY_FILE_NAME} does not decrypt the stored credentials; the file was left in place`,
+    );
+  }
+  await remove(LEGACY_KEY_FILE_NAME, FS_OPTIONS);
+}
+
+async function loadKey(): Promise<CryptoKey> {
+  const stored = await invoke<string | null>("credential_key_get");
+  const legacy = await readLegacyKey();
+
+  if (stored) {
+    const key = await importKey(stored);
+    if (legacy !== null) {
+      // A previous run stored the key and was interrupted before deleting the file.
+      if (legacy !== stored) {
+        throw new Error(
+          `The OS keychain and ${LEGACY_KEY_FILE_NAME} hold different credential keys; neither was changed`,
+        );
+      }
+      await retireLegacyFile(key);
+    }
+    return key;
+  }
+
+  if (legacy !== null) {
+    const key = await importKey(legacy);
+    await invoke("credential_key_store", { key: legacy });
+    if ((await invoke<string | null>("credential_key_get")) !== legacy) {
+      throw new Error("The credential key could not be read back from the OS keychain");
+    }
+    await retireLegacyFile(key);
+    return key;
+  }
+
+  // No key anywhere. Generating one is only safe if nothing was encrypted with the lost one.
+  if ((await storedCiphertexts()).length > 0) {
+    throw new Error(
+      "The credential encryption key is missing from the OS keychain while encrypted credentials are stored. " +
+        "A new key would make them unreadable, so none was created. " +
+        "Restore the key (or maish.key) or remove and re-add the accounts.",
+    );
+  }
+  const rawKey = new Uint8Array(KEY_LENGTH / 8);
+  crypto.getRandomValues(rawKey);
+  const rawKeyB64 = base64Encode(rawKey);
+  await invoke("credential_key_store", { key: rawKeyB64 });
+  if ((await invoke<string | null>("credential_key_get")) !== rawKeyB64) {
+    throw new Error("The credential key could not be read back from the OS keychain");
+  }
+  return importKey(rawKeyB64);
+}
+
+function getKey(): Promise<CryptoKey> {
+  if (!keyPromise) {
+    keyPromise = loadKey().catch((err) => {
+      keyPromise = null;
+      throw err;
+    });
+  }
+  return keyPromise;
 }
 
 /**
@@ -79,7 +200,7 @@ async function getOrCreateKey(): Promise<CryptoKey> {
  * (GCM tag is appended to ciphertext by the Web Crypto API)
  */
 export async function encryptValue(plaintext: string): Promise<string> {
-  const key = await getOrCreateKey();
+  const key = await getKey();
   const iv = new Uint8Array(IV_LENGTH);
   crypto.getRandomValues(iv);
 
@@ -101,28 +222,8 @@ export async function encryptValue(plaintext: string): Promise<string> {
  * Decrypt a value produced by encryptValue. Returns the original plaintext.
  */
 export async function decryptValue(encrypted: string): Promise<string> {
-  const key = await getOrCreateKey();
-
-  const parts = encrypted.split(":");
-  if (parts.length !== 2) {
-    throw new Error("Invalid encrypted value format");
-  }
-  const [ivB64, ciphertextB64] = parts;
-  if (!ivB64 || !ciphertextB64) {
-    throw new Error("Invalid encrypted value format");
-  }
-
-  const iv = base64Decode(ivB64);
-  const ciphertext = base64Decode(ciphertextB64);
-
-  const decrypted = await crypto.subtle.decrypt(
-    { name: ALGORITHM, iv: asBufferSource(iv) },
-    key,
-    asBufferSource(ciphertext),
-  );
-
-  const decoder = new TextDecoder();
-  return decoder.decode(decrypted);
+  const key = await getKey();
+  return decryptWith(key, encrypted);
 }
 
 /**

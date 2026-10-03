@@ -2,9 +2,9 @@ import { getSetting, getSecureSetting } from "@/services/db/settings";
 import { AiError } from "./errors";
 import type { AiProvider, AiProviderClient } from "./types";
 import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
-import { createClaudeProvider, clearClaudeProvider } from "./providers/claudeProvider";
+import { createClaudeProvider } from "./providers/claudeProvider";
 import { createOpenAIProvider, clearOpenAIProvider } from "./providers/openaiProvider";
-import { createGeminiProvider, clearGeminiProvider } from "./providers/geminiProvider";
+import { createGeminiProvider } from "./providers/geminiProvider";
 import { createOllamaProvider, clearOllamaProvider } from "./providers/ollamaProvider";
 import { createCopilotProvider, clearCopilotProvider } from "./providers/copilotProvider";
 
@@ -95,9 +95,7 @@ export async function isAiAvailable(): Promise<boolean> {
 
 export function clearProviderClients(): void {
   cachedProvider = null;
-  clearClaudeProvider();
   clearOpenAIProvider();
-  clearGeminiProvider();
   clearOllamaProvider();
   clearCopilotProvider();
 }

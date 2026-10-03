@@ -1,4 +1,4 @@
-import { getDb, selectFirstBy, existsBy, boolToInt } from "./connection";
+import { getDb, selectFirstBy, boolToInt } from "./connection";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 
 export interface DeliverySchedule {
@@ -77,17 +77,6 @@ export async function holdThread(
   );
 }
 
-export async function isThreadHeld(
-  accountId: string,
-  threadId: string,
-): Promise<boolean> {
-  const now = getCurrentUnixTimestamp();
-  return existsBy(
-    "SELECT COUNT(*) as count FROM bundled_threads WHERE account_id = $1 AND thread_id = $2 AND held_until > $3",
-    [accountId, threadId, now],
-  );
-}
-
 export async function getHeldThreadIds(
   accountId: string,
 ): Promise<Set<string>> {
@@ -122,38 +111,6 @@ export async function updateLastDelivered(
     "UPDATE bundle_rules SET last_delivered_at = $1 WHERE account_id = $2 AND category = $3",
     [now, accountId, category],
   );
-}
-
-export async function getBundleSummary(
-  accountId: string,
-  category: string,
-): Promise<{ count: number; latestSubject: string | null; latestSender: string | null }> {
-  const db = await getDb();
-  // Count threads in this category that are in inbox
-  const countRows = await db.select<{ count: number }[]>(
-    `SELECT COUNT(DISTINCT t.id) as count
-     FROM threads t
-     JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
-     JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.category = $2
-     WHERE t.account_id = $1`,
-    [accountId, category],
-  );
-  const latestRows = await db.select<{ subject: string | null; from_name: string | null }[]>(
-    `SELECT t.subject, m.from_name
-     FROM threads t
-     JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id AND tl.label_id = 'INBOX'
-     JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id AND tc.category = $2
-     JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
-     WHERE t.account_id = $1
-     ORDER BY t.last_message_at DESC LIMIT 1`,
-    [accountId, category],
-  );
-
-  return {
-    count: countRows[0]?.count ?? 0,
-    latestSubject: latestRows[0]?.subject ?? null,
-    latestSender: latestRows[0]?.from_name ?? null,
-  };
 }
 
 /**

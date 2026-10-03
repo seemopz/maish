@@ -7,6 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
 mod commands;
+mod credential_key;
 mod db_tx;
 mod imap;
 mod oauth;
@@ -98,7 +99,6 @@ pub fn run() {
             commands::imap_list_folders,
             commands::imap_fetch_messages,
             commands::imap_fetch_new_uids,
-            commands::imap_search_all_uids,
             commands::imap_fetch_message_body,
             commands::imap_fetch_raw_message,
             commands::imap_set_flags,
@@ -108,11 +108,11 @@ pub fn run() {
             commands::imap_fetch_attachment,
             commands::imap_append_message,
             commands::imap_search_folder,
-            commands::imap_sync_folder,
-            commands::imap_raw_fetch_diagnostic,
             commands::imap_delta_check,
             commands::smtp_send_email,
             commands::smtp_test_connection,
+            credential_key::credential_key_get,
+            credential_key::credential_key_store,
             db_tx::db_tx_begin,
             db_tx::db_tx_commit,
             db_tx::db_tx_rollback,

@@ -1,12 +1,12 @@
 [package]
 name = "maish"
-version = "0.6.0" # x-release-please-version
+version = "0.7.0" # x-release-please-version
 description = "Email at the speed of thought"
 authors = ["Seemops1337"]
 license = "Apache-2.0"
 repository = "https://github.com/seemopz/maish"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 [lib]
 name = "app_lib"
@@ -47,6 +47,8 @@ sha2 = "0.10"
 utf7-imap = "0.3"
 socket2 = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }
+keyring = "4.2"
+
 # Same major/minor as the one tauri-plugin-sql pulls in, so cargo unifies them.
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio"] }
 

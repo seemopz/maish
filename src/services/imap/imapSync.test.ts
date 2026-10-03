@@ -6,7 +6,6 @@ vi.mock("./tauriCommands", () => ({
   imapGetFolderStatus: vi.fn(),
   imapFetchMessages: vi.fn(),
   imapFetchNewUids: vi.fn(),
-  imapSearchAllUids: vi.fn(),
   imapSearchFolder: vi.fn(),
   imapDeltaCheck: vi.fn(),
 }));

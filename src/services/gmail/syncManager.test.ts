@@ -46,18 +46,25 @@ vi.mock("../db/calendarEvents", () => ({
   deleteEventByRemoteId: vi.fn(),
 }));
 
+vi.mock("../logFile", () => ({
+  logToFile: vi.fn(),
+}));
+
 // Import after mocks
 import {
   syncAccount,
   startBackgroundSync,
   stopBackgroundSync,
   triggerSync,
+  forceFullSync,
+  resyncAccount,
   removeAccountFromSync,
   onSyncStatus,
 } from "./syncManager";
 import { getAccount } from "../db/accounts";
 import { getGmailClient } from "./tokenManager";
 import { initialSync, deltaSync } from "./sync";
+import { logToFile } from "../logFile";
 
 const mockGetAccount = vi.mocked(getAccount);
 const mockGetGmailClient = vi.mocked(getGmailClient);
@@ -394,6 +401,102 @@ describe("syncManager", () => {
 
       expect(errors).toHaveLength(1);
       expect(errors[0]).toBe("Unknown error");
+    });
+  });
+  describe("resync outcome", () => {
+    it("resyncAccount rejects with the sync error instead of resolving as done", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("r1"));
+      mockInitialSync.mockRejectedValue(new Error("connection timed out"));
+
+      await expect(resyncAccount("r1")).rejects.toThrow("connection timed out");
+    });
+
+    it("resyncAccount resolves when the sync works", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("r2"));
+
+      await expect(resyncAccount("r2")).resolves.toBeUndefined();
+    });
+
+    it("a later success does not inherit an earlier failure", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("r3"));
+      mockInitialSync.mockRejectedValueOnce(new Error("boom"));
+      await expect(resyncAccount("r3")).rejects.toThrow("boom");
+
+      await expect(resyncAccount("r3")).resolves.toBeUndefined();
+    });
+
+    it("forceFullSync rejects when any account fails and names the failure", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id));
+      mockInitialSync.mockImplementation(async (_client, accountId) => {
+        if (accountId === "bad") throw new Error("authentication failed");
+      });
+
+      await expect(forceFullSync(["good", "bad"])).rejects.toThrow("authentication failed");
+    });
+
+    it("triggerSync stays non-throwing", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("t1"));
+      mockInitialSync.mockRejectedValue(new Error("boom"));
+
+      await expect(triggerSync(["t1"])).resolves.toBeUndefined();
+    });
+
+    it("reports 'queued' while another sync runs, then waits for the real result", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id));
+      let release: () => void = () => {};
+      mockInitialSync.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+      mockInitialSync.mockRejectedValueOnce(new Error("resync failed"));
+
+      const background = syncAccount("bg");
+      await wait(10);
+      const onQueued = vi.fn();
+      const resync = resyncAccount("rq", { onQueued });
+      const settled = vi.fn();
+      resync.catch(settled);
+      await wait(10);
+
+      expect(onQueued).toHaveBeenCalledTimes(1);
+      expect(settled).not.toHaveBeenCalled();
+
+      release();
+      await background;
+      await expect(resync).rejects.toThrow("resync failed");
+    });
+
+    it("does not call onQueued when nothing else runs", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("nq"));
+      const onQueued = vi.fn();
+
+      await resyncAccount("nq", { onQueued });
+
+      expect(onQueued).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("log file", () => {
+    it("writes a failed sync to the log file", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("l1", "100"));
+      mockDeltaSync.mockRejectedValue(new Error("imap timeout"));
+
+      await syncAccount("l1");
+
+      expect(logToFile).toHaveBeenCalledWith("error", expect.stringContaining("l1"));
+      expect(logToFile).toHaveBeenCalledWith("error", expect.stringContaining("imap timeout"));
+    });
+
+    it("notifies every listener, not just the last one", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("m1"));
+      const a = vi.fn();
+      const b = vi.fn();
+      const unsubA = onSyncStatus(a);
+      const unsubB = onSyncStatus(b);
+
+      await syncAccount("m1");
+      unsubA();
+      unsubB();
+
+      expect(a).toHaveBeenCalledWith("m1", "done");
+      expect(b).toHaveBeenCalledWith("m1", "done");
     });
   });
 });

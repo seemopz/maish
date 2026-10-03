@@ -34,7 +34,7 @@ no changes sent upstream.
 
 - Architecture, services, UI, styling, testing, database: `docs/codebase.md`
 - CalDAV/CardDAV, recurrence, vCard – read before touching `src/services/{calendar,contacts,dav}/`: `docs/dav.md`
-- Frontend logging: `console.log` never reaches the log file – add a temporary `#[tauri::command]` that calls `log::warn!` instead.
+- Frontend logging: `console.log` never reaches the log file – call `logToFile(level, message)` (`src/services/logFile.ts`, backed by the `log_frontend` command). Sync failures already go there.
 
 ## Fork-specific behaviour
 

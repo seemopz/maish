@@ -45,6 +45,21 @@ const statusCallbacks = new Set<SyncStatusCallback>();
  * throwing, so a caller that waits for a run reads its verdict from here.
  */
 const syncOutcomes = new Map<string, string | null>();
+/**
+ * Work to do directly before an account's next sync, e.g. wiping its local data
+ * for a resync. It must not run earlier: a sync of the same account that is
+ * already in flight would write `history_id` and the folder sync state back
+ * after the wipe, and the resync would degrade to a plain delta sync.
+ */
+const prepareHooks = new Map<string, () => Promise<void>>();
+/**
+ * How the sync that ran an account's prepare hook ended (`null` for success).
+ * A resync reads its verdict from here, not from `syncOutcomes`: another run may
+ * pick up the hook, and a later plain sync of the same account would overwrite
+ * a failed wipe with its own success.
+ */
+const prepareOutcomes = new Map<string, string | null>();
+
 /** Accounts deleted this session. Account ids are random UUIDs, so they are never reused. */
 const removedAccountIds = new Set<string>();
 
@@ -234,7 +249,16 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
  * Routes to Gmail or IMAP sync based on account provider.
  */
 async function syncAccountInternal(accountId: string): Promise<void> {
+  const prepare = prepareHooks.get(accountId);
+  prepareHooks.delete(accountId);
+  await syncAccountRun(accountId, prepare);
+  if (prepare) prepareOutcomes.set(accountId, syncOutcomes.get(accountId) ?? null);
+}
+
+async function syncAccountRun(accountId: string, prepare?: () => Promise<void>): Promise<void> {
   try {
+    await prepare?.();
+
     const account = await getAccount(accountId);
 
     if (!account) {
@@ -391,13 +415,22 @@ export interface ResyncOptions {
  * Run a sync and throw if any of the accounts failed, instead of resolving as
  * if it had worked. The sync itself never throws (see `syncOutcomes`).
  */
-async function runSyncOrThrow(accountIds: string[], options: ResyncOptions): Promise<void> {
-  // A background run that is still in flight may write its own outcome first;
-  // the run queued below finishes later and overwrites it.
-  for (const id of accountIds) syncOutcomes.delete(id);
+async function runSyncOrThrow(
+  accountIds: string[],
+  options: ResyncOptions,
+  prepare: (accountId: string) => Promise<void>,
+): Promise<void> {
+  for (const id of accountIds) {
+    const earlier = prepareHooks.get(id);
+    prepareHooks.set(id, async () => {
+      await earlier?.();
+      await prepare(id);
+    });
+  }
+  for (const id of accountIds) prepareOutcomes.delete(id);
   await runSync(accountIds, options.onQueued);
   const failures = accountIds.flatMap((id) => {
-    const error = syncOutcomes.get(id);
+    const error = prepareOutcomes.get(id);
     return error ? [error] : [];
   });
   if (failures.length > 0) throw new Error(failures.join("; "));
@@ -408,11 +441,8 @@ async function runSyncOrThrow(accountIds: string[], options: ResyncOptions): Pro
  * This re-downloads all threads from scratch. Rejects if any account fails.
  */
 export async function forceFullSync(accountIds: string[], options: ResyncOptions = {}): Promise<void> {
-  for (const id of accountIds) {
-    await clearAccountHistoryId(id);
-  }
   logToFile("info", `[syncManager] Full resync of ${accountIds.length} account(s)`);
-  await runSyncOrThrow(accountIds, options);
+  await runSyncOrThrow(accountIds, options, clearAccountHistoryId);
 }
 
 /**
@@ -421,10 +451,13 @@ export async function forceFullSync(accountIds: string[], options: ResyncOptions
  * then runs a fresh initial sync. Rejects if the sync fails.
  */
 export async function resyncAccount(accountId: string, options: ResyncOptions = {}): Promise<void> {
-  await deleteAllThreadsForAccount(accountId);
-  await deleteAllMessagesForAccount(accountId);
-  await clearAccountHistoryId(accountId);
-  await clearAllFolderSyncStates(accountId);
   logToFile("info", `[syncManager] Resync of account ${accountId}`);
-  await runSyncOrThrow([accountId], options);
+  await runSyncOrThrow([accountId], options, async (id) => {
+    // Sync state first: if a later step fails, the next run starts from scratch
+    // instead of a delta sync over mail that is already gone.
+    await clearAccountHistoryId(id);
+    await clearAllFolderSyncStates(id);
+    await deleteAllThreadsForAccount(id);
+    await deleteAllMessagesForAccount(id);
+  });
 }

@@ -61,7 +61,10 @@ import {
   removeAccountFromSync,
   onSyncStatus,
 } from "./syncManager";
-import { getAccount } from "../db/accounts";
+import { getAccount, clearAccountHistoryId } from "../db/accounts";
+import { deleteAllThreadsForAccount } from "../db/threads";
+import { deleteAllMessagesForAccount } from "../db/messages";
+import { clearAllFolderSyncStates } from "../db/folderSyncState";
 import { getGmailClient } from "./tokenManager";
 import { initialSync, deltaSync } from "./sync";
 import { logToFile } from "../logFile";
@@ -461,6 +464,59 @@ describe("syncManager", () => {
       release();
       await background;
       await expect(resync).rejects.toThrow("resync failed");
+    });
+
+    it("resyncAccount wipes only after the in-flight sync of that account has finished", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id, "100"));
+      const order: string[] = [];
+      let release: () => void = () => {};
+      mockDeltaSync.mockImplementationOnce(() => new Promise<void>((resolve) => {
+        release = () => { order.push("background-done"); resolve(); };
+      }));
+      vi.mocked(deleteAllThreadsForAccount).mockImplementationOnce(async () => { order.push("wipe"); });
+
+      const background = syncAccount("w1");
+      await wait(10);
+      const resync = resyncAccount("w1");
+      await wait(10);
+
+      expect(deleteAllThreadsForAccount).not.toHaveBeenCalled();
+      expect(clearAccountHistoryId).not.toHaveBeenCalled();
+
+      release();
+      await background;
+      await resync;
+
+      expect(order).toEqual(["background-done", "wipe"]);
+      expect(deleteAllMessagesForAccount).toHaveBeenCalledWith("w1");
+      expect(clearAllFolderSyncStates).toHaveBeenCalledWith("w1");
+    });
+
+    it("forceFullSync clears the history id only after the in-flight sync has finished", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id, "100"));
+      let release: () => void = () => {};
+      mockDeltaSync.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+
+      const background = syncAccount("w2");
+      await wait(10);
+      const full = forceFullSync(["w2"]);
+      await wait(10);
+
+      expect(clearAccountHistoryId).not.toHaveBeenCalled();
+
+      release();
+      await background;
+      await full;
+
+      expect(clearAccountHistoryId).toHaveBeenCalledWith("w2");
+    });
+
+    it("a failing wipe fails the resync and skips the sync", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id));
+      vi.mocked(deleteAllThreadsForAccount).mockRejectedValueOnce(new Error("disk full"));
+
+      await expect(resyncAccount("w3")).rejects.toThrow("disk full");
+      expect(mockInitialSync).not.toHaveBeenCalled();
     });
 
     it("does not call onQueued when nothing else runs", async () => {

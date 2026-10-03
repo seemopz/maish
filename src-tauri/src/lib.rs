@@ -49,9 +49,28 @@ fn open_devtools(app: tauri::AppHandle) {
     }
 }
 
+/// Longest message `log_frontend` writes; server responses can be large.
+const LOG_FRONTEND_MAX_BYTES: usize = 4096;
+
+/// Keep a webview message to one bounded log line: cut it at
+/// `LOG_FRONTEND_MAX_BYTES` (on a char boundary) and escape CR and LF, so a
+/// multi-line server response cannot forge extra log entries.
+fn sanitize_log_message(message: &str) -> String {
+    let mut end = message.len().min(LOG_FRONTEND_MAX_BYTES);
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = message[..end].replace('\r', "\\r").replace('\n', "\\n");
+    if end < message.len() {
+        out.push_str(" [truncated]");
+    }
+    out
+}
+
 /// Write a line from the webview to the log file; `console.*` never reaches it.
 #[tauri::command]
 fn log_frontend(level: String, message: String) {
+    let message = sanitize_log_message(&message);
     let level = match level.as_str() {
         "error" => log::Level::Error,
         "warn" => log::Level::Warn,
@@ -143,6 +162,11 @@ pub fn run() {
                     tauri_plugin_log::Builder::default()
                         .level(level)
                         .level_for("sqlx::query", log::LevelFilter::Warn)
+                        // The default (40 kB, KeepOne) deletes the log once full, so a
+                        // sync failing every minute would push the start of an
+                        // incident out of the file within hours.
+                        .max_file_size(1_000_000)
+                        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
                         .build(),
                 )?;
             }
@@ -287,4 +311,27 @@ pub fn run() {
         .expect("error while running tauri application");
 
     log::info!("Tauri application exited normally");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_message_escapes_line_breaks() {
+        assert_eq!(sanitize_log_message("a\r\nb\nc"), "a\\r\\nb\\nc");
+    }
+
+    #[test]
+    fn log_message_is_capped_on_a_char_boundary() {
+        let long = "é".repeat(LOG_FRONTEND_MAX_BYTES);
+        let out = sanitize_log_message(&long);
+        assert!(out.ends_with(" [truncated]"));
+        assert!(out.len() <= LOG_FRONTEND_MAX_BYTES + " [truncated]".len());
+    }
+
+    #[test]
+    fn short_log_message_is_untouched() {
+        assert_eq!(sanitize_log_message("sync ok"), "sync ok");
+    }
 }

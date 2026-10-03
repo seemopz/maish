@@ -11,6 +11,7 @@ import { hasCalendarSupport, getCalendarProvider } from "../calendar/providerFac
 import { getVisibleCalendars, upsertCalendar, updateCalendarSyncToken } from "../db/calendars";
 import { upsertCalendarEvent, deleteEventByRemoteId } from "../db/calendarEvents";
 import { syncContactsForAccount } from "../contacts/contactSync";
+import { logToFile } from "../logFile";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
 
@@ -36,7 +37,14 @@ export type SyncStatusCallback = (
   error?: string,
 ) => void;
 
-let statusCallback: SyncStatusCallback | null = null;
+/** Several listeners: the app shell shows the status bar, the settings page its own buttons. */
+const statusCallbacks = new Set<SyncStatusCallback>();
+/**
+ * How the last sync of each account ended: `null` for success, else the error.
+ * `syncAccountInternal` reports failures through the status callback rather than
+ * throwing, so a caller that waits for a run reads its verdict from here.
+ */
+const syncOutcomes = new Map<string, string | null>();
 /** Accounts deleted this session. Account ids are random UUIDs, so they are never reused. */
 const removedAccountIds = new Set<string>();
 
@@ -48,13 +56,13 @@ const removedAccountIds = new Set<string>();
 function notify(...args: Parameters<SyncStatusCallback>): void {
   const [accountId, status] = args;
   if (removedAccountIds.has(accountId) && status !== "removed") return;
-  statusCallback?.(...args);
+  for (const cb of statusCallbacks) cb(...args);
 }
 
 export function onSyncStatus(cb: SyncStatusCallback): () => void {
-  statusCallback = cb;
+  statusCallbacks.add(cb);
   return () => {
-    statusCallback = null;
+    statusCallbacks.delete(cb);
   };
 }
 
@@ -231,6 +239,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
 
     if (!account) {
       // Deleted while a sync was queued or running — nothing to sync, nothing to report.
+      syncOutcomes.delete(accountId);
       notify(accountId, "removed");
       return;
     }
@@ -243,6 +252,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
       // DAV-only accounts carry no mailbox — sync what they do have.
       await syncCalendarForAccount(accountId);
       await syncContactsForAccount(accountId);
+      syncOutcomes.set(accountId, null);
       notify(accountId, "done");
       return;
     }
@@ -256,6 +266,7 @@ async function syncAccountInternal(accountId: string): Promise<void> {
     // Always emit "done" when an initial sync completes (clears the bar).
     // Also emit for delta syncs that fell back to initial (recovery re-sync)
     // since those emit progress via statusCallback inside syncImapAccount.
+    syncOutcomes.set(accountId, null);
     notify(accountId, "done");
 
     // Sync calendar alongside email (non-blocking — calendar errors don't affect email sync)
@@ -271,11 +282,13 @@ async function syncAccountInternal(accountId: string): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err ?? "Unknown error");
     console.error(`[syncManager] Sync failed for account ${accountId}:`, message);
+    logToFile("error", `[syncManager] Sync failed for account ${accountId}: ${message}`);
+    syncOutcomes.set(accountId, message);
     notify(accountId, "error", undefined, message);
   }
 }
 
-async function runSync(accountIds: string[]): Promise<void> {
+async function runSync(accountIds: string[], onQueued?: () => void): Promise<void> {
   // An empty run would clear `syncPromise` before the assignment below stores it,
   // leaving a settled promise behind that every later run would queue onto.
   if (accountIds.length === 0) return;
@@ -285,6 +298,7 @@ async function runSync(accountIds: string[]): Promise<void> {
     const existing = new Set(pendingAccountIds ?? []);
     for (const id of accountIds) existing.add(id);
     pendingAccountIds = [...existing];
+    onQueued?.();
     return syncPromise;
   }
 
@@ -368,26 +382,49 @@ export async function triggerSync(accountIds: string[]): Promise<void> {
   await runSync(accountIds);
 }
 
+export interface ResyncOptions {
+  /** Called when another sync is running, so this one waits for its turn. */
+  onQueued?: () => void;
+}
+
+/**
+ * Run a sync and throw if any of the accounts failed, instead of resolving as
+ * if it had worked. The sync itself never throws (see `syncOutcomes`).
+ */
+async function runSyncOrThrow(accountIds: string[], options: ResyncOptions): Promise<void> {
+  // A background run that is still in flight may write its own outcome first;
+  // the run queued below finishes later and overwrites it.
+  for (const id of accountIds) syncOutcomes.delete(id);
+  await runSync(accountIds, options.onQueued);
+  const failures = accountIds.flatMap((id) => {
+    const error = syncOutcomes.get(id);
+    return error ? [error] : [];
+  });
+  if (failures.length > 0) throw new Error(failures.join("; "));
+}
+
 /**
  * Clear history IDs and perform a full re-sync for all provided accounts.
- * This re-downloads all threads from scratch.
+ * This re-downloads all threads from scratch. Rejects if any account fails.
  */
-export async function forceFullSync(accountIds: string[]): Promise<void> {
+export async function forceFullSync(accountIds: string[], options: ResyncOptions = {}): Promise<void> {
   for (const id of accountIds) {
     await clearAccountHistoryId(id);
   }
-  await runSync(accountIds);
+  logToFile("info", `[syncManager] Full resync of ${accountIds.length} account(s)`);
+  await runSyncOrThrow(accountIds, options);
 }
 
 /**
  * Delete all local data for a single account and re-sync from scratch.
  * Removes all threads, messages, history ID, and IMAP folder sync states,
- * then runs a fresh initial sync.
+ * then runs a fresh initial sync. Rejects if the sync fails.
  */
-export async function resyncAccount(accountId: string): Promise<void> {
+export async function resyncAccount(accountId: string, options: ResyncOptions = {}): Promise<void> {
   await deleteAllThreadsForAccount(accountId);
   await deleteAllMessagesForAccount(accountId);
   await clearAccountHistoryId(accountId);
   await clearAllFolderSyncStates(accountId);
-  await runSync([accountId]);
+  logToFile("info", `[syncManager] Resync of account ${accountId}`);
+  await runSyncOrThrow([accountId], options);
 }

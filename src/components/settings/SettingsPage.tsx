@@ -7,7 +7,9 @@ import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/se
 import { PROVIDER_MODELS } from "@/services/ai/types";
 import { deleteAccount } from "@/services/db/accounts";
 import { removeClient, reauthorizeAccount } from "@/services/gmail/tokenManager";
-import { triggerSync, forceFullSync, resyncAccount, removeAccountFromSync } from "@/services/gmail/syncManager";
+import { triggerSync, forceFullSync, resyncAccount, removeAccountFromSync, onSyncStatus } from "@/services/gmail/syncManager";
+import { syncProgressMessage } from "@/utils/syncStatus";
+import { formatSyncError } from "@/utils/networkErrors";
 import {
   registerComposeShortcut,
   getCurrentShortcut,
@@ -115,6 +117,11 @@ export function SettingsPage() {
   const [clientSecret, setClientSecret] = useState("");
   const [apiSettingsSaved, setApiSettingsSaved] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  /** What the manual sync buttons last did: waiting, running (with progress) or failed. */
+  const [syncNote, setSyncNote] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+  /** Progress line per account while its sync runs; shown on the matching resync button. */
+  const [resyncError, setResyncError] = useState<Record<string, string>>({});
+  const [syncProgress, setSyncProgress] = useState<Record<string, string>>({});
   const [syncPeriodDays, setSyncPeriodDays] = useState("365");
   const [blockRemoteImages, setBlockRemoteImages] = useState(true);
   const [phishingDetectionEnabled, setPhishingDetectionEnabled] = useState(true);
@@ -145,7 +152,7 @@ export function SettingsPage() {
   const [cacheSizeMb, setCacheSizeMb] = useState<number | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
   const [reauthStatus, setReauthStatus] = useState<Record<string, "idle" | "authorizing" | "done" | "error">>({});
-  const [resyncStatus, setResyncStatus] = useState<Record<string, "idle" | "syncing" | "done" | "error">>({});
+  const [resyncStatus, setResyncStatus] = useState<Record<string, "idle" | "queued" | "syncing" | "done" | "error">>({});
   const [autoArchiveCategories, setAutoArchiveCategories] = useState<Set<string>>(() => new Set());
   const [smartNotifications, setSmartNotifications] = useState(true);
   const [notifyCategories, setNotifyCategories] = useState<Set<string>>(() => new Set(["Primary"]));
@@ -291,8 +298,15 @@ export function SettingsPage() {
     const activeIds = accounts.filter((a) => a.isActive).map((a) => a.id);
     if (activeIds.length === 0) return;
     setIsSyncing(true);
+    setSyncNote(null);
     try {
-      await forceFullSync(activeIds);
+      await forceFullSync(activeIds, {
+        onQueued: () => setSyncNote({ tone: "info", text: "Another sync is running — the full resync starts when it finishes." }),
+      });
+      setSyncNote(null);
+    } catch (err) {
+      console.error("Full resync failed:", err);
+      setSyncNote({ tone: "error", text: `Full resync failed: ${formatSyncError(err instanceof Error ? err.message : String(err))}` });
     } finally {
       setIsSyncing(false);
     }
@@ -345,8 +359,11 @@ export function SettingsPage() {
   const handleResyncAccount = useCallback(
     async (accountId: string) => {
       setResyncStatus((prev) => ({ ...prev, [accountId]: "syncing" }));
+      setResyncError(({ [accountId]: _cleared, ...rest }) => rest);
       try {
-        await resyncAccount(accountId);
+        await resyncAccount(accountId, {
+          onQueued: () => setResyncStatus((prev) => ({ ...prev, [accountId]: "queued" })),
+        });
         setResyncStatus((prev) => ({ ...prev, [accountId]: "done" }));
         setTimeout(() => {
           setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
@@ -354,6 +371,7 @@ export function SettingsPage() {
       } catch (err) {
         console.error("Resync failed:", err);
         setResyncStatus((prev) => ({ ...prev, [accountId]: "error" }));
+        setResyncError((prev) => ({ ...prev, [accountId]: formatSyncError(err instanceof Error ? err.message : String(err)) }));
         setTimeout(() => {
           setResyncStatus((prev) => ({ ...prev, [accountId]: "idle" }));
         }, 3000);
@@ -361,6 +379,19 @@ export function SettingsPage() {
     },
     [],
   );
+
+  // Follow the sync manager so a queued resync switches to "running" once its turn comes
+  // and the buttons show how far it got.
+  useEffect(() => {
+    return onSyncStatus((accountId, status, progress) => {
+      if (status === "syncing") {
+        setSyncProgress((prev) => ({ ...prev, [accountId]: syncProgressMessage(progress) }));
+        setResyncStatus((prev) => (prev[accountId] === "queued" ? { ...prev, [accountId]: "syncing" } : prev));
+      } else {
+        setSyncProgress(({ [accountId]: _done, ...rest }) => rest);
+      }
+    });
+  }, []);
 
   const activeTabDef = tabs.find((t) => t.id === activeTab);
 
@@ -854,6 +885,11 @@ export function SettingsPage() {
                                 <div className="text-xs text-text-tertiary truncate">
                                   {account.email}
                                 </div>
+                                {resyncError[account.id] && (
+                                  <div role="alert" className="text-xs text-danger mt-0.5">
+                                    Resync failed: {resyncError[account.id]}
+                                  </div>
+                                )}
                               </div>
                               <div className="flex items-center gap-1.5 shrink-0">
                                 <button
@@ -868,10 +904,11 @@ export function SettingsPage() {
                                 </button>
                                 <button
                                   onClick={() => handleResyncAccount(account.id)}
-                                  disabled={resyncStatus[account.id] === "syncing"}
+                                  disabled={resyncStatus[account.id] === "syncing" || resyncStatus[account.id] === "queued"}
                                   className={smallButtonClass}
                                 >
-                                  {resyncStatus[account.id] === "syncing" && "Resyncing..."}
+                                  {resyncStatus[account.id] === "queued" && "Queued..."}
+                                  {resyncStatus[account.id] === "syncing" && (syncProgress[account.id] ?? "Resyncing...")}
                                   {resyncStatus[account.id] === "done" && "Done!"}
                                   {resyncStatus[account.id] === "error" && "Failed"}
                                   {(!resyncStatus[account.id] || resyncStatus[account.id] === "idle") && "Resync"}
@@ -988,6 +1025,11 @@ export function SettingsPage() {
                         {isSyncing ? "Syncing..." : "Full resync"}
                       </Button>
                     </div>
+                    {syncNote && (
+                      <p role={syncNote.tone === "error" ? "alert" : "status"} className={`text-xs ${syncNote.tone === "error" ? "text-danger" : "text-text-tertiary"}`}>
+                        {syncNote.text}
+                      </p>
+                    )}
                   </Section>
 
                   <Section title="Sync Period">

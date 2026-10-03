@@ -1368,15 +1368,16 @@ describe("empty folders and partial folder failures", () => {
   });
 
   describe("sync state of an empty folder", () => {
-    it("is recorded by the initial sync for a folder the server reports as empty", async () => {
+    it("is left to the first delta for a folder the server reports as empty", async () => {
       mockImapListFolders.mockResolvedValue([createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 0 })]);
 
       await imapInitialSync("acc-1");
 
-      // Without a row the folder stays "new" and every delta re-searches it.
-      expect(mockUpsertFolderSyncState).toHaveBeenCalledWith(
-        expect.objectContaining({ folder_path: "INBOX", last_uid: 0 }),
-      );
+      // list_folders reports exists = 0 when STATUS fails, so a row here would
+      // have last_uid 0 and the next delta would fetch the whole folder with no
+      // date window. As a new folder it is searched with SINCE and gets a real
+      // UIDVALIDITY/UIDNEXT.
+      expect(mockUpsertFolderSyncState).not.toHaveBeenCalled();
     });
 
     it("is recorded by the initial sync when the search finds nothing", async () => {
@@ -1391,6 +1392,31 @@ describe("empty folders and partial folder failures", () => {
       expect(mockUpsertFolderSyncState).toHaveBeenCalledWith(
         expect.objectContaining({ folder_path: "INBOX", uidvalidity: 7, last_uid: 5 }),
       );
+    });
+
+    it("is not recorded when the server gave no UIDNEXT for a folder that has messages", async () => {
+      mockImapListFolders.mockResolvedValue([createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 5 })]);
+      mockImapSearchFolder.mockResolvedValue({
+        uids: [],
+        folder_status: createMockImapFolderStatus({ uidvalidity: 7, uidnext: 0, exists: 5 }),
+      });
+
+      await imapInitialSync("acc-1");
+
+      // last_uid 0 would make the next delta fetch everything above UID 0.
+      expect(mockUpsertFolderSyncState).not.toHaveBeenCalled();
+    });
+
+    it("is not recorded by the delta sync when the server gave no UIDNEXT for a folder that has messages", async () => {
+      mockImapListFolders.mockResolvedValue([archive()]);
+      mockImapSearchFolder.mockResolvedValue({
+        uids: [],
+        folder_status: createMockImapFolderStatus({ uidvalidity: 3, uidnext: 0, exists: 9 }),
+      });
+
+      await imapDeltaSync("acc-1");
+
+      expect(mockUpsertFolderSyncState).not.toHaveBeenCalled();
     });
 
     it("is recorded by the delta sync for a new folder the search finds nothing in", async () => {

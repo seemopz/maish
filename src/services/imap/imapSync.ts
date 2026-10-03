@@ -509,12 +509,17 @@ function uidsToRetry(accountId: string, folder: string, undelivered: number[]): 
  * folder counts as new on every delta and is searched again over a fresh
  * connection each time. The watermark is the last UID the server has handed
  * out: nothing at or below it is of interest, since the search came back empty.
+ *
+ * Null when the server sent no UIDNEXT for a folder that has messages: the
+ * watermark would be 0 and the next delta would fetch the whole folder with no
+ * date window, so the folder stays "new" and is searched again instead.
  */
 function emptyFolderState(
   accountId: string,
   folderPath: string,
-  status: { uidvalidity: number; uidnext: number },
-): FolderSyncState {
+  status: { uidvalidity: number; uidnext: number; exists: number },
+): FolderSyncState | null {
+  if (status.uidnext === 0 && status.exists > 0) return null;
   return {
     account_id: accountId,
     folder_path: folderPath,
@@ -595,12 +600,10 @@ export async function imapInitialSync(
 
   for (let folderIdx = 0; folderIdx < syncableFolders.length; folderIdx++) {
     const folder = syncableFolders[folderIdx]!;
-    if (folder.exists === 0) {
-      // No SELECT happens here, so there is no UIDVALIDITY to record; a
-      // delta check treats 0 as unknown and adopts the server's value.
-      await upsertFolderSyncState(emptyFolderState(accountId, folder.raw_path, { uidvalidity: 0, uidnext: 1 }));
-      continue;
-    }
+    // list_folders also reports 0 when STATUS failed, and there is no SELECT
+    // here to tell the two apart. No row is written: the first delta treats the
+    // folder as new, searches it by date and records the real UIDVALIDITY/UIDNEXT.
+    if (folder.exists === 0) continue;
 
     // Circuit breaker: skip remaining folders after too many consecutive failures
     if (consecutiveFailures >= CIRCUIT_BREAKER_MAX_FAILURES) {
@@ -637,7 +640,8 @@ export async function imapInitialSync(
       consecutiveFailures = 0;
 
       if (uidsToFetch.length === 0) {
-        await upsertFolderSyncState(emptyFolderState(accountId, folder.raw_path, searchResult.folder_status));
+        const state = emptyFolderState(accountId, folder.raw_path, searchResult.folder_status);
+        if (state) await upsertFolderSyncState(state);
         continue;
       }
 
@@ -1103,11 +1107,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
       consecutiveFailures = 0;
 
       if (searchResult.uids.length === 0) {
-        folderStates.push({
-          state: emptyFolderState(accountId, folder.raw_path, searchResult.folder_status),
-          floor: 0,
-          undeliveredUids: [],
-        });
+        const state = emptyFolderState(accountId, folder.raw_path, searchResult.folder_status);
+        if (state) folderStates.push({ state, floor: 0, undeliveredUids: [] });
         succeededFolders++;
         continue;
       }
@@ -1231,11 +1232,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           const searchResult = await imapSearchFolder(config, folder.raw_path, sinceDate);
           if (searchResult.uids.length === 0) {
             // The old row would pair the previous last_uid with the new UIDVALIDITY.
-            folderStates.push({
-              state: emptyFolderState(accountId, folder.raw_path, searchResult.folder_status),
-              floor: 0,
-              undeliveredUids: [],
-            });
+            const state = emptyFolderState(accountId, folder.raw_path, searchResult.folder_status);
+            if (state) folderStates.push({ state, floor: 0, undeliveredUids: [] });
             succeededFolders++;
             continue;
           }

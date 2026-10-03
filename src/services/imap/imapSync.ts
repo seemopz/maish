@@ -504,6 +504,27 @@ function uidsToRetry(accountId: string, folder: string, undelivered: number[]): 
   return retry;
 }
 
+/**
+ * The sync state of a folder the search found nothing in. Without a row the
+ * folder counts as new on every delta and is searched again over a fresh
+ * connection each time. The watermark is the last UID the server has handed
+ * out: nothing at or below it is of interest, since the search came back empty.
+ */
+function emptyFolderState(
+  accountId: string,
+  folderPath: string,
+  status: { uidvalidity: number; uidnext: number },
+): FolderSyncState {
+  return {
+    account_id: accountId,
+    folder_path: folderPath,
+    uidvalidity: status.uidvalidity,
+    last_uid: Math.max(status.uidnext - 1, 0),
+    modseq: null,
+    last_sync_at: Math.floor(Date.now() / 1000),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Initial sync
 // ---------------------------------------------------------------------------
@@ -574,7 +595,12 @@ export async function imapInitialSync(
 
   for (let folderIdx = 0; folderIdx < syncableFolders.length; folderIdx++) {
     const folder = syncableFolders[folderIdx]!;
-    if (folder.exists === 0) continue;
+    if (folder.exists === 0) {
+      // No SELECT happens here, so there is no UIDVALIDITY to record; a
+      // delta check treats 0 as unknown and adopts the server's value.
+      await upsertFolderSyncState(emptyFolderState(accountId, folder.raw_path, { uidvalidity: 0, uidnext: 1 }));
+      continue;
+    }
 
     // Circuit breaker: skip remaining folders after too many consecutive failures
     if (consecutiveFailures >= CIRCUIT_BREAKER_MAX_FAILURES) {
@@ -610,7 +636,10 @@ export async function imapInitialSync(
       // Reset circuit breaker on success
       consecutiveFailures = 0;
 
-      if (uidsToFetch.length === 0) continue;
+      if (uidsToFetch.length === 0) {
+        await upsertFolderSyncState(emptyFolderState(accountId, folder.raw_path, searchResult.folder_status));
+        continue;
+      }
 
       // Date filter config
       const cutoffDate = Math.floor(Date.now() / 1000) - daysBack * 86400;
@@ -1053,6 +1082,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
   // Handle new folders: search for UIDs then fetch in chunks
   let consecutiveFailures = 0;
+  let succeededFolders = 0;
   const deltaFolderErrors: string[] = [];
   for (const folder of newFolders) {
     // Circuit breaker: skip remaining new folders after too many failures
@@ -1072,7 +1102,15 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
       const searchResult = await imapSearchFolder(config, folder.raw_path, sinceDate);
       consecutiveFailures = 0;
 
-      if (searchResult.uids.length === 0) continue;
+      if (searchResult.uids.length === 0) {
+        folderStates.push({
+          state: emptyFolderState(accountId, folder.raw_path, searchResult.folder_status),
+          floor: 0,
+          undeliveredUids: [],
+        });
+        succeededFolders++;
+        continue;
+      }
 
       const { messages, lastUid, undeliveredUids } = await fetchMessagesInBatches(
         config,
@@ -1103,6 +1141,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
         floor: 0,
         undeliveredUids,
       });
+      succeededFolders++;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
       console.error(`Delta sync failed for new folder ${folder.path}:`, err);
@@ -1190,7 +1229,16 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
           const sinceDate = computeSinceDate(daysBack);
           const searchResult = await imapSearchFolder(config, folder.raw_path, sinceDate);
-          if (searchResult.uids.length === 0) continue;
+          if (searchResult.uids.length === 0) {
+            // The old row would pair the previous last_uid with the new UIDVALIDITY.
+            folderStates.push({
+              state: emptyFolderState(accountId, folder.raw_path, searchResult.folder_status),
+              floor: 0,
+              undeliveredUids: [],
+            });
+            succeededFolders++;
+            continue;
+          }
 
           const { messages, lastUid, undeliveredUids } = await fetchMessagesInBatches(
             config,
@@ -1221,11 +1269,15 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
             floor: 0,
             undeliveredUids,
           });
+          succeededFolders++;
           continue;
         }
 
         // Normal delta: fetch the new UIDs returned by delta check
-        if (deltaResult.new_uids.length === 0) continue;
+        if (deltaResult.new_uids.length === 0) {
+          succeededFolders++;
+          continue;
+        }
 
         const { messages, lastUid, uidvalidity, undeliveredUids } = await fetchMessagesInBatches(
           config,
@@ -1256,6 +1308,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           floor: savedState.last_uid,
           undeliveredUids,
         });
+        succeededFolders++;
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
         console.error(`Delta sync failed for folder ${folder.path}:`, err);
@@ -1264,9 +1317,15 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     }
   }
 
-  // If no new messages found and every folder errored, propagate the error
-  if (allThreadable.length === 0 && deltaFolderErrors.length > 0) {
-    throw new Error(`All folders failed to sync: ${deltaFolderErrors[0]}`);
+  // One folder that cannot be synced must not turn the whole account red:
+  // throw only when no folder got through, otherwise report the partial failure.
+  if (deltaFolderErrors.length > 0) {
+    if (succeededFolders === 0 && allThreadable.length === 0) {
+      throw new Error(`All folders failed to sync: ${deltaFolderErrors[0]}`);
+    }
+    console.warn(
+      `[imapSync] Delta sync partially failed, ${deltaFolderErrors.length} folder(s) will be retried: ${deltaFolderErrors.join("; ")}`,
+    );
   }
 
   if (allThreadable.length === 0) {

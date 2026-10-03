@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextSyncDisplay } from "./syncStatus";
+import { nextSyncDisplay, syncProgressMessage } from "./syncStatus";
 
 describe("nextSyncDisplay", () => {
   it("goes idle when a sync finishes cleanly", () => {
@@ -62,5 +62,14 @@ describe("nextSyncDisplay", () => {
     nextSyncDisplay(errors, "c", "syncing", "Syncing...", syncing);
     nextSyncDisplay(errors, "c", "error", "Sync failed: C", syncing);
     expect(nextSyncDisplay(errors, "b", "removed", null, syncing)).toEqual({ state: "error", message: "Sync failed: C" });
+  });
+});
+
+describe("syncProgressMessage", () => {
+  it("names the phase and its counts", () => {
+    expect(syncProgressMessage()).toBe("Syncing...");
+    expect(syncProgressMessage({ phase: "labels", current: 0, total: 1 })).toBe("Syncing labels...");
+    expect(syncProgressMessage({ phase: "threads", current: 2, total: 9 })).toBe("Building threads... (2/9)");
+    expect(syncProgressMessage({ phase: "messages", current: 3, total: 7 })).toBe("Syncing: 3/7 messages");
   });
 });

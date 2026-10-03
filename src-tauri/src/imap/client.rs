@@ -143,7 +143,7 @@ fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_tls::TlsConn
 
 // ---------- Public API ----------
 
-type ImapSession = Session<ImapStream>;
+pub(crate) type ImapSession = Session<ImapStream>;
 
 /// Establish an IMAP connection and authenticate.
 ///

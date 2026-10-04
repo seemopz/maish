@@ -525,13 +525,12 @@ pub async fn set_flags(
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let query = format!("{flag_op} {flags}");
-    tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+    let items = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
         let stream = session
             .uid_store(uid_set, &query)
             .await
             .map_err(|e| format!("UID STORE failed: {e}"))?;
-        let _: Vec<_> = stream.collect().await;
-        Ok::<_, String>(())
+        Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await
     .map_err(|_| {
@@ -539,7 +538,9 @@ pub async fn set_flags(
             "UID STORE timed out after {}s — check your server settings or network connection",
             IMAP_CMD_TIMEOUT.as_secs()
         )
-    })?
+    })??;
+    collect_ok(session, items);
+    Ok(())
 }
 
 /// Move messages between folders.
@@ -566,16 +567,16 @@ pub async fn move_messages(
                 .map_err(|_| format!("UID COPY timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
                 .map_err(|e| format!("UID COPY failed: {e}"))?;
 
-            tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+            let items = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
                 let store_stream = session
                     .uid_store(uid_set, "+FLAGS (\\Deleted)")
                     .await
                     .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
-                let _: Vec<_> = store_stream.collect().await;
-                Ok::<_, String>(())
+                Ok::<_, String>(store_stream.collect::<Vec<_>>().await)
             })
             .await
             .map_err(|_| format!("UID STORE +Deleted timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))??;
+            collect_ok(session, items);
 
             expunge_uid_set(session, uid_set).await?;
         }
@@ -668,13 +669,12 @@ async fn expunge_uid_set(session: &mut ImapSession, uid_set: &str) -> Result<(),
             Ok(())
         }
         ExpungeMode::ByUid => {
-            tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+            let items = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
                 let expunge_stream = session
                     .uid_expunge(uid_set)
                     .await
                     .map_err(|e| format!("UID EXPUNGE failed: {e}"))?;
-                let _: Vec<_> = expunge_stream.collect().await;
-                Ok::<_, String>(())
+                Ok::<_, String>(expunge_stream.collect::<Vec<_>>().await)
             })
             .await
             .map_err(|_| {
@@ -683,6 +683,7 @@ async fn expunge_uid_set(session: &mut ImapSession, uid_set: &str) -> Result<(),
                     IMAP_CMD_TIMEOUT.as_secs()
                 )
             })??;
+            collect_ok(session, items);
             Ok(())
         }
     }
@@ -699,16 +700,16 @@ pub async fn delete_messages(
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
-    tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
+    let items = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
         let store_stream = session
             .uid_store(uid_set, "+FLAGS (\\Deleted)")
             .await
             .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
-        let _: Vec<_> = store_stream.collect().await;
-        Ok::<_, String>(())
+        Ok::<_, String>(store_stream.collect::<Vec<_>>().await)
     })
     .await
     .map_err(|_| format!("UID STORE +Deleted timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))??;
+    collect_ok(session, items);
 
     expunge_uid_set(session, uid_set).await?;
 

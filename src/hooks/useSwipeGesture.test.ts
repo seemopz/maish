@@ -175,4 +175,132 @@ describe("useSwipeGesture", () => {
     expect(hook.result.current.offset).toBe(0);
     expect(onCommit).not.toHaveBeenCalled();
   });
+
+  describe("touch", () => {
+    function pointer(
+      el: HTMLElement,
+      type: string,
+      x: number,
+      y = 0,
+      init: PointerEventInit & { pointerType?: string } = {},
+    ) {
+      const e = new MouseEvent(type, { clientX: x, clientY: y, cancelable: true, bubbles: true });
+      Object.defineProperties(e, {
+        pointerId: { value: init.pointerId ?? 1 },
+        pointerType: { value: init.pointerType ?? "touch" },
+        isPrimary: { value: init.isPrimary ?? true },
+      });
+      act(() => {
+        el.dispatchEvent(e);
+      });
+    }
+
+    it("follows one finger and commits right when lifted past the threshold", () => {
+      const { el, hook } = setup();
+      pointer(el, "pointerdown", 50);
+      pointer(el, "pointermove", 120);
+      pointer(el, "pointermove", 230);
+      expect(hook.result.current.offset).toBe(180);
+      expect(hook.result.current.armed).toBe(true);
+      pointer(el, "pointerup", 230);
+      expect(onCommit).toHaveBeenCalledWith("right");
+      expect(hook.result.current.offset).toBe(0);
+    });
+
+    it("commits left for a finger moving left", () => {
+      const { el } = setup();
+      pointer(el, "pointerdown", 300);
+      pointer(el, "pointermove", 100);
+      pointer(el, "pointerup", 100);
+      expect(onCommit).toHaveBeenCalledWith("left");
+    });
+
+    it("snaps back below the threshold", () => {
+      const { el, hook } = setup();
+      pointer(el, "pointerdown", 50);
+      pointer(el, "pointermove", 150); // 100 < 160
+      pointer(el, "pointerup", 150);
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(hook.result.current.offset).toBe(0);
+    });
+
+    it("leaves a vertical start to scrolling", () => {
+      const { el, hook } = setup();
+      pointer(el, "pointerdown", 50, 50);
+      pointer(el, "pointermove", 60, 120);
+      pointer(el, "pointermove", 300, 130);
+      pointer(el, "pointerup", 300, 130);
+      expect(hook.result.current.offset).toBe(0);
+      expect(onCommit).not.toHaveBeenCalled();
+    });
+
+    it("stays idle for movement inside the slop (a tap)", () => {
+      const { el, hook } = setup();
+      pointer(el, "pointerdown", 50);
+      pointer(el, "pointermove", 55);
+      expect(hook.result.current.offset).toBe(0);
+    });
+
+    it("drops the swipe on pointercancel (browser took over)", () => {
+      const { el, hook } = setup();
+      pointer(el, "pointerdown", 50);
+      pointer(el, "pointermove", 230);
+      pointer(el, "pointercancel", 230);
+      expect(hook.result.current.offset).toBe(0);
+      pointer(el, "pointerup", 230);
+      expect(onCommit).not.toHaveBeenCalled();
+    });
+
+    it("never swipes with a mouse", () => {
+      const { el, hook } = setup();
+      pointer(el, "pointerdown", 50, 0, { pointerType: "mouse" });
+      pointer(el, "pointermove", 300, 0, { pointerType: "mouse" });
+      pointer(el, "pointerup", 300, 0, { pointerType: "mouse" });
+      expect(hook.result.current.offset).toBe(0);
+      expect(onCommit).not.toHaveBeenCalled();
+    });
+
+    it("respects a disallowed direction", () => {
+      const { el, hook } = setup({ allowRight: false });
+      pointer(el, "pointerdown", 50);
+      pointer(el, "pointermove", 300);
+      expect(hook.result.current.offset).toBe(0);
+      pointer(el, "pointerup", 300);
+      expect(onCommit).not.toHaveBeenCalled();
+    });
+
+    it("swallows the click that follows a swipe, then lets clicks through", () => {
+      const { el } = setup();
+      const onClick = vi.fn();
+      el.addEventListener("click", onClick);
+      pointer(el, "pointerdown", 50);
+      pointer(el, "pointermove", 120);
+      pointer(el, "pointerup", 120);
+      act(() => {
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      expect(onClick).not.toHaveBeenCalled();
+      // once: a second click right after is a real tap
+      act(() => {
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets clicks through again after the suppression window when no click came", () => {
+      const { el } = setup();
+      const onClick = vi.fn();
+      el.addEventListener("click", onClick);
+      pointer(el, "pointerdown", 50);
+      pointer(el, "pointermove", 120);
+      pointer(el, "pointerup", 120);
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      act(() => {
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
+  });
 });

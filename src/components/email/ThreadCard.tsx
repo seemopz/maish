@@ -63,7 +63,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
     data: dragData,
   });
 
-  // Two-finger trackpad swipe; a single thread only, never over a multi-selection or a drag.
+  // Two-finger trackpad swipe or one-finger touch swipe; a single thread only, never over a multi-selection or a drag.
   const { offset, armed } = useSwipeGesture(swipeRef, {
     enabled: !hasMultiSelect && !isDragging,
     allowLeft: swipeLeft !== "none",
@@ -115,7 +115,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
   ).toUpperCase();
 
   return (
-    <div ref={swipeRef} className="relative overflow-hidden">
+    <div ref={swipeRef} style={{ touchAction: "pan-y" }} className="relative overflow-hidden">
       {swipeVisual && (
         <div
           aria-hidden="true"

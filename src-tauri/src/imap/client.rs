@@ -12,13 +12,56 @@ use super::types::*;
 
 // ---------- Timeout constants ----------
 
-const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// The kernel already retransmits a lost SYN within one attempt (after about
+/// 1 s, 3 s, 7 s...). Several short attempts add a fresh socket (new source port,
+/// new DNS lookup) when a path stays stalled, and an unreachable host fails after
+/// 18 s instead of 30 s.
+const TCP_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(6);
+const TCP_CONNECT_ATTEMPTS: u32 = 3;
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 const IMAP_CMD_TIMEOUT: Duration = Duration::from_secs(30);
 const IMAP_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 const IMAP_SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 const OVERALL_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Run `connect` up to `attempts` times, each bounded by `per_attempt`. Only a
+/// timeout is retried (a dropped SYN); a refusal or DNS failure is final.
+async fn connect_with_retry<T, Fut>(
+    host: &str,
+    port: u16,
+    attempts: u32,
+    per_attempt: Duration,
+    mut connect: impl FnMut() -> Fut,
+) -> Result<T, String>
+where
+    Fut: std::future::Future<Output = std::io::Result<T>>,
+{
+    for attempt in 1..=attempts {
+        match tokio::time::timeout(per_attempt, connect()).await {
+            Ok(Ok(stream)) => return Ok(stream),
+            Ok(Err(e)) => return Err(format!("TCP connect to {host}:{port} failed: {e}")),
+            Err(_) => {
+                log::warn!("TCP connect to {host}:{port} timed out (attempt {attempt}/{attempts})")
+            }
+        }
+    }
+    Err(format!(
+        "TCP connect to {host}:{port} timed out after {}s — check your server settings or network connection",
+        (per_attempt * attempts).as_secs()
+    ))
+}
+
+async fn tcp_connect(config: &ImapConfig) -> Result<TcpStream, String> {
+    connect_with_retry(
+        &config.host,
+        config.port,
+        TCP_CONNECT_ATTEMPTS,
+        TCP_CONNECT_ATTEMPT_TIMEOUT,
+        || TcpStream::connect((&*config.host, config.port)),
+    )
+    .await
+}
 
 /// Configure TCP keepalive and nodelay on a connected socket.
 fn configure_tcp_socket(stream: &TcpStream) {
@@ -1181,14 +1224,7 @@ struct RawFetchedMessage {
 
 /// Connect via STARTTLS for raw TCP operations.
 async fn raw_connect_starttls(config: &ImapConfig) -> Result<ImapStream, String> {
-    let addr = (&*config.host, config.port);
-    let mut tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
-        .await
-        .map_err(|_| format!(
-            "TCP connect to {}:{} timed out after {}s — check your server settings or network connection",
-            config.host, config.port, TCP_CONNECT_TIMEOUT.as_secs()
-        ))?
-        .map_err(|e| format!("TCP: {e}"))?;
+    let mut tcp = tcp_connect(config).await?;
     configure_tcp_socket(&tcp);
     let mut tmp = vec![0u8; 4096];
     let _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, tcp.read(&mut tmp)).await; // consume greeting
@@ -1452,19 +1488,11 @@ fn extract_literal_size(line: &str) -> Option<usize> {
 
 /// Establish TCP + TLS or plain stream for "tls" and "none" security modes.
 async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
-    let addr = (&*config.host, config.port);
-
     match config.security.as_str() {
         "tls" => {
             let native_connector = build_tls_connector(config.accept_invalid_certs)?;
             let tls_connector = tokio_native_tls::TlsConnector::from(native_connector);
-            let tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
-                .await
-                .map_err(|_| format!(
-                    "TCP connect to {}:{} timed out after {}s — check your server settings or network connection",
-                    config.host, config.port, TCP_CONNECT_TIMEOUT.as_secs()
-                ))?
-                .map_err(|e| format!("TCP connect to {}:{} failed: {e}", config.host, config.port))?;
+            let tcp = tcp_connect(config).await?;
             configure_tcp_socket(&tcp);
             let tls = tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, tls_connector.connect(&config.host, tcp))
                 .await
@@ -1476,13 +1504,7 @@ async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
             Ok(ImapStream::Tls(tls))
         }
         "none" => {
-            let tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
-                .await
-                .map_err(|_| format!(
-                    "TCP connect to {}:{} timed out after {}s — check your server settings or network connection",
-                    config.host, config.port, TCP_CONNECT_TIMEOUT.as_secs()
-                ))?
-                .map_err(|e| format!("TCP connect to {}:{} failed: {e}", config.host, config.port))?;
+            let tcp = tcp_connect(config).await?;
             configure_tcp_socket(&tcp);
             Ok(ImapStream::Plain(tcp))
         }
@@ -1498,14 +1520,7 @@ async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
 /// connection, upgrade the underlying TCP stream to TLS, and then create a new
 /// Client on the TLS stream for authentication.
 async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
-    let addr = (&*config.host, config.port);
-    let mut tcp = tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr))
-        .await
-        .map_err(|_| format!(
-            "TCP connect to {}:{} timed out after {}s — check your server settings or network connection",
-            config.host, config.port, TCP_CONNECT_TIMEOUT.as_secs()
-        ))?
-        .map_err(|e| format!("TCP connect to {}:{} failed: {e}", config.host, config.port))?;
+    let mut tcp = tcp_connect(config).await?;
     configure_tcp_socket(&tcp);
 
     // Read the server greeting
@@ -1971,6 +1986,67 @@ fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The first attempt hangs like a dropped SYN, the retry reaches the (bound,
+    // never-accepting) listener, which is enough for the handshake to complete.
+    #[tokio::test]
+    async fn connect_retries_after_a_lost_syn() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut calls = 0;
+        let started = std::time::Instant::now();
+
+        let stream = connect_with_retry("127.0.0.1", port, 3, Duration::from_millis(100), || {
+            calls += 1;
+            let first = calls == 1;
+            async move {
+                if first {
+                    std::future::pending().await
+                } else {
+                    TcpStream::connect(("127.0.0.1", port)).await
+                }
+            }
+        })
+        .await;
+
+        assert!(stream.is_ok());
+        assert_eq!(calls, 2);
+        assert!(started.elapsed() < Duration::from_millis(300));
+    }
+
+    #[tokio::test]
+    async fn dead_host_fails_with_the_timeout_text() {
+        let err = connect_with_retry::<TcpStream, _>(
+            "10.255.255.1",
+            993,
+            2,
+            Duration::from_millis(50),
+            std::future::pending,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.starts_with("TCP connect to 10.255.255.1:993 timed out after "));
+        assert!(err.ends_with("check your server settings or network connection"));
+    }
+
+    #[tokio::test]
+    async fn refused_connection_is_not_retried() {
+        let port = {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let mut calls = 0;
+        let err = connect_with_retry("127.0.0.1", port, 3, Duration::from_secs(5), || {
+            calls += 1;
+            TcpStream::connect(("127.0.0.1", port))
+        })
+        .await
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert!(err.contains("failed"));
+    }
 
     // A tagged NO/BAD ends the command cleanly, so the connection stays in sync
     // and may be reused. Everything else leaves the stream position unknown: the

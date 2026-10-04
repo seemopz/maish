@@ -644,12 +644,13 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: "Swipe actions",
         summary: "Swipe a conversation with two fingers to act on it.",
         description:
-          "On a trackpad, swipe left or right with two fingers over a conversation in the list. The card follows your fingers and a coloured field with the action's icon appears underneath. Release after about 40 % of the card's width to run the action; release earlier and the card snaps back. By default left deletes and right marks the conversation read or unread.",
+          "On a trackpad, swipe left or right with two fingers over a conversation in the list; on a touchscreen, swipe with one finger. The card follows your fingers and a coloured field with the action's icon appears underneath. Release after about 40 % of the card's width to run the action; release earlier and the card snaps back. By default left deletes and right marks the conversation read or unread.",
         tips: [
           { text: "Choose the action for each direction (delete, archive, read/unread, star, snooze, spam or off) in Settings > General." },
           { text: "Delete, archive, spam and move can be undone for 5 seconds with the toast or the z key." },
           { text: "Swiping works on one conversation at a time and is off while several are selected, in Drafts, and for Delete inside Trash." },
           { text: "Vertical scrolling is never taken over: a gesture that starts vertical stays a scroll." },
+          { text: "On a touchscreen, drag a conversation to a folder by pressing and holding it for a moment first; the mouse still drags right away." },
         ],
         relatedSettingsTab: "general",
       },
@@ -707,7 +708,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         description:
           "Grab a thread (or multiple selected threads) from the email list and drag them onto any label in the sidebar to apply that label. The drop target highlights as you hover over it. This works with both custom labels and system folders like Trash. Multi-selected threads are all labeled at once when you drop them.",
         tips: [
-          { text: "Click and hold a thread to start dragging." },
+          { text: "Click and hold a thread to start dragging. On a touchscreen, press and hold briefly, then move your finger." },
           { text: "Drop onto any label in the sidebar to apply it." },
           { text: "Works with multi-selected threads — all get labeled." },
           { text: "The sidebar label highlights when a valid drop is detected." },

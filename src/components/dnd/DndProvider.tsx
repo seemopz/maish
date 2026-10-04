@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragOverlay,
@@ -70,8 +71,13 @@ export function DndProvider({ children }: DndProviderProps) {
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    // A mouse drags after 8 px; a finger only after a long press, so a swipe
+    // (see useSwipeGesture) and a vertical scroll stay free.
+    useSensor(MouseSensor, {
       activationConstraint: { distance: 8 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 8 },
     }),
   );
 

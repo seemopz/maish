@@ -12,6 +12,10 @@ const LOCK_PX = 12;
 const LINE_PX = 16;
 /** This many shrinking events in a row, each at most half the peak, mean the fingers are off and momentum is playing out. */
 const MOMENTUM_RUN = 4;
+/** A finger has to travel this far (px) before the direction is decided. */
+const TOUCH_SLOP_PX = 10;
+/** The click a finger swipe leaves behind is swallowed for this long (ms). */
+const CLICK_SUPPRESS_MS = 400;
 
 interface SwipeOptions {
   enabled: boolean;
@@ -30,11 +34,14 @@ export interface SwipeState {
 const IDLE_STATE: SwipeState = { offset: 0, armed: false };
 
 /**
- * Two-finger horizontal swipe on an element, read from `wheel` events
- * (a trackpad reports it as `deltaX`). A gesture that starts vertical stays
- * with the browser's scrolling. It ends when the events stop, or as soon as the
- * deltas decay like momentum; the tail of the momentum is then ignored so it
- * cannot start a second swipe.
+ * Horizontal swipe on an element, from two sources: a two-finger trackpad swipe
+ * read from `wheel` events (`deltaX`), and a one-finger swipe read from touch
+ * pointer events (the element needs `touch-action: pan-y` so the browser keeps
+ * only the vertical pan). A gesture that starts vertical stays with the
+ * browser's scrolling. A trackpad swipe ends when the events stop, or as soon as
+ * the deltas decay like momentum; the tail of the momentum is then ignored so it
+ * cannot start a second swipe. A finger swipe ends on lift-off, and the click
+ * that would follow is swallowed. Mouse pointers never swipe (they drag).
  */
 export function useSwipeGesture(
   ref: RefObject<HTMLElement | null>,
@@ -129,9 +136,79 @@ export function useSwipeGesture(
       setState({ offset, armed: Math.abs(offset) >= SWIPE_THRESHOLD * width });
     };
 
+    // One finger. A pointer that is not `touch` is ignored.
+    let touchMode: "idle" | "pending" | "swiping" | "ignored" = "idle";
+    let touchId = -1;
+    let startX = 0;
+    let startY = 0;
+
+    const swallowClick = () => {
+      const stop = (e: Event) => {
+        e.stopPropagation();
+        e.preventDefault();
+      };
+      el.addEventListener("click", stop, { capture: true });
+      setTimeout(() => el.removeEventListener("click", stop, { capture: true }), CLICK_SUPPRESS_MS);
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || !e.isPrimary) return;
+      touchMode = "pending";
+      touchId = e.pointerId;
+      startX = e.clientX;
+      startY = e.clientY;
+      width = el.offsetWidth;
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerId !== touchId || touchMode === "idle" || touchMode === "ignored") return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (touchMode === "pending") {
+        if (Math.abs(dx) < TOUCH_SLOP_PX && Math.abs(dy) < TOUCH_SLOP_PX) return;
+        if (Math.abs(dy) >= Math.abs(dx)) {
+          touchMode = "ignored";
+          return;
+        }
+        touchMode = "swiping";
+      }
+      let next = dx;
+      if (next < 0 && !options.current.allowLeft) next = 0;
+      if (next > 0 && !options.current.allowRight) next = 0;
+      offset = Math.max(-width, Math.min(width, next));
+      setState({ offset, armed: Math.abs(offset) >= SWIPE_THRESHOLD * width });
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerId !== touchId) return;
+      const swiped = touchMode === "swiping";
+      touchMode = "idle";
+      if (!swiped) return;
+      const direction: SwipeDirection = offset < 0 ? "left" : "right";
+      const hit = Math.abs(offset) >= SWIPE_THRESHOLD * width;
+      reset();
+      swallowClick();
+      if (hit) options.current.onCommit(direction);
+    };
+
+    // The browser took the gesture over (vertical scroll) or the system aborted it.
+    const onPointerCancel = (e: PointerEvent) => {
+      if (e.pointerId !== touchId) return;
+      if (touchMode === "swiping") reset();
+      touchMode = "idle";
+    };
+
     el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("pointercancel", onPointerCancel);
     return () => {
       el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("pointercancel", onPointerCancel);
       clearTimeout(timer);
       setState(IDLE_STATE);
     };

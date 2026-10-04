@@ -237,6 +237,13 @@ describe("uiStore", () => {
       expect(useUIStore.getState().mailZoom).toBe(0.5);
     });
 
+    it("keeps a fraction of a percent live but saves whole percent", () => {
+      useUIStore.getState().setMailZoom(1.0034);
+      expect(useUIStore.getState().mailZoom).toBe(1.0034);
+      vi.advanceTimersByTime(400);
+      expect(setSetting).toHaveBeenCalledWith("mail_zoom", "1");
+    });
+
     it("saves only the last level of a burst of changes", () => {
       useUIStore.getState().setMailZoom(1.1);
       useUIStore.getState().setMailZoom(1.2);

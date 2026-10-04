@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { setSetting } from "@/services/db/settings";
-import { clampMailZoom, MAIL_ZOOM_DEFAULT } from "@/utils/mailZoom";
+import { clampMailZoom, roundMailZoom, MAIL_ZOOM_DEFAULT } from "@/utils/mailZoom";
 import { DEFAULT_SWIPE_LEFT, DEFAULT_SWIPE_RIGHT, type SwipeAction } from "@/utils/swipeActions";
 
 type Theme = "light" | "dark" | "system";
@@ -149,7 +149,7 @@ export const useUIStore = create<UIState>((set) => ({
     const mailZoom = clampMailZoom(zoom);
     clearTimeout(zoomSaveTimer);
     zoomSaveTimer = setTimeout(() => {
-      setSetting("mail_zoom", String(mailZoom)).catch(() => {});
+      setSetting("mail_zoom", String(roundMailZoom(mailZoom))).catch(() => {});
     }, ZOOM_SAVE_DELAY_MS);
     set({ mailZoom });
   },

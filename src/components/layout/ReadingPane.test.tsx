@@ -92,6 +92,12 @@ describe("ReadingPane zoom", () => {
     expect(useUIStore.getState().mailZoom).toBeLessThan(1);
   });
 
+  it("follows a slow pinch made of fractions of a pixel", () => {
+    render(<ReadingPane />);
+    for (let i = 0; i < 50; i++) fireEvent.wheel(pane(), { ctrlKey: true, deltaY: -0.4 });
+    expect(useUIStore.getState().mailZoom).toBeGreaterThan(1.1);
+  });
+
   it("leaves a plain wheel alone", () => {
     render(<ReadingPane />);
     fireEvent.wheel(pane(), { deltaY: -10 });

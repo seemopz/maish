@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from "react";
 import { useUIStore } from "@/stores/uiStore";
-import { MAIL_ZOOM_DEFAULT, MAIL_ZOOM_STEP } from "@/utils/mailZoom";
+import { MAIL_ZOOM_DEFAULT, MAIL_ZOOM_STEP, roundMailZoom } from "@/utils/mailZoom";
 
 /** Wheel events in line mode (deltaMode 1) count this many px per line. */
 const LINE_PX = 16;
@@ -32,8 +32,8 @@ export function useMailZoom(ref: RefObject<HTMLElement | null>, enabled: boolean
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       const { mailZoom, setMailZoom } = useUIStore.getState();
-      if (e.key === "+" || e.key === "=") setMailZoom(mailZoom + MAIL_ZOOM_STEP);
-      else if (e.key === "-" || e.key === "_") setMailZoom(mailZoom - MAIL_ZOOM_STEP);
+      if (e.key === "+" || e.key === "=") setMailZoom(roundMailZoom(roundMailZoom(mailZoom) + MAIL_ZOOM_STEP));
+      else if (e.key === "-" || e.key === "_") setMailZoom(roundMailZoom(roundMailZoom(mailZoom) - MAIL_ZOOM_STEP));
       else if (e.key === "0") setMailZoom(MAIL_ZOOM_DEFAULT);
       else return;
       e.preventDefault();

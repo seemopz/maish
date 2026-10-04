@@ -188,6 +188,23 @@ export function EmailRenderer({
         return;
       }
 
+      // Wheel events do not leave the frame, so the frame reports them and they
+      // are replayed on the iframe element, where an ancestor's swipe gesture
+      // (`useSwipeGesture`) sees them like any other wheel event.
+      if (data.type === "maish:wheel") {
+        const { deltaX, deltaY, deltaMode } = data as Record<string, unknown>;
+        if (typeof deltaX !== "number" || typeof deltaY !== "number") return;
+        if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+        iframe.dispatchEvent(new WheelEvent("wheel", {
+          deltaX,
+          deltaY,
+          deltaMode: deltaMode === 1 ? 1 : 0,
+          bubbles: true,
+          cancelable: true,
+        }));
+        return;
+      }
+
       if (data.type === "maish:link" && typeof data.url === "string") {
         if (!isOpenableUrl(data.url)) return;
 

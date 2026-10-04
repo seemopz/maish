@@ -236,6 +236,18 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         relatedSettingsTab: "general",
       },
       {
+        id: "swipe-between-mails",
+        icon: MoveHorizontal,
+        title: "Swipe to the next mail",
+        summary: "Swipe the open mail to step through the list.",
+        description:
+          "On a trackpad, swipe left with two fingers over an open mail to open the next one in the list, or swipe right for the previous one. It steps through the same order as j and k, and does nothing at the first or last mail. A swipe that starts on a wide table or code block in the message that can still scroll sideways scrolls that content instead.",
+        tips: [
+          { text: "Next / previous mail with the keyboard", shortcut: "j / k" },
+          { text: "Release after about 40 % of the pane's width to turn the page; release earlier and it snaps back." },
+        ],
+      },
+      {
         id: "mark-as-read",
         icon: Eye,
         title: "Mark-as-read behavior",

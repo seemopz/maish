@@ -19,15 +19,28 @@ export async function enqueuePendingOperation(
   operationType: string,
   resourceId: string,
   params: Record<string, unknown>,
+  /** Seconds before the queue processor may pick the operation up. */
+  delaySec = 0,
 ): Promise<string> {
   const db = await getDb();
   const id = crypto.randomUUID();
+  const nextRetryAt = delaySec > 0 ? Math.floor(Date.now() / 1000) + delaySec : null;
   await db.execute(
-    `INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, accountId, operationType, resourceId, JSON.stringify(params)],
+    `INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, next_retry_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, accountId, operationType, resourceId, JSON.stringify(params), nextRetryAt],
   );
   return id;
+}
+
+/** Keep the queue processor away from an operation for `delaySec` seconds (0 = release it). */
+export async function holdOperation(id: string, delaySec: number): Promise<void> {
+  const db = await getDb();
+  const nextRetryAt = delaySec > 0 ? Math.floor(Date.now() / 1000) + delaySec : null;
+  await db.execute(`UPDATE pending_operations SET next_retry_at = $1 WHERE id = $2`, [
+    nextRetryAt,
+    id,
+  ]);
 }
 
 export async function getPendingOperations(

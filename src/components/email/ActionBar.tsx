@@ -161,7 +161,7 @@ export function ActionBar({ thread, messages, noReply, defaultReplyMode = "reply
       updateThread(thread.id, { isMuted: true });
       try {
         await muteThreadDb(activeAccountId, thread.id);
-        await archiveThread(activeAccountId, thread.id, []);
+        await archiveThread(activeAccountId, thread.id, [], { undo: false });
       } catch (err) {
         console.error("Failed to mute:", err);
         await unmuteThreadDb(activeAccountId, thread.id);

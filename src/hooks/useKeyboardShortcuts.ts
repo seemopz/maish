@@ -14,7 +14,7 @@ import { getMessagesForThread } from "@/services/db/messages";
 import { parseUnsubscribeUrl } from "@/components/email/MessageItem";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { triggerSync } from "@/services/gmail/syncManager";
-import { undoPending } from "@/services/undoableActions";
+import { undoPending, undoBatch } from "@/services/undoableActions";
 
 /**
  * Parse a key binding string and check if it matches a keyboard event.
@@ -303,9 +303,11 @@ async function executeAction(actionId: string): Promise<void> {
       const multiIds = useThreadStore.getState().selectedThreadIds;
       if (multiIds.size > 0 && activeAccountId) {
         const ids = [...multiIds];
-        for (const id of ids) {
-          await archiveThread(activeAccountId, id, []);
-        }
+        await undoBatch(async () => {
+          for (const id of ids) {
+            await archiveThread(activeAccountId, id, []);
+          }
+        });
       } else if (selectedId && activeAccountId) {
         await archiveThread(activeAccountId, selectedId, []);
       }
@@ -318,6 +320,7 @@ async function executeAction(actionId: string): Promise<void> {
       const multiDeleteIds = useThreadStore.getState().selectedThreadIds;
       if (multiDeleteIds.size > 0 && activeAccountId) {
         const ids = [...multiDeleteIds];
+        await undoBatch(async () => {
         for (const id of ids) {
           if (isTrashView) {
             await permanentDeleteThread(activeAccountId, id, []);
@@ -334,6 +337,7 @@ async function executeAction(actionId: string): Promise<void> {
             await trashThread(activeAccountId, id, []);
           }
         }
+        });
       } else if (selectedId && activeAccountId) {
         if (isTrashView) {
           await permanentDeleteThread(activeAccountId, selectedId, []);
@@ -366,9 +370,11 @@ async function executeAction(actionId: string): Promise<void> {
       const multiSpamIds = useThreadStore.getState().selectedThreadIds;
       if (multiSpamIds.size > 0 && activeAccountId) {
         const ids = [...multiSpamIds];
-        for (const id of ids) {
-          await spamThread(activeAccountId, id, [], !isSpamView);
-        }
+        await undoBatch(async () => {
+          for (const id of ids) {
+            await spamThread(activeAccountId, id, [], !isSpamView);
+          }
+        });
       } else if (selectedId && activeAccountId) {
         await spamThread(activeAccountId, selectedId, [], !isSpamView);
       }
@@ -431,7 +437,7 @@ async function executeAction(actionId: string): Promise<void> {
             useThreadStore.getState().updateThread(id, { isMuted: false });
           } else {
             await muteThreadDb(activeAccountId, id);
-            await archiveThread(activeAccountId, id, []);
+            await archiveThread(activeAccountId, id, [], { undo: false });
           }
         }
       } else if (selectedId && activeAccountId) {
@@ -442,7 +448,7 @@ async function executeAction(actionId: string): Promise<void> {
             useThreadStore.getState().updateThread(selectedId, { isMuted: false });
           } else {
             await muteThreadDb(activeAccountId, selectedId);
-            await archiveThread(activeAccountId, selectedId, []);
+            await archiveThread(activeAccountId, selectedId, [], { undo: false });
           }
         }
       }

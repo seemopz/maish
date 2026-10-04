@@ -1,12 +1,16 @@
 import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
-import { enqueuePendingOperation } from "@/services/db/pendingOperations";
+import {
+  enqueuePendingOperation,
+  deleteOperation,
+  holdOperation,
+} from "@/services/db/pendingOperations";
 import { classifyError } from "@/utils/networkErrors";
 import { getDb } from "@/services/db/connection";
 import { getMessageIdsForThread } from "@/services/db/messages";
 import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
-import { registerUndoable } from "@/services/undoableActions";
+import { registerUndoable, UNDO_WINDOW_MS } from "@/services/undoableActions";
 import { logToFile } from "@/services/logFile";
 
 // ---------------------------------------------------------------------------
@@ -426,6 +430,40 @@ async function captureRevert(
   };
 }
 
+/**
+ * Send an action that waited out its undo window and is already in the queue.
+ * Offline, or on a retryable error, the queued row stays and the processor
+ * takes over; otherwise it is removed once the server has the change.
+ */
+async function sendQueued(
+  accountId: string,
+  action: EmailAction,
+  opId: string,
+): Promise<ActionResult> {
+  if (!useUIStore.getState().isOnline) {
+    await holdOperation(opId, 0);
+    return { success: true, queued: true };
+  }
+  // Lease the row so the queue processor does not send it a second time
+  // while this call is in flight; if we die here it is retried after the lease.
+  await holdOperation(opId, 60);
+  try {
+    const data = await executeViaProvider(accountId, action);
+    await deleteOperation(opId);
+    return { success: true, data };
+  } catch (err) {
+    const classified = classifyError(err);
+    if (classified.isRetryable) {
+      await holdOperation(opId, 0);
+      return { success: true, queued: true };
+    }
+    await deleteOperation(opId);
+    revertOptimisticUpdate(action);
+    console.error(`Email action ${action.type} failed permanently:`, err);
+    return { success: false, error: classified.message };
+  }
+}
+
 export async function executeEmailAction(
   accountId: string,
   inputAction: EmailAction,
@@ -454,18 +492,35 @@ export async function executeEmailAction(
     console.warn("Local DB update failed:", err);
   }
 
-  // 3. Undoable actions wait out the undo window before they leave the device
+  // 3. Undoable actions wait out the undo window before they leave the device.
+  // The call is queued now with a delayed retry time, so it survives a quit.
   if (undo && revert) {
-    registerUndoable(undo.kind, undo.describe, {
-      revert,
-      commit: async () => {
-        const result = await dispatchAction(accountId, action);
-        if (!result.success) {
-          logToFile("error", `Email action ${action.type} failed: ${result.error ?? "unknown error"}`);
-        }
-      },
-    });
-    return { success: true };
+    try {
+      const opId = await enqueuePendingOperation(
+        accountId,
+        action.type,
+        getResourceId(action),
+        actionToParams(action),
+        Math.ceil(UNDO_WINDOW_MS / 1000) + 1,
+      );
+      const restoreLabels = revert;
+      registerUndoable(undo.kind, undo.describe, {
+        revert: async () => {
+          await deleteOperation(opId);
+          await restoreLabels();
+        },
+        commit: async () => {
+          const result = await sendQueued(accountId, action, opId);
+          if (!result.success) {
+            logToFile("error", `Email action ${action.type} failed: ${result.error ?? "unknown error"}`);
+          }
+        },
+      });
+      return { success: true };
+    } catch (err) {
+      // Not queued, so not protected: send it now instead of holding it in memory.
+      console.warn("Could not queue action for undo:", err);
+    }
   }
 
   // 4. Offline queue or provider

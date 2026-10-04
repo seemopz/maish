@@ -24,6 +24,8 @@ vi.mock("@/services/email/providerFactory", () => ({
 
 vi.mock("@/services/db/pendingOperations", () => ({
   enqueuePendingOperation: vi.fn(() => Promise.resolve("op-1")),
+  deleteOperation: vi.fn(() => Promise.resolve()),
+  holdOperation: vi.fn(() => Promise.resolve()),
 }));
 
 const { mockDbExecute, mockDbSelect } = vi.hoisted(() => ({
@@ -48,7 +50,7 @@ vi.mock("@/router/navigate", () => ({
 import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
-import { enqueuePendingOperation } from "@/services/db/pendingOperations";
+import { enqueuePendingOperation, deleteOperation, holdOperation } from "@/services/db/pendingOperations";
 import {
   archiveThread,
   trashThread,
@@ -62,7 +64,7 @@ import {
 } from "./emailActions";
 import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
 import { useUndoStore } from "@/stores/undoStore";
-import { flushPendingUndo, undoPending } from "./undoableActions";
+import { flushPendingUndo, undoPending, undoBatch } from "./undoableActions";
 import { createMockEmailProvider, createMockUIStoreState, createMockThreadStoreState } from "@/test/mocks";
 
 const mockProvider = createMockEmailProvider();
@@ -430,42 +432,76 @@ describe("emailActions undo", () => {
     expect(useUndoStore.getState().message).toBe("Conversation archived");
   });
 
-  it("sends the call after the window", async () => {
+  it("stores the call in the queue at once, delayed past the window, so a quit loses nothing", async () => {
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    expect(enqueuePendingOperation).toHaveBeenCalledWith(
+      "acct-1",
+      "archive",
+      "t1",
+      { threadId: "t1", messageIds: ["m1"] },
+      6,
+    );
+  });
+
+  it("sends the call after the window and removes the queued copy", async () => {
     await archiveThread("acct-1", "t1", ["m1"]);
     await flushPendingUndo();
 
     expect(mockProvider.archive).toHaveBeenCalledWith("t1", ["m1"]);
+    expect(holdOperation).toHaveBeenCalledWith("op-1", 60);
+    expect(deleteOperation).toHaveBeenCalledWith("op-1");
   });
 
-  it("queues the call at commit time while offline", async () => {
+  it("leaves the queued copy to the processor while offline", async () => {
     vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({ isOnline: false }));
     await trashThread("acct-1", "t1", ["m1"]);
-    expect(enqueuePendingOperation).not.toHaveBeenCalled();
 
     await flushPendingUndo();
-    expect(enqueuePendingOperation).toHaveBeenCalledWith("acct-1", "trash", "t1", {
-      threadId: "t1",
-      messageIds: ["m1"],
-    });
+
     expect(mockProvider.trash).not.toHaveBeenCalled();
+    expect(holdOperation).toHaveBeenCalledWith("op-1", 0);
+    expect(deleteOperation).not.toHaveBeenCalled();
   });
 
-  it("undo sends nothing and queues nothing", async () => {
+  it("releases the queued copy again on a retryable error", async () => {
+    mockProvider.archive.mockRejectedValueOnce(new Error("network error"));
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    await flushPendingUndo();
+
+    expect(holdOperation).toHaveBeenLastCalledWith("op-1", 0);
+    expect(deleteOperation).not.toHaveBeenCalled();
+  });
+
+  it("sends at once when it cannot be queued", async () => {
+    vi.mocked(enqueuePendingOperation).mockRejectedValueOnce(new Error("db locked"));
+
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    expect(mockProvider.archive).toHaveBeenCalledWith("t1", ["m1"]);
+    expect(useUndoStore.getState().message).toBeNull();
+  });
+
+  it("undo takes the call out of the queue and sends nothing", async () => {
     await archiveThread("acct-1", "t1", ["m1"]);
     await undoPending();
     await flushPendingUndo();
 
+    expect(deleteOperation).toHaveBeenCalledWith("op-1");
     expect(mockProvider.archive).not.toHaveBeenCalled();
-    expect(enqueuePendingOperation).not.toHaveBeenCalled();
   });
 
   it("undo of a multi-select takes back every thread", async () => {
-    await archiveThread("acct-1", "t1", ["m1"]);
-    await archiveThread("acct-1", "t2", ["m2"]);
+    await undoBatch(async () => {
+      await archiveThread("acct-1", "t1", ["m1"]);
+      await archiveThread("acct-1", "t2", ["m2"]);
+    });
     expect(useUndoStore.getState().message).toBe("2 conversations archived");
 
     await undoPending();
     await flushPendingUndo();
+    expect(deleteOperation).toHaveBeenCalledTimes(2);
     expect(mockProvider.archive).not.toHaveBeenCalled();
   });
 

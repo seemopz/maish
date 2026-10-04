@@ -7,6 +7,7 @@ import {
   registerUndoable,
   flushPendingUndo,
   undoPending,
+  undoBatch,
   UNDO_WINDOW_MS,
 } from "./undoableActions";
 
@@ -97,6 +98,21 @@ describe("undoableActions", () => {
 
     expect(a.commit).toHaveBeenCalledTimes(1);
     expect(useUndoStore.getState().message).toBe("1 done");
+  });
+
+  it("an explicit batch stays one batch however far apart the calls are", async () => {
+    const [a, b] = [item(), item()];
+    await undoBatch(async () => {
+      registerUndoable("archive", describeN, a);
+      await vi.advanceTimersByTimeAsync(3000);
+      registerUndoable("archive", describeN, b);
+    });
+    expect(a.commit).not.toHaveBeenCalled();
+    expect(useUndoStore.getState().message).toBe("2 done");
+
+    await undoPending();
+    expect(a.revert).toHaveBeenCalledTimes(1);
+    expect(b.revert).toHaveBeenCalledTimes(1);
   });
 
   it("a failing commit does not stop the others", async () => {

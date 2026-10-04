@@ -14,6 +14,7 @@ import {
   getPendingOperations,
   updateOperationStatus,
   deleteOperation,
+  holdOperation,
   incrementRetry,
   getPendingOpsCount,
   getFailedOpsCount,
@@ -42,6 +43,32 @@ describe("pendingOperations DB service", () => {
         expect.stringContaining("INSERT INTO pending_operations"),
         expect.arrayContaining(["acct-1", "archive", "thread-1"]),
       );
+    });
+  });
+
+  describe("delayed operations", () => {
+    it("enqueues with no retry time by default", async () => {
+      await enqueuePendingOperation("acct-1", "archive", "thread-1", {});
+      const args = mockDb.execute.mock.calls.at(-1)![1] as unknown[];
+      expect(args[5]).toBeNull();
+    });
+
+    it("enqueues with a retry time `delaySec` seconds ahead", async () => {
+      const before = Math.floor(Date.now() / 1000);
+      await enqueuePendingOperation("acct-1", "archive", "thread-1", {}, 6);
+      const args = mockDb.execute.mock.calls.at(-1)![1] as unknown[];
+      expect(args[5]).toBeGreaterThanOrEqual(before + 6);
+      expect(args[5]).toBeLessThanOrEqual(before + 8);
+    });
+
+    it("holdOperation pushes the retry time out, and 0 releases it", async () => {
+      await holdOperation("op-1", 60);
+      expect(mockDb.execute).toHaveBeenLastCalledWith(
+        expect.stringContaining("SET next_retry_at"),
+        [expect.any(Number), "op-1"],
+      );
+      await holdOperation("op-1", 0);
+      expect(mockDb.execute).toHaveBeenLastCalledWith(expect.anything(), [null, "op-1"]);
     });
   });
 

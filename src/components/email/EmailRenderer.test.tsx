@@ -228,6 +228,8 @@ describe("EmailRenderer", () => {
 
       postFromFrame(iframe, { type: "maish:wheel", deltaX: 7, deltaY: 1 }, window);
       postFromFrame(iframe, { type: "maish:wheel", deltaX: "7", deltaY: 1 });
+      expect(() => postFromFrame(iframe, { type: "maish:wheel", deltaX: NaN, deltaY: 1 })).not.toThrow();
+      postFromFrame(iframe, { type: "maish:wheel", deltaX: Infinity, deltaY: 1 });
       document.removeEventListener("wheel", onWheel);
 
       expect(seen).toHaveLength(0);

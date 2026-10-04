@@ -21,9 +21,12 @@ export function ReadingPane() {
     return i < 1 ? null : s.threads[i - 1]?.id ?? null;
   });
 
-  // Swiping left turns to the next mail, right to the previous one.
+  // Swiping left turns to the next mail, right to the previous one. Like j/k it
+  // stays put while a field has focus: leaving would drop an unsent inline reply.
   const paneRef = useRef<HTMLDivElement>(null);
   const onCommit = useCallback((direction: SwipeDirection) => {
+    const active = document.activeElement as HTMLElement | null;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
     const id = direction === "left" ? nextId : prevId;
     if (id) navigateToThread(id);
   }, [nextId, prevId]);

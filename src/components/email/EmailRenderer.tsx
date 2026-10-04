@@ -194,6 +194,7 @@ export function EmailRenderer({
       if (data.type === "maish:wheel") {
         const { deltaX, deltaY, deltaMode } = data as Record<string, unknown>;
         if (typeof deltaX !== "number" || typeof deltaY !== "number") return;
+        if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
         iframe.dispatchEvent(new WheelEvent("wheel", {
           deltaX,
           deltaY,

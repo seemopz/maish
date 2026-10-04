@@ -57,6 +57,8 @@
     "wheel",
     function (event) {
       if (event.ctrlKey) return; // pinch-zoom arrives as ctrl+wheel
+      // Who owns a gesture is decided on its first event with motion.
+      if (event.deltaX === 0 && event.deltaY === 0) return;
       if (event.timeStamp - lastWheel > GESTURE_IDLE_MS) {
         gestureOwnedByContent = scrollsSideways(event.target, event.deltaX);
       }

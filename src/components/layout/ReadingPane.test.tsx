@@ -57,4 +57,12 @@ describe("ReadingPane swipe", () => {
     swipe(screen.getByTestId("thread-view").parentElement!.parentElement!, -50);
     expect(navigateToThread).not.toHaveBeenCalled();
   });
+  it("stays put while a field has focus, so an unsent reply is not lost", () => {
+    const { container } = render(<ReadingPane />);
+    const input = document.createElement("input");
+    container.appendChild(input);
+    input.focus();
+    swipe(screen.getByTestId("thread-view").parentElement!.parentElement!, 50);
+    expect(navigateToThread).not.toHaveBeenCalled();
+  });
 });

@@ -153,6 +153,19 @@ describe("emailFrame bootstrap", () => {
       expect(posted).toHaveLength(0);
     });
 
+    it("decides who owns a gesture on its first event with motion", () => {
+      document.body.innerHTML = '<pre id="wide">wide</pre>';
+      const pre = document.getElementById("wide")!;
+      makeScrollable(pre, 0);
+      runFrameScript();
+      posted.length = 0;
+
+      wheel(pre, { deltaX: 0, deltaY: 0 }, 1000);
+      wheel(pre, { deltaX: 10 }, 1016);
+
+      expect(posted).toHaveLength(0);
+    });
+
     it("reports a gesture that starts with the content at its edge", () => {
       document.body.innerHTML = '<pre id="wide">wide</pre>';
       const pre = document.getElementById("wide")!;

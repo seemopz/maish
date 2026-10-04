@@ -194,7 +194,7 @@ export function InlineReply({ thread, messages, accountId, noReply, onSent }: In
 
           // Send & archive: remove from inbox if enabled
           if (useUIStore.getState().sendAndArchive) {
-            try { await archiveThread(accountId, thread.id, []); } catch { /* ignore */ }
+            try { await archiveThread(accountId, thread.id, [], { undo: false }); } catch { /* ignore */ }
           }
 
           // Update contacts frequency

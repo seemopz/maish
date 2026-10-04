@@ -55,7 +55,7 @@ Component groups:
 - `help/` — HelpPage, HelpSidebar, HelpSearchBar, HelpCard, HelpCardGrid
 - `labels/` — LabelForm
 - `dnd/` — DndProvider (@dnd-kit drag-and-drop: threads → sidebar labels)
-- `ui/` — EmptyState, Skeleton, ContextMenu, ContextMenuPortal, OfflineBanner, SyncIndicator (sync spinner / error icon in the sidebar's bottom bar, state in `uiStore.syncState`), illustrations/ (InboxClearIllustration, NoAccountIllustration, NoSearchResultsIllustration, ReadingPaneIllustration, GenericEmptyIllustration)
+- `ui/` — UndoActionToast (undo toast for archive / trash / spam / move; logic in `services/undoableActions.ts`, which holds the server call back for 5 s), EmptyState, Skeleton, ContextMenu, ContextMenuPortal, OfflineBanner, SyncIndicator (sync spinner / error icon in the sidebar's bottom bar, state in `uiStore.syncState`), illustrations/ (InboxClearIllustration, NoAccountIllustration, NoSearchResultsIllustration, ReadingPaneIllustration, GenericEmptyIllustration)
 
 ### Multi-window support
 

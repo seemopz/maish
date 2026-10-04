@@ -14,6 +14,7 @@ import { getMessagesForThread } from "@/services/db/messages";
 import { parseUnsubscribeUrl } from "@/components/email/MessageItem";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { triggerSync } from "@/services/gmail/syncManager";
+import { undoPending } from "@/services/undoableActions";
 
 /**
  * Parse a key binding string and check if it matches a keyboard event.
@@ -447,6 +448,9 @@ async function executeAction(actionId: string): Promise<void> {
       }
       break;
     }
+    case "action.undo":
+      await undoPending();
+      break;
     case "action.createTaskFromEmail": {
       if (selectedId) {
         window.dispatchEvent(new CustomEvent("maish-extract-task", { detail: { threadId: selectedId } }));

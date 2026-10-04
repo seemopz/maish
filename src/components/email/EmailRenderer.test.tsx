@@ -18,9 +18,11 @@ vi.mock("@/services/db/imageAllowlist", () => ({
   addToAllowlist: vi.fn(),
 }));
 
+const zoomState = vi.hoisted(() => ({ mailZoom: 1 }));
+
 vi.mock("@/stores/uiStore", () => ({
-  useUIStore: (selector: (s: { theme: string }) => string) =>
-    selector({ theme: "light" }),
+  useUIStore: (selector: (s: { theme: string; mailZoom: number }) => unknown) =>
+    selector({ theme: "light", mailZoom: zoomState.mailZoom }),
 }));
 
 const mockFetchAttachment = vi.fn();
@@ -218,6 +220,47 @@ describe("EmailRenderer", () => {
 
       expect(seen).toHaveLength(1);
       expect(seen[0]).toMatchObject({ deltaX: 7, deltaY: 1, deltaMode: 1, target: iframe });
+    });
+
+    it("replays a pinch report with its ctrl flag, and nothing more than a flag", () => {
+      const { iframe } = renderWithFrame("<p>hi</p>");
+      const seen: WheelEvent[] = [];
+      document.addEventListener("wheel", (e) => seen.push(e), { once: true });
+
+      postFromFrame(iframe, { type: "maish:wheel", ctrlKey: true, deltaX: 0, deltaY: -4 });
+
+      expect(seen[0]).toMatchObject({ ctrlKey: true, deltaY: -4 });
+    });
+
+    it("replays a side-button report as a mouseup on the iframe, only for buttons 3 and 4", () => {
+      const { iframe } = renderWithFrame("<p>hi</p>");
+      const seen: MouseEvent[] = [];
+      const onUp = (e: MouseEvent) => seen.push(e);
+      document.addEventListener("mouseup", onUp);
+
+      postFromFrame(iframe, { type: "maish:mouse", button: 3 });
+      postFromFrame(iframe, { type: "maish:mouse", button: 4 });
+      postFromFrame(iframe, { type: "maish:mouse", button: 0 });
+      postFromFrame(iframe, { type: "maish:mouse", button: 3 }, window);
+      document.removeEventListener("mouseup", onUp);
+
+      expect(seen.map((e) => e.button)).toEqual([3, 4]);
+      expect(seen[0]!.target).toBe(iframe);
+    });
+
+    it("tells the frame the zoom after it loads and when it changes", () => {
+      zoomState.mailZoom = 1;
+      const { container, rerender } = render(<EmailRenderer html="<p>hi</p>" text={null} />);
+      const iframe = container.querySelector("iframe") as HTMLIFrameElement;
+      const post = vi.spyOn(iframe.contentWindow!, "postMessage");
+
+      fireEvent.load(iframe);
+      expect(post).toHaveBeenCalledWith({ type: "maish:zoom", zoom: 1 }, "*");
+
+      zoomState.mailZoom = 1.5;
+      rerender(<EmailRenderer html="<p>hi</p>" text={null} />);
+      expect(post).toHaveBeenLastCalledWith({ type: "maish:zoom", zoom: 1.5 }, "*");
+      zoomState.mailZoom = 1;
     });
 
     it("drops a wheel report from another window or with bad numbers", () => {

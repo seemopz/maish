@@ -220,4 +220,38 @@ describe("uiStore", () => {
     expect(useUIStore.getState().reduceMotion).toBe(false);
   });
 
+
+  describe("mail zoom", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      useUIStore.setState({ mailZoom: 1 });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("clamps the zoom to the allowed range", () => {
+      useUIStore.getState().setMailZoom(10);
+      expect(useUIStore.getState().mailZoom).toBe(3);
+      useUIStore.getState().setMailZoom(0);
+      expect(useUIStore.getState().mailZoom).toBe(0.5);
+    });
+
+    it("keeps a fraction of a percent live but saves whole percent", () => {
+      useUIStore.getState().setMailZoom(1.0034);
+      expect(useUIStore.getState().mailZoom).toBe(1.0034);
+      vi.advanceTimersByTime(400);
+      expect(setSetting).toHaveBeenCalledWith("mail_zoom", "1");
+    });
+
+    it("saves only the last level of a burst of changes", () => {
+      useUIStore.getState().setMailZoom(1.1);
+      useUIStore.getState().setMailZoom(1.2);
+      useUIStore.getState().setMailZoom(1.3);
+      expect(setSetting).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(400);
+      expect(setSetting).toHaveBeenCalledTimes(1);
+      expect(setSetting).toHaveBeenCalledWith("mail_zoom", "1.3");
+    });
+  });
 });

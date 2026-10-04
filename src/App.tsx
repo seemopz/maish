@@ -11,6 +11,7 @@ import { AskInbox } from "./components/search/AskInbox";
 import { useUIStore } from "./stores/uiStore";
 import { useAccountStore } from "./stores/accountStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useMouseNavigation } from "./hooks/useMouseNavigation";
 import { runMigrations } from "./services/db/migrations";
 import { getAllAccounts } from "./services/db/accounts";
 import { getSetting } from "./services/db/settings";
@@ -77,6 +78,7 @@ import { nextSyncDisplay, syncProgressMessage } from "./utils/syncStatus";
 import { router } from "./router";
 import { getSelectedThreadId } from "./router/navigate";
 import { isSwipeAction } from "./utils/swipeActions";
+import { parseMailZoom } from "./utils/mailZoom";
 
 /**
  * Sync bridge: subscribes to router state changes and writes the selected
@@ -114,6 +116,7 @@ export default function App() {
 
   // Register global keyboard shortcuts
   useKeyboardShortcuts();
+  useMouseNavigation();
 
   // Network status detection
   useEffect(() => {
@@ -240,6 +243,10 @@ export default function App() {
         if (isSwipeAction(savedSwipeLeft)) ui.setSwipeLeftAction(savedSwipeLeft);
         const savedSwipeRight = await getSetting("swipe_right_action");
         if (isSwipeAction(savedSwipeRight)) ui.setSwipeRightAction(savedSwipeRight);
+
+        // Restore the mail zoom
+        const savedMailZoom = parseMailZoom(await getSetting("mail_zoom"));
+        if (savedMailZoom !== null) ui.setMailZoom(savedMailZoom);
 
         // Restore default reply mode
         const savedReplyMode = await getSetting("default_reply_mode");

@@ -18,6 +18,8 @@ import {
   Layout,
   Undo2,
   MoveHorizontal,
+  ZoomIn,
+  Mouse,
   CalendarClock,
   CalendarSync,
   Archive,
@@ -245,6 +247,29 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         tips: [
           { text: "Next / previous mail with the keyboard", shortcut: "j / k" },
           { text: "Release after about 40 % of the pane's width to turn the page; release earlier and it snaps back." },
+        ],
+      },
+      {
+        id: "mouse-side-buttons",
+        icon: Mouse,
+        title: "Mouse side buttons",
+        summary: "Back and forward buttons step through your mail.",
+        description:
+          "With a mail open, the back button of your mouse opens the previous mail in the list and the forward button opens the next one, in the same order as k and j. With no mail open, they go back and forward through the screens you visited. They do nothing while you are typing in a field, so an unsent reply is never lost.",
+        tips: [
+          { text: "Same order as a swipe to the right (previous) and to the left (next)." },
+        ],
+      },
+      {
+        id: "zoom-mail",
+        icon: ZoomIn,
+        title: "Zoom the message text",
+        summary: "Make the message larger or smaller.",
+        description:
+          "Pinch on a trackpad or hold Ctrl and turn the mouse wheel over an open mail to zoom the message text between 50 % and 300 %. Ctrl or Cmd with + and - zooms in steps of 10 %, and Ctrl or Cmd with 0 returns to 100 %. Maish remembers the level for the next start.",
+        tips: [
+          { text: "Zoom in / out", shortcut: "Ctrl/Cmd + / -" },
+          { text: "Back to 100 %", shortcut: "Ctrl/Cmd 0" },
         ],
       },
       {

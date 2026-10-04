@@ -16,12 +16,19 @@ function runFrameScript() {
 describe("emailFrame bootstrap", () => {
   let posted: unknown[];
   let listeners: Parameters<Document["addEventListener"]>[];
+  let windowListeners: Parameters<Window["addEventListener"]>[];
 
   beforeEach(() => {
     posted = [];
     // The script listens on `document`, which outlives a test; take its listeners off again.
     listeners = [];
+    windowListeners = [];
     const add = document.addEventListener.bind(document);
+    const addWindow = window.addEventListener.bind(window);
+    vi.spyOn(window, "addEventListener").mockImplementation((...args: Parameters<typeof addWindow>) => {
+      windowListeners.push(args);
+      addWindow(...args);
+    });
     vi.spyOn(document, "addEventListener").mockImplementation((...args: Parameters<typeof add>) => {
       listeners.push(args);
       add(...args);
@@ -34,6 +41,7 @@ describe("emailFrame bootstrap", () => {
 
   afterEach(() => {
     for (const [type, listener, options] of listeners) document.removeEventListener(type, listener, options);
+    for (const [type, listener, options] of windowListeners) window.removeEventListener(type, listener, options);
     vi.restoreAllMocks();
   });
 
@@ -128,14 +136,16 @@ describe("emailFrame bootstrap", () => {
       expect(posted).toContainEqual({ type: "maish:wheel", deltaX: 12, deltaY: 3, deltaMode: 0 });
     });
 
-    it("keeps pinch-zoom (ctrl+wheel) to itself", () => {
+    it("reports pinch-zoom (ctrl+wheel) for the app to zoom the body, and stops the webview zooming", () => {
       document.body.innerHTML = '<p id="t">text</p>';
       runFrameScript();
       posted.length = 0;
 
-      wheel(document.getElementById("t")!, { deltaX: 0, deltaY: 5, ctrlKey: true });
+      const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaX: 3, deltaY: 5, ctrlKey: true });
+      document.getElementById("t")!.dispatchEvent(event);
 
-      expect(posted).toHaveLength(0);
+      expect(posted).toEqual([{ type: "maish:wheel", ctrlKey: true, deltaX: 0, deltaY: 5, deltaMode: 0 }]);
+      expect(event.defaultPrevented).toBe(true);
     });
 
     it("leaves a gesture to content that can still scroll sideways", () => {
@@ -189,6 +199,79 @@ describe("emailFrame bootstrap", () => {
       wheel(pre, { deltaX: -10 }, 1000);
 
       expect(posted).toHaveLength(0);
+    });
+  });
+
+  describe("mouse side buttons", () => {
+    function press(type: "mousedown" | "mouseup", button: number) {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, button });
+      document.body.dispatchEvent(event);
+      return event;
+    }
+
+    it("reports the back and forward buttons and keeps the webview from navigating", () => {
+      runFrameScript();
+      posted.length = 0;
+
+      expect(press("mousedown", 3).defaultPrevented).toBe(true);
+      expect(press("mouseup", 3).defaultPrevented).toBe(true);
+      press("mouseup", 4);
+
+      expect(posted).toEqual([
+        { type: "maish:mouse", button: 3 },
+        { type: "maish:mouse", button: 4 },
+      ]);
+    });
+
+    it("leaves the other buttons alone", () => {
+      runFrameScript();
+      posted.length = 0;
+
+      expect(press("mousedown", 0).defaultPrevented).toBe(false);
+      press("mouseup", 0);
+      press("mouseup", 1);
+
+      expect(posted).toHaveLength(0);
+    });
+  });
+
+  describe("zoom", () => {
+    function tell(data: unknown, source: MessageEventSource | null = window) {
+      window.dispatchEvent(new MessageEvent("message", { data, source }));
+    }
+
+    it("zooms the body to the level the app sends and reports the new height", () => {
+      document.body.innerHTML = "<p>body</p>";
+      vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(200);
+      runFrameScript();
+      vi.spyOn(document.documentElement, "scrollHeight", "get").mockReturnValue(300);
+      posted.length = 0;
+
+      tell({ type: "maish:zoom", zoom: 1.5 });
+
+      expect(document.body.style.zoom).toBe("1.5");
+      expect(posted).toContainEqual({ type: "maish:height", height: 300 });
+    });
+
+    it("ignores a level that is not a positive number", () => {
+      runFrameScript();
+      document.body.style.zoom = "1";
+
+      tell({ type: "maish:zoom", zoom: "2" });
+      tell({ type: "maish:zoom", zoom: 0 });
+      tell({ type: "maish:zoom", zoom: Infinity });
+      tell({ type: "maish:zoom", zoom: -1 });
+
+      expect(document.body.style.zoom).toBe("1");
+    });
+
+    it("ignores a level that did not come from the app window", () => {
+      runFrameScript();
+      document.body.style.zoom = "1";
+
+      tell({ type: "maish:zoom", zoom: 2 }, null);
+
+      expect(document.body.style.zoom).toBe("1");
     });
   });
 });

@@ -4,6 +4,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useSelectedThreadId } from "@/hooks/useRouteNavigation";
 import { navigateToThread } from "@/router/navigate";
 import { useSwipeGesture, type SwipeDirection } from "@/hooks/useSwipeGesture";
+import { useMailZoom } from "@/hooks/useMailZoom";
 import { EmptyState } from "../ui/EmptyState";
 import { ReadingPaneIllustration } from "../ui/illustrations";
 
@@ -36,6 +37,8 @@ export function ReadingPane() {
     allowRight: prevId !== null,
     onCommit,
   });
+
+  useMailZoom(paneRef, selectedThread !== null);
 
   if (!selectedThread) {
     return (

@@ -16,6 +16,7 @@ import {
   deleteOperation,
   claimOperation,
   releaseOperation,
+  releaseExecutingOperations,
   deleteUnclaimedOperation,
   incrementRetry,
   getPendingOpsCount,
@@ -138,6 +139,15 @@ describe("pendingOperations DB service", () => {
     });
   });
 
+  describe("releaseExecutingOperations", () => {
+    it("turns every executing row back into pending", async () => {
+      await releaseExecutingOperations();
+      expect(mockDb.execute).toHaveBeenCalledWith(
+        expect.stringContaining("SET status = 'pending' WHERE status = 'executing'"),
+      );
+    });
+  });
+
   describe("incrementRetry", () => {
     it("increments retry count with exponential backoff", async () => {
       mockDb.select.mockResolvedValueOnce([{ retry_count: 0, max_retries: 10 }]);
@@ -145,6 +155,15 @@ describe("pendingOperations DB service", () => {
       expect(mockDb.execute).toHaveBeenCalledWith(
         expect.stringContaining("retry_count = $1"),
         expect.arrayContaining([1]),
+      );
+    });
+
+    it("requeues the claimed row together with the backoff", async () => {
+      mockDb.select.mockResolvedValueOnce([{ retry_count: 0, max_retries: 10 }]);
+      await incrementRetry("op-1");
+      expect(mockDb.execute).toHaveBeenCalledWith(
+        expect.stringContaining("status = 'pending'"),
+        expect.anything(),
       );
     });
 

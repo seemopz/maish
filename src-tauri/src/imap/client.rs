@@ -143,7 +143,82 @@ fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_tls::TlsConn
 
 // ---------- Public API ----------
 
-pub(crate) type ImapSession = Session<ImapStream>;
+/// An authenticated session plus a record of whether it can serve another
+/// command.
+///
+/// Several commands report a partial result instead of an error when a step
+/// times out or the connection breaks (see `delta_check_folders`). The session
+/// then still looks fine to the caller, but the abandoned command may have left
+/// unread responses on the socket, so the pool must not hand it out again.
+/// [`ImapSession::taint`] records that; the pool checks [`ImapSession::is_clean`].
+pub(crate) struct ImapSession {
+    inner: Session<ImapStream>,
+    clean: bool,
+}
+
+impl ImapSession {
+    fn new(inner: Session<ImapStream>) -> Self {
+        Self { inner, clean: true }
+    }
+
+    /// Mark the session as unfit for reuse.
+    fn taint(&mut self) {
+        self.clean = false;
+    }
+
+    /// Mark the session unfit for reuse unless `err` is a plain server refusal.
+    fn taint_unless_refusal(&mut self, err: &async_imap::error::Error) {
+        if !refusal_leaves_session_usable(err) {
+            self.taint();
+        }
+    }
+
+    pub(crate) fn is_clean(&self) -> bool {
+        self.clean
+    }
+}
+
+impl std::ops::Deref for ImapSession {
+    type Target = Session<ImapStream>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for ImapSession {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+/// A tagged `NO`/`BAD` is a complete answer: the command ended and the
+/// connection is in sync. Anything else (I/O error, lost connection, a response
+/// that did not parse) means the stream position is unknown.
+fn refusal_leaves_session_usable(err: &async_imap::error::Error) -> bool {
+    matches!(
+        err,
+        async_imap::error::Error::No(_) | async_imap::error::Error::Bad(_)
+    )
+}
+
+/// Unwrap the items of a response stream, tainting the session when one of them
+/// is an error that leaves the connection in an unknown state.
+fn collect_ok<T>(
+    session: &mut ImapSession,
+    items: Vec<Result<T, async_imap::error::Error>>,
+) -> Vec<T> {
+    items
+        .into_iter()
+        .filter_map(|r| match r {
+            Ok(v) => Some(v),
+            Err(e) => {
+                session.taint_unless_refusal(&e);
+                None
+            }
+        })
+        .collect()
+}
 
 /// Establish an IMAP connection and authenticate.
 ///
@@ -188,12 +263,10 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
         })?
         .map_err(|e| format!("LIST failed: {e}"))?;
 
-    let names: Vec<_> = tokio::time::timeout(IMAP_CMD_TIMEOUT, names_stream.collect::<Vec<_>>())
+    let names = tokio::time::timeout(IMAP_CMD_TIMEOUT, names_stream.collect::<Vec<_>>())
         .await
-        .map_err(|_| format!("LIST stream timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
-        .into_iter()
-        .filter_map(|r| r.ok())
-        .collect();
+        .map_err(|_| format!("LIST stream timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?;
+    let names = collect_ok(session, names);
 
     let mut folders = Vec::new();
     for name in &names {
@@ -220,7 +293,15 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
         .await
         {
             Ok(Ok(mailbox)) => (mailbox.exists, mailbox.unseen.unwrap_or(0)),
-            _ => (0, 0),
+            Ok(Err(e)) => {
+                session.taint_unless_refusal(&e);
+                (0, 0)
+            }
+            Err(_) => {
+                // The STATUS was abandoned mid-command.
+                session.taint();
+                (0, 0)
+            }
         };
 
         folders.push(ImapFolder {
@@ -287,6 +368,7 @@ pub async fn fetch_messages(
             }
             Err(e) => {
                 fetch_err += 1;
+                session.taint_unless_refusal(&e);
                 log::warn!("IMAP fetch stream error in {folder}: {e}");
             }
         }
@@ -366,7 +448,7 @@ pub async fn fetch_message_body(
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let uid_str = uid.to_string();
-    let fetches: Vec<_> = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
+    let fetches = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
         let stream = session
             .uid_fetch(&uid_str, "(UID FLAGS BODY.PEEK[])")
             .await
@@ -375,10 +457,8 @@ pub async fn fetch_message_body(
     })
     .await
     .map_err(|_| format!("UID FETCH for UID {uid} timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
-    ?
-    .into_iter()
-    .filter_map(|r| r.ok())
-    .collect();
+    ?;
+    let fetches = collect_ok(session, fetches);
 
     let fetch = fetches
         .first()
@@ -701,7 +781,7 @@ pub async fn fetch_attachment(
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let uid_str = uid.to_string();
-    let fetches: Vec<_> = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
+    let fetches = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
         let stream = session
             .uid_fetch(&uid_str, "BODY.PEEK[]")
             .await
@@ -710,10 +790,8 @@ pub async fn fetch_attachment(
     })
     .await
     .map_err(|_| format!("UID FETCH attachment timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
-    ?
-    .into_iter()
-    .filter_map(|r| r.ok())
-    .collect();
+    ?;
+    let fetches = collect_ok(session, fetches);
 
     let fetch = fetches
         .first()
@@ -776,7 +854,7 @@ pub async fn fetch_raw_message(
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
     let uid_str = uid.to_string();
-    let fetches: Vec<_> = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
+    let fetches = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
         let stream = session
             .uid_fetch(&uid_str, "BODY.PEEK[]")
             .await
@@ -785,10 +863,8 @@ pub async fn fetch_raw_message(
     })
     .await
     .map_err(|_| format!("UID FETCH raw message timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
-    ?
-    .into_iter()
-    .filter_map(|r| r.ok())
-    .collect();
+    ?;
+    let fetches = collect_ok(session, fetches);
 
     let fetch = fetches
         .first()
@@ -817,10 +893,12 @@ pub async fn delta_check_folders(
             match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(&req.folder)).await {
                 Ok(Ok(m)) => m,
                 Ok(Err(e)) => {
+                    session.taint_unless_refusal(&e);
                     log::warn!("delta_check: SELECT {} failed: {e}", req.folder);
                     continue;
                 }
                 Err(_) => {
+                    session.taint();
                     log::warn!(
                         "delta_check: SELECT {} timed out after {}s",
                         req.folder,
@@ -854,10 +932,12 @@ pub async fn delta_check_folders(
                 result
             }
             Ok(Err(e)) => {
+                session.taint_unless_refusal(&e);
                 log::warn!("delta_check: UID SEARCH {} failed: {e}", req.folder);
                 vec![]
             }
             Err(_) => {
+                session.taint();
                 log::warn!(
                     "delta_check: UID SEARCH {} timed out after {}s",
                     req.folder,
@@ -945,7 +1025,7 @@ pub async fn test_connection(config: &ImapConfig) -> Result<String, String> {
         )
     })??;
 
-    let _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.logout()).await;
+    let _ = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.inner.logout()).await;
 
     Ok(format!(
         "Connected successfully. Found {} folder(s).",
@@ -1491,11 +1571,13 @@ async fn authenticate(
             client
                 .authenticate("XOAUTH2", auth)
                 .await
+                .map(ImapSession::new)
                 .map_err(|(e, _)| format!("XOAUTH2 authentication failed: {e}"))
         }
         _ => client
             .login(&config.username, &config.password)
             .await
+            .map(ImapSession::new)
             .map_err(|(e, _)| format!("Login failed: {e}")),
     }
 }
@@ -1888,6 +1970,22 @@ fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A tagged NO/BAD ends the command cleanly, so the connection stays in sync
+    // and may be reused. Everything else leaves the stream position unknown: the
+    // pool must drop that session instead of handing it to the next command.
+    #[test]
+    fn only_a_tagged_refusal_leaves_the_session_usable() {
+        use async_imap::error::Error;
+
+        assert!(refusal_leaves_session_usable(&Error::No("nope".into())));
+        assert!(refusal_leaves_session_usable(&Error::Bad("bad".into())));
+        assert!(!refusal_leaves_session_usable(&Error::ConnectionLost));
+        assert!(!refusal_leaves_session_usable(&Error::Io(
+            std::io::ErrorKind::TimedOut.into()
+        )));
+        assert!(!refusal_leaves_session_usable(&Error::Append));
+    }
 
     // A bare EXPUNGE removes every \Deleted message in the mailbox (RFC 3501
     // section 6.4.3), not only the ones this client marked. Clients routinely

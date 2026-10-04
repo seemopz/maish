@@ -9,8 +9,13 @@
 //! - A session is returned to the pool only through [`Lease::release`]. Dropping
 //!   a lease (every `?` on an error path does) discards the session, because an
 //!   error in the middle of a response can leave the protocol state unusable.
+//! - `release` also drops a session the client marked as not clean. Some
+//!   commands swallow a timeout or I/O error and return a partial result, so
+//!   `Ok` alone does not mean the connection is still in sync.
 //! - A session idle for longer than `validate_after` is probed with `NOOP`
-//!   before reuse; one idle for longer than `max_idle` is dropped.
+//!   before reuse; one idle for longer than `max_idle` is dropped. Idle time is
+//!   wall-clock time (`SystemTime`), because `Instant` does not advance while
+//!   the machine sleeps and a session that died overnight would look fresh.
 //! - Nothing is retried here. `move`, `delete` and `append` are not idempotent,
 //!   so a failed command is reported and the next call connects afresh.
 //! - The password or token is held only as a SHA-256 digest, in memory.
@@ -19,7 +24,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
 
@@ -45,6 +50,10 @@ pub(crate) trait Backend: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Self::Session, String>> + Send;
 
     fn noop(&self, session: &mut Self::Session) -> impl Future<Output = Result<(), String>> + Send;
+
+    /// False when the session saw a failure that may have left unread
+    /// responses on the connection.
+    fn is_clean(&self, session: &Self::Session) -> bool;
 }
 
 /// Opens real sessions through `imap::client`.
@@ -62,6 +71,10 @@ impl Backend for ClientBackend {
             .noop()
             .await
             .map_err(|e| format!("NOOP failed: {e}"))
+    }
+
+    fn is_clean(&self, session: &Self::Session) -> bool {
+        session.is_clean()
     }
 }
 
@@ -98,6 +111,23 @@ impl AccountId {
     }
 }
 
+/// Time since `since` on the wall clock. A clock that went backwards counts as
+/// "too old", so the session is probed or dropped rather than trusted.
+fn idle_age(since: SystemTime) -> Duration {
+    SystemTime::now()
+        .duration_since(since)
+        .unwrap_or(Duration::MAX)
+}
+
+/// Drop sessions that sat idle too long, for every account, and the accounts
+/// left without a session.
+fn prune<S>(accounts: &mut HashMap<AccountId, AccountSlot<S>>, max_idle: Duration) {
+    for slot in accounts.values_mut() {
+        slot.idle.retain(|(_, since)| idle_age(*since) <= max_idle);
+    }
+    accounts.retain(|_, slot| !slot.idle.is_empty());
+}
+
 type SecretHash = [u8; 32];
 
 fn hash_secret(secret: &str) -> SecretHash {
@@ -108,7 +138,7 @@ struct AccountSlot<S> {
     /// Digest of the secret the idle sessions logged in with.
     secret: SecretHash,
     /// Oldest first; the most recently used session is reused first.
-    idle: Vec<(S, Instant)>,
+    idle: Vec<(S, SystemTime)>,
 }
 
 struct Shared<B: Backend> {
@@ -168,7 +198,7 @@ impl<B: Backend> Pool<B> {
                 return Ok(self.lease(id, secret, session));
             };
 
-            if idle_since.elapsed() > self.shared.validate_after {
+            if idle_age(idle_since) > self.shared.validate_after {
                 let probe = tokio::time::timeout(
                     self.shared.noop_timeout,
                     self.shared.backend.noop(&mut session),
@@ -183,19 +213,14 @@ impl<B: Backend> Pool<B> {
         }
     }
 
-    fn take_idle(&self, id: &AccountId, secret: SecretHash) -> Option<(B::Session, Instant)> {
+    fn take_idle(&self, id: &AccountId, secret: SecretHash) -> Option<(B::Session, SystemTime)> {
         let mut accounts = self
             .shared
             .accounts
             .lock()
             .unwrap_or_else(|e| e.into_inner());
 
-        // Drop sessions that sat idle too long, for every account.
-        let max_idle = self.shared.max_idle;
-        for slot in accounts.values_mut() {
-            slot.idle.retain(|(_, since)| since.elapsed() <= max_idle);
-        }
-        accounts.retain(|_, slot| !slot.idle.is_empty());
+        prune(&mut accounts, self.shared.max_idle);
 
         let slot = accounts.get_mut(id)?;
         if slot.secret != secret {
@@ -242,11 +267,18 @@ impl<B: Backend> Lease<B> {
         let Some(session) = self.session.take() else {
             return;
         };
+        if !self.shared.backend.is_clean(&session) {
+            log::debug!("Discarding IMAP session after a failure the command swallowed");
+            return;
+        }
         let mut accounts = self
             .shared
             .accounts
             .lock()
             .unwrap_or_else(|e| e.into_inner());
+        // Also here, not only on acquire: an account that is never used again
+        // (removed, or its password changed) must not stay logged in.
+        prune(&mut accounts, self.shared.max_idle);
         let slot = accounts
             .entry(self.id.clone())
             .or_insert_with(|| AccountSlot {
@@ -262,7 +294,7 @@ impl<B: Backend> Lease<B> {
             }
         }
         if slot.idle.len() < self.shared.max_idle_per_account {
-            slot.idle.push((session, Instant::now()));
+            slot.idle.push((session, SystemTime::now()));
         }
     }
 }
@@ -292,6 +324,7 @@ mod tests {
 
     struct FakeSession {
         alive: Arc<AtomicBool>,
+        clean: bool,
     }
 
     #[derive(Default)]
@@ -309,7 +342,7 @@ mod tests {
             self.connects.fetch_add(1, Ordering::SeqCst);
             let alive = Arc::new(AtomicBool::new(true));
             self.sessions.lock().unwrap().push(alive.clone());
-            Ok(FakeSession { alive })
+            Ok(FakeSession { alive, clean: true })
         }
 
         async fn noop(&self, session: &mut FakeSession) -> Result<(), String> {
@@ -319,6 +352,10 @@ mod tests {
             } else {
                 Err("connection reset".to_string())
             }
+        }
+
+        fn is_clean(&self, session: &FakeSession) -> bool {
+            session.clean
         }
     }
 
@@ -372,6 +409,62 @@ mod tests {
         assert_eq!(pool.idle_count(&cfg), 0);
         pool.acquire(&cfg).await.unwrap().release();
         assert_eq!(backend.connects.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn session_marked_unclean_is_not_returned_to_the_pool() {
+        let (pool, backend) = pool();
+        let cfg = config("pw");
+        let mut lease = pool.acquire(&cfg).await.unwrap();
+        lease.clean = false;
+        lease.release();
+        assert_eq!(pool.idle_count(&cfg), 0);
+        pool.acquire(&cfg).await.unwrap().release();
+        assert_eq!(backend.connects.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn release_prunes_sessions_of_other_accounts_that_sat_idle_too_long() {
+        let (pool, _backend) = pool_with(VALIDATE_AFTER, Duration::from_millis(1));
+        let gone = config("pw");
+        let mut other = config("pw");
+        other.username = "other@example.test".to_string();
+        pool.acquire(&gone).await.unwrap().release();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        pool.acquire(&other).await.unwrap().release();
+        assert_eq!(pool.idle_count(&gone), 0);
+        assert_eq!(pool.idle_count(&other), 1);
+    }
+
+    #[tokio::test]
+    async fn session_idle_for_hours_on_the_wall_clock_is_not_reused() {
+        let (pool, backend) = pool();
+        let cfg = config("pw");
+        pool.acquire(&cfg).await.unwrap().release();
+        // What a night of sleep looks like: the wall clock moved on.
+        {
+            let mut accounts = pool.shared.accounts.lock().unwrap();
+            for slot in accounts.values_mut() {
+                for (_, since) in slot.idle.iter_mut() {
+                    *since = SystemTime::now() - Duration::from_secs(8 * 3600);
+                }
+            }
+        }
+        pool.acquire(&cfg).await.unwrap().release();
+        assert_eq!(backend.noops.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.connects.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_session_idle_since_before_a_sleep_counts_its_wall_clock_age() {
+        let slept = SystemTime::now() - Duration::from_secs(8 * 3600);
+        assert!(idle_age(slept) >= Duration::from_secs(8 * 3600));
+    }
+
+    #[test]
+    fn a_clock_that_went_backwards_counts_as_too_old() {
+        let future = SystemTime::now() + Duration::from_secs(3600);
+        assert_eq!(idle_age(future), Duration::MAX);
     }
 
     #[tokio::test]

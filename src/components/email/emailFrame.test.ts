@@ -15,9 +15,17 @@ function runFrameScript() {
 
 describe("emailFrame bootstrap", () => {
   let posted: unknown[];
+  let listeners: Parameters<Document["addEventListener"]>[];
 
   beforeEach(() => {
     posted = [];
+    // The script listens on `document`, which outlives a test; take its listeners off again.
+    listeners = [];
+    const add = document.addEventListener.bind(document);
+    vi.spyOn(document, "addEventListener").mockImplementation((...args: Parameters<typeof add>) => {
+      listeners.push(args);
+      add(...args);
+    });
     document.body.innerHTML = "";
     vi.spyOn(window.parent, "postMessage").mockImplementation((message) => {
       posted.push(message);
@@ -25,6 +33,7 @@ describe("emailFrame bootstrap", () => {
   });
 
   afterEach(() => {
+    for (const [type, listener, options] of listeners) document.removeEventListener(type, listener, options);
     vi.restoreAllMocks();
   });
 
@@ -94,5 +103,79 @@ describe("emailFrame bootstrap", () => {
     );
     expect(heights.length).toBeGreaterThan(0);
     expect(heights[0]!.height).toBe(321);
+  });
+  describe("wheel reports", () => {
+    function wheel(target: Element, init: WheelEventInit, timeStamp?: number) {
+      const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ...init });
+      if (timeStamp !== undefined) Object.defineProperty(event, "timeStamp", { value: timeStamp });
+      target.dispatchEvent(event);
+    }
+
+    function makeScrollable(el: HTMLElement, scrollLeft: number) {
+      el.style.overflowX = "auto";
+      Object.defineProperty(el, "scrollWidth", { value: 500, configurable: true });
+      Object.defineProperty(el, "clientWidth", { value: 100, configurable: true });
+      el.scrollLeft = scrollLeft;
+    }
+
+    it("reports wheel deltas to the app", () => {
+      document.body.innerHTML = '<p id="t">text</p>';
+      runFrameScript();
+      posted.length = 0;
+
+      wheel(document.getElementById("t")!, { deltaX: 12, deltaY: 3, deltaMode: 0 });
+
+      expect(posted).toContainEqual({ type: "maish:wheel", deltaX: 12, deltaY: 3, deltaMode: 0 });
+    });
+
+    it("keeps pinch-zoom (ctrl+wheel) to itself", () => {
+      document.body.innerHTML = '<p id="t">text</p>';
+      runFrameScript();
+      posted.length = 0;
+
+      wheel(document.getElementById("t")!, { deltaX: 0, deltaY: 5, ctrlKey: true });
+
+      expect(posted).toHaveLength(0);
+    });
+
+    it("leaves a gesture to content that can still scroll sideways", () => {
+      document.body.innerHTML = '<pre id="wide">wide</pre>';
+      const pre = document.getElementById("wide")!;
+      makeScrollable(pre, 0);
+      runFrameScript();
+      posted.length = 0;
+
+      wheel(pre, { deltaX: 10 }, 1000);
+      // The content reaches its edge mid-gesture; the gesture stays with it.
+      pre.scrollLeft = 400;
+      wheel(pre, { deltaX: 10 }, 1016);
+
+      expect(posted).toHaveLength(0);
+    });
+
+    it("reports a gesture that starts with the content at its edge", () => {
+      document.body.innerHTML = '<pre id="wide">wide</pre>';
+      const pre = document.getElementById("wide")!;
+      makeScrollable(pre, 400);
+      runFrameScript();
+      posted.length = 0;
+
+      wheel(pre, { deltaX: 10 }, 1000);
+
+      expect(posted).toHaveLength(1);
+    });
+
+    it("reports content that scrolls sideways only the other way", () => {
+      document.body.innerHTML = '<pre id="wide">wide</pre>';
+      const pre = document.getElementById("wide")!;
+      makeScrollable(pre, 400);
+      runFrameScript();
+      posted.length = 0;
+
+      // Fingers moving right (negative deltaX) scroll the content back left.
+      wheel(pre, { deltaX: -10 }, 1000);
+
+      expect(posted).toHaveLength(0);
+    });
   });
 });

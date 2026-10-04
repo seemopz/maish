@@ -209,6 +209,30 @@ describe("EmailRenderer", () => {
       window.dispatchEvent(event);
     }
 
+    it("replays a wheel report from the frame as a bubbling wheel event on the iframe", () => {
+      const { iframe } = renderWithFrame("<p>hi</p>");
+      const seen: WheelEvent[] = [];
+      document.addEventListener("wheel", (e) => seen.push(e), { once: true });
+
+      postFromFrame(iframe, { type: "maish:wheel", deltaX: 7, deltaY: 1, deltaMode: 1 });
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({ deltaX: 7, deltaY: 1, deltaMode: 1, target: iframe });
+    });
+
+    it("drops a wheel report from another window or with bad numbers", () => {
+      const { iframe } = renderWithFrame("<p>hi</p>");
+      const seen: WheelEvent[] = [];
+      const onWheel = (e: WheelEvent) => seen.push(e);
+      document.addEventListener("wheel", onWheel);
+
+      postFromFrame(iframe, { type: "maish:wheel", deltaX: 7, deltaY: 1 }, window);
+      postFromFrame(iframe, { type: "maish:wheel", deltaX: "7", deltaY: 1 });
+      document.removeEventListener("wheel", onWheel);
+
+      expect(seen).toHaveLength(0);
+    });
+
     it("opens a link the frame reports via the system opener", () => {
       const { iframe } = renderWithFrame('<a href="https://example.com/x">go</a>');
 

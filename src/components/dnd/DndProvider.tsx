@@ -61,6 +61,15 @@ export function resolveLabelChange(
   return { addLabelIds: [targetGmailId], removeLabelIds: [sourceGmailId] };
 }
 
+/** `MouseSensor` only rejects the right button; the old pointer sensor wanted the left one. */
+export class LeftMouseSensor extends MouseSensor {
+  static activators = MouseSensor.activators.map((activator) => ({
+    ...activator,
+    handler: ((event, options) =>
+      event.nativeEvent.button === 0 && activator.handler(event, options)) as typeof activator.handler,
+  }));
+}
+
 interface DndProviderProps {
   children: ReactNode;
 }
@@ -73,7 +82,7 @@ export function DndProvider({ children }: DndProviderProps) {
   const sensors = useSensors(
     // A mouse drags after 8 px; a finger only after a long press, so a swipe
     // (see useSwipeGesture) and a vertical scroll stay free.
-    useSensor(MouseSensor, {
+    useSensor(LeftMouseSensor, {
       activationConstraint: { distance: 8 },
     }),
     useSensor(TouchSensor, {

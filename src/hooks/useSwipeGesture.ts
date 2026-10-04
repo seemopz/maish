@@ -147,7 +147,7 @@ export function useSwipeGesture(
         e.stopPropagation();
         e.preventDefault();
       };
-      el.addEventListener("click", stop, { capture: true });
+      el.addEventListener("click", stop, { capture: true, once: true });
       setTimeout(() => el.removeEventListener("click", stop, { capture: true }), CLICK_SUPPRESS_MS);
     };
 

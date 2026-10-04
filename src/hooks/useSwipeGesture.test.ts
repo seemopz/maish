@@ -280,6 +280,20 @@ describe("useSwipeGesture", () => {
         el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       });
       expect(onClick).not.toHaveBeenCalled();
+      // once: a second click right after is a real tap
+      act(() => {
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets clicks through again after the suppression window when no click came", () => {
+      const { el } = setup();
+      const onClick = vi.fn();
+      el.addEventListener("click", onClick);
+      pointer(el, "pointerdown", 50);
+      pointer(el, "pointermove", 120);
+      pointer(el, "pointerup", 120);
       act(() => {
         vi.advanceTimersByTime(500);
       });

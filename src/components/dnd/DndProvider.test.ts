@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { resolveLabelChange } from "./DndProvider";
+import { describe, it, expect, vi } from "vitest";
+import { resolveLabelChange, LeftMouseSensor } from "./DndProvider";
 
 describe("resolveLabelChange", () => {
   it("returns null when target equals source (sidebar IDs)", () => {
@@ -64,5 +64,26 @@ describe("resolveLabelChange", () => {
       addLabelIds: ["INBOX"],
       removeLabelIds: ["Label_1"],
     });
+  });
+});
+
+describe("LeftMouseSensor", () => {
+  const [activator] = LeftMouseSensor.activators;
+  const run = (button: number) => {
+    const onActivation = vi.fn();
+    const result = activator.handler({ nativeEvent: { button } } as never, { onActivation } as never);
+    return { result, onActivation };
+  };
+
+  it("activates on the left button", () => {
+    const { result, onActivation } = run(0);
+    expect(result).toBe(true);
+    expect(onActivation).toHaveBeenCalled();
+  });
+
+  it.each([1, 2])("ignores button %i", (button) => {
+    const { result, onActivation } = run(button);
+    expect(result).toBe(false);
+    expect(onActivation).not.toHaveBeenCalled();
   });
 });

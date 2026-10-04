@@ -25,7 +25,10 @@ vi.mock("@/services/email/providerFactory", () => ({
 vi.mock("@/services/db/pendingOperations", () => ({
   enqueuePendingOperation: vi.fn(() => Promise.resolve("op-1")),
   deleteOperation: vi.fn(() => Promise.resolve()),
-  holdOperation: vi.fn(() => Promise.resolve()),
+  claimOperation: vi.fn(() => Promise.resolve(true)),
+  releaseOperation: vi.fn(() => Promise.resolve()),
+  deleteUnclaimedOperation: vi.fn(() => Promise.resolve(true)),
+  incrementRetry: vi.fn(() => Promise.resolve()),
 }));
 
 const { mockDbExecute, mockDbSelect } = vi.hoisted(() => ({
@@ -50,7 +53,14 @@ vi.mock("@/router/navigate", () => ({
 import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
-import { enqueuePendingOperation, deleteOperation, holdOperation } from "@/services/db/pendingOperations";
+import {
+  enqueuePendingOperation,
+  deleteOperation,
+  claimOperation,
+  releaseOperation,
+  deleteUnclaimedOperation,
+  incrementRetry,
+} from "@/services/db/pendingOperations";
 import {
   archiveThread,
   trashThread,
@@ -64,7 +74,7 @@ import {
 } from "./emailActions";
 import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
 import { useUndoStore } from "@/stores/undoStore";
-import { flushPendingUndo, undoPending, undoBatch } from "./undoableActions";
+import { flushPendingUndo, undoPending, undoBatch, UNDO_HOLD_SEC } from "./undoableActions";
 import { createMockEmailProvider, createMockUIStoreState, createMockThreadStoreState } from "@/test/mocks";
 
 const mockProvider = createMockEmailProvider();
@@ -432,7 +442,7 @@ describe("emailActions undo", () => {
     expect(useUndoStore.getState().message).toBe("Conversation archived");
   });
 
-  it("stores the call in the queue at once, delayed past the window, so a quit loses nothing", async () => {
+  it("stores the call in the queue at once, held far past the window, so a quit loses nothing and a long multi-select is not sent early", async () => {
     await archiveThread("acct-1", "t1", ["m1"]);
 
     expect(enqueuePendingOperation).toHaveBeenCalledWith(
@@ -440,7 +450,7 @@ describe("emailActions undo", () => {
       "archive",
       "t1",
       { threadId: "t1", messageIds: ["m1"] },
-      6,
+      UNDO_HOLD_SEC,
     );
   });
 
@@ -449,7 +459,7 @@ describe("emailActions undo", () => {
     await flushPendingUndo();
 
     expect(mockProvider.archive).toHaveBeenCalledWith("t1", ["m1"]);
-    expect(holdOperation).toHaveBeenCalledWith("op-1", 60);
+    expect(claimOperation).toHaveBeenCalledWith("op-1");
     expect(deleteOperation).toHaveBeenCalledWith("op-1");
   });
 
@@ -460,7 +470,8 @@ describe("emailActions undo", () => {
     await flushPendingUndo();
 
     expect(mockProvider.trash).not.toHaveBeenCalled();
-    expect(holdOperation).toHaveBeenCalledWith("op-1", 0);
+    expect(releaseOperation).toHaveBeenCalledWith("op-1");
+    expect(claimOperation).not.toHaveBeenCalled();
     expect(deleteOperation).not.toHaveBeenCalled();
   });
 
@@ -470,8 +481,28 @@ describe("emailActions undo", () => {
 
     await flushPendingUndo();
 
-    expect(holdOperation).toHaveBeenLastCalledWith("op-1", 0);
+    expect(releaseOperation).toHaveBeenCalledWith("op-1");
+    expect(incrementRetry).toHaveBeenCalledWith("op-1");
     expect(deleteOperation).not.toHaveBeenCalled();
+  });
+
+  it("does not send a call the queue processor already claimed", async () => {
+    vi.mocked(claimOperation).mockResolvedValueOnce(false);
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    await flushPendingUndo();
+
+    expect(mockProvider.archive).not.toHaveBeenCalled();
+  });
+
+  it("undo that comes after the queue processor sent the call leaves the local state alone", async () => {
+    await archiveThread("acct-1", "t1", ["m1"]);
+    vi.mocked(deleteUnclaimedOperation).mockResolvedValueOnce(false);
+    mockDbExecute.mockClear();
+
+    await undoPending();
+
+    expect(mockDbExecute).not.toHaveBeenCalled();
   });
 
   it("sends at once when it cannot be queued", async () => {
@@ -488,7 +519,7 @@ describe("emailActions undo", () => {
     await undoPending();
     await flushPendingUndo();
 
-    expect(deleteOperation).toHaveBeenCalledWith("op-1");
+    expect(deleteUnclaimedOperation).toHaveBeenCalledWith("op-1");
     expect(mockProvider.archive).not.toHaveBeenCalled();
   });
 
@@ -501,7 +532,7 @@ describe("emailActions undo", () => {
 
     await undoPending();
     await flushPendingUndo();
-    expect(deleteOperation).toHaveBeenCalledTimes(2);
+    expect(deleteUnclaimedOperation).toHaveBeenCalledTimes(2);
     expect(mockProvider.archive).not.toHaveBeenCalled();
   });
 

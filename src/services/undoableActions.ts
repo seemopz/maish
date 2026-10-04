@@ -3,6 +3,12 @@ import { logToFile } from "@/services/logFile";
 
 /** How long the toast stays and the server call is held back. */
 export const UNDO_WINDOW_MS = 5000;
+/**
+ * How long the queue processor leaves a queued call alone. Far longer than the
+ * window, because a multi-select keeps restarting the window after the first
+ * call was queued; `commit` sends earlier, so this only matters after a quit.
+ */
+export const UNDO_HOLD_SEC = 120;
 /** Fallback: calls of one kind closer together than this belong to one batch. */
 const BATCH_GAP_MS = 1000;
 

@@ -14,7 +14,9 @@ import {
   getPendingOperations,
   updateOperationStatus,
   deleteOperation,
-  holdOperation,
+  claimOperation,
+  releaseOperation,
+  deleteUnclaimedOperation,
   incrementRetry,
   getPendingOpsCount,
   getFailedOpsCount,
@@ -61,14 +63,32 @@ describe("pendingOperations DB service", () => {
       expect(args[5]).toBeLessThanOrEqual(before + 8);
     });
 
-    it("holdOperation pushes the retry time out, and 0 releases it", async () => {
-      await holdOperation("op-1", 60);
+    it("claimOperation only takes a pending row and reports whether it won", async () => {
+      expect(await claimOperation("op-1")).toBe(true);
       expect(mockDb.execute).toHaveBeenLastCalledWith(
-        expect.stringContaining("SET next_retry_at"),
-        [expect.any(Number), "op-1"],
+        expect.stringContaining("status = 'pending'"),
+        ["op-1"],
       );
-      await holdOperation("op-1", 0);
-      expect(mockDb.execute).toHaveBeenLastCalledWith(expect.anything(), [null, "op-1"]);
+      mockDb.execute.mockResolvedValueOnce({ rowsAffected: 0 });
+      expect(await claimOperation("op-1")).toBe(false);
+    });
+
+    it("releaseOperation puts the row back without a retry time", async () => {
+      await releaseOperation("op-1");
+      expect(mockDb.execute).toHaveBeenLastCalledWith(
+        expect.stringContaining("next_retry_at = NULL"),
+        ["op-1"],
+      );
+    });
+
+    it("deleteUnclaimedOperation reports false once the row is on its way", async () => {
+      expect(await deleteUnclaimedOperation("op-1")).toBe(true);
+      expect(mockDb.execute).toHaveBeenLastCalledWith(
+        expect.stringContaining("status = 'pending'"),
+        ["op-1"],
+      );
+      mockDb.execute.mockResolvedValueOnce({ rowsAffected: 0 });
+      expect(await deleteUnclaimedOperation("op-1")).toBe(false);
     });
   });
 

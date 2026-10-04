@@ -9,6 +9,7 @@ import {
   undoPending,
   undoBatch,
   UNDO_WINDOW_MS,
+  UNDO_HOLD_SEC,
 } from "./undoableActions";
 
 function item() {
@@ -113,6 +114,13 @@ describe("undoableActions", () => {
     await undoPending();
     expect(a.revert).toHaveBeenCalledTimes(1);
     expect(b.revert).toHaveBeenCalledTimes(1);
+  });
+
+  it("the queue hold outlasts the toast of a long batch", () => {
+    // The first call is queued at t=0; a batch of calls 3 s apart keeps the
+    // toast up until the last call + the window.
+    const batchLengthMs = 3 * 3000 + UNDO_WINDOW_MS;
+    expect(UNDO_HOLD_SEC * 1000).toBeGreaterThan(batchLengthMs);
   });
 
   it("a failing commit does not stop the others", async () => {

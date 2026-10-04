@@ -3,14 +3,17 @@ import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import {
   enqueuePendingOperation,
+  claimOperation,
+  releaseOperation,
   deleteOperation,
-  holdOperation,
+  deleteUnclaimedOperation,
+  incrementRetry,
 } from "@/services/db/pendingOperations";
 import { classifyError } from "@/utils/networkErrors";
 import { getDb } from "@/services/db/connection";
 import { getMessageIdsForThread } from "@/services/db/messages";
 import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
-import { registerUndoable, UNDO_WINDOW_MS } from "@/services/undoableActions";
+import { registerUndoable, UNDO_HOLD_SEC } from "@/services/undoableActions";
 import { logToFile } from "@/services/logFile";
 
 // ---------------------------------------------------------------------------
@@ -441,12 +444,11 @@ async function sendQueued(
   opId: string,
 ): Promise<ActionResult> {
   if (!useUIStore.getState().isOnline) {
-    await holdOperation(opId, 0);
+    await releaseOperation(opId);
     return { success: true, queued: true };
   }
-  // Lease the row so the queue processor does not send it a second time
-  // while this call is in flight; if we die here it is retried after the lease.
-  await holdOperation(opId, 60);
+  // The row may be gone (compacted away) or already taken by the queue processor.
+  if (!(await claimOperation(opId))) return { success: true, queued: true };
   try {
     const data = await executeViaProvider(accountId, action);
     await deleteOperation(opId);
@@ -454,7 +456,8 @@ async function sendQueued(
   } catch (err) {
     const classified = classifyError(err);
     if (classified.isRetryable) {
-      await holdOperation(opId, 0);
+      await releaseOperation(opId);
+      await incrementRetry(opId);
       return { success: true, queued: true };
     }
     await deleteOperation(opId);
@@ -501,12 +504,17 @@ export async function executeEmailAction(
         action.type,
         getResourceId(action),
         actionToParams(action),
-        Math.ceil(UNDO_WINDOW_MS / 1000) + 1,
+        UNDO_HOLD_SEC,
       );
       const restoreLabels = revert;
       registerUndoable(undo.kind, undo.describe, {
         revert: async () => {
-          await deleteOperation(opId);
+          if (!(await deleteUnclaimedOperation(opId))) {
+            // The queue processor got there first: the server has the change,
+            // so restoring the labels locally would make the two disagree.
+            logToFile("warn", `Undo of ${action.type} came too late: it was already sent`);
+            return;
+          }
           await restoreLabels();
         },
         commit: async () => {

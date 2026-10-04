@@ -33,14 +33,37 @@ export async function enqueuePendingOperation(
   return id;
 }
 
-/** Keep the queue processor away from an operation for `delaySec` seconds (0 = release it). */
-export async function holdOperation(id: string, delaySec: number): Promise<void> {
+/**
+ * Take an operation for sending. Only one caller wins: the queue processor and
+ * a deferred undo commit race for the same row, and a second send of an IMAP
+ * move would run into UIDs that no longer exist.
+ */
+export async function claimOperation(id: string): Promise<boolean> {
   const db = await getDb();
-  const nextRetryAt = delaySec > 0 ? Math.floor(Date.now() / 1000) + delaySec : null;
-  await db.execute(`UPDATE pending_operations SET next_retry_at = $1 WHERE id = $2`, [
-    nextRetryAt,
-    id,
-  ]);
+  const result = await db.execute(
+    `UPDATE pending_operations SET status = 'executing' WHERE id = $1 AND status = 'pending'`,
+    [id],
+  );
+  return result.rowsAffected > 0;
+}
+
+/** Give a claimed or delayed operation back to the queue for the processor to pick up. */
+export async function releaseOperation(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE pending_operations SET status = 'pending', next_retry_at = NULL WHERE id = $1`,
+    [id],
+  );
+}
+
+/** Remove an operation that has not been claimed. False means it is already on its way. */
+export async function deleteUnclaimedOperation(id: string): Promise<boolean> {
+  const db = await getDb();
+  const result = await db.execute(
+    `DELETE FROM pending_operations WHERE id = $1 AND status = 'pending'`,
+    [id],
+  );
+  return result.rowsAffected > 0;
 }
 
 export async function getPendingOperations(

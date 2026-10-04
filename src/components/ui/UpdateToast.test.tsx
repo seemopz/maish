@@ -8,7 +8,9 @@ const mockInstallUpdate = vi.fn();
 vi.mock("@/services/updateManager", () => ({
   getAvailableUpdate: () => mockGetAvailableUpdate(),
   setUpdateCallback: (cb: unknown) => mockSetUpdateCallback(cb),
-  installUpdate: () => mockInstallUpdate(),
+  installUpdate: (onProgress: unknown) => mockInstallUpdate(onProgress),
+  updateProgressLabel: (p: { phase: string; percent?: number | null }) =>
+    p.phase === "downloading" ? `Downloading ${p.percent}%` : p.phase,
 }));
 
 import { UpdateToast } from "./UpdateToast";
@@ -72,6 +74,34 @@ describe("UpdateToast", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Updating...")).toBeTruthy();
+    });
+  });
+
+  it("shows download progress while updating", async () => {
+    mockGetAvailableUpdate.mockReturnValue({ version: "2.0.0", body: null });
+    let report: ((p: unknown) => void) | undefined;
+    mockInstallUpdate.mockImplementation((onProgress: (p: unknown) => void) => {
+      report = onProgress;
+      return new Promise(() => {});
+    });
+    render(<UpdateToast />);
+    fireEvent.click(screen.getByText("Update Now"));
+
+    act(() => report!({ phase: "downloading", percent: 42 }));
+    await waitFor(() => {
+      expect(screen.getByText("Downloading 42%")).toBeTruthy();
+    });
+  });
+
+  it("shows the error and offers a retry when the update fails", async () => {
+    mockGetAvailableUpdate.mockReturnValue({ version: "2.0.0", body: null });
+    mockInstallUpdate.mockRejectedValue(new Error("signature mismatch"));
+    render(<UpdateToast />);
+    fireEvent.click(screen.getByText("Update Now"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Update failed: signature mismatch")).toBeTruthy();
+      expect(screen.getByText("Retry")).toBeTruthy();
     });
   });
 

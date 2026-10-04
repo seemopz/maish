@@ -58,6 +58,7 @@ import {
 import { ALL_NAV_ITEMS } from "@/components/layout/Sidebar";
 import type { SidebarNavItem } from "@/stores/uiStore";
 import { Button } from "@/components/ui/Button";
+import { updateProgressLabel, type UpdateProgress } from "@/services/updateManager";
 import { TextField } from "@/components/ui/TextField";
 import appIcon from "@/assets/icon.png";
 
@@ -1449,7 +1450,7 @@ export function SettingsPage() {
 
               {activeTab === "about" && (
                 <>
-                  <DemaishperTab />
+                  <DeveloperTab />
                   <AboutTab />
                 </>
               )}
@@ -1628,7 +1629,7 @@ function SyncOfflineSection() {
   );
 }
 
-function DemaishperTab() {
+function DeveloperTab() {
   const [appVersion, setAppVersion] = useState("");
   const [tauriVersion, setTauriVersion] = useState("");
   const [webviewVersion, setWebviewVersion] = useState("");
@@ -1637,6 +1638,8 @@ function DemaishperTab() {
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [updateCheckDone, setUpdateCheckDone] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -1696,12 +1699,15 @@ function DemaishperTab() {
 
   const handleInstallUpdate = async () => {
     setInstallingUpdate(true);
+    setUpdateProgress(null);
+    setUpdateError(null);
     try {
       const { installUpdate } = await import("@/services/updateManager");
-      await installUpdate();
+      await installUpdate(setUpdateProgress);
     } catch (err) {
-      console.error("Update install failed:", err);
+      setUpdateError(err instanceof Error ? err.message : String(err));
       setInstallingUpdate(false);
+      setUpdateProgress(null);
     }
   };
 
@@ -1723,6 +1729,9 @@ function DemaishperTab() {
                 v{updateVersion} available
               </p>
             )}
+            {updateError && (
+              <p className="text-xs text-danger mt-0.5 break-words">Update failed: {updateError}</p>
+            )}
             {updateCheckDone && !updateVersion && (
               <p className="text-xs text-success mt-0.5">Up to date</p>
             )}
@@ -1736,7 +1745,11 @@ function DemaishperTab() {
                 onClick={handleInstallUpdate}
                 disabled={installingUpdate}
               >
-                {installingUpdate ? "Updating..." : "Update & Restart"}
+                {installingUpdate
+                  ? updateProgress
+                    ? updateProgressLabel(updateProgress)
+                    : "Updating..."
+                  : "Update & Restart"}
               </Button>
             ) : (
               <Button
@@ -1753,12 +1766,12 @@ function DemaishperTab() {
         </div>
       </Section>
 
-      <Section title="Demaishper Tools">
+      <Section title="Developer Tools">
         <div className="flex items-center justify-between gap-4">
           <div>
             <span className="text-sm text-text-primary">Open DevTools</span>
             <p className="text-xs text-text-tertiary mt-0.5">
-              Open the WebView demaishper tools inspector
+              Open the WebView developer tools inspector
             </p>
           </div>
           <Button

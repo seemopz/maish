@@ -12,11 +12,17 @@ vi.mock("@tauri-apps/plugin-process", () => ({
   relaunch: (...args: unknown[]) => mockRelaunch(...args),
 }));
 
+const mockLogToFile = vi.fn();
+vi.mock("./logFile", () => ({
+  logToFile: (...args: unknown[]) => mockLogToFile(...args),
+}));
+
 import {
   checkForUpdateNow,
   installUpdate,
   getAvailableUpdate,
   setUpdateCallback,
+  updateProgressLabel,
   _resetForTesting,
 } from "./updateManager";
 
@@ -24,6 +30,7 @@ beforeEach(() => {
   _resetForTesting();
   mockCheck.mockReset();
   mockRelaunch.mockReset();
+  mockLogToFile.mockReset();
 });
 
 describe("updateManager", () => {
@@ -74,6 +81,73 @@ describe("updateManager", () => {
 
     expect(mockDownloadAndInstall).toHaveBeenCalled();
     expect(mockRelaunch).toHaveBeenCalled();
+  });
+
+  it("installUpdate reports download progress, then installing and restarting", async () => {
+    mockCheck.mockResolvedValue({
+      version: "1.0.1",
+      body: null,
+      downloadAndInstall: vi.fn(async (onEvent: (e: unknown) => void) => {
+        onEvent({ event: "Started", data: { contentLength: 200 } });
+        onEvent({ event: "Progress", data: { chunkLength: 50 } });
+        onEvent({ event: "Progress", data: { chunkLength: 150 } });
+        onEvent({ event: "Finished" });
+      }),
+    });
+    mockRelaunch.mockResolvedValue(undefined);
+    const onProgress = vi.fn();
+
+    await checkForUpdateNow();
+    await installUpdate(onProgress);
+
+    expect(onProgress.mock.calls.map((c) => c[0])).toEqual([
+      { phase: "downloading", percent: 0 },
+      { phase: "downloading", percent: 25 },
+      { phase: "downloading", percent: 100 },
+      { phase: "installing" },
+      { phase: "restarting" },
+    ]);
+  });
+
+  it("installUpdate reports no percentage when the size is unknown", async () => {
+    mockCheck.mockResolvedValue({
+      version: "1.0.1",
+      body: null,
+      downloadAndInstall: vi.fn(async (onEvent: (e: unknown) => void) => {
+        onEvent({ event: "Started", data: {} });
+        onEvent({ event: "Progress", data: { chunkLength: 50 } });
+      }),
+    });
+    const onProgress = vi.fn();
+
+    await checkForUpdateNow();
+    await installUpdate(onProgress);
+
+    expect(onProgress).toHaveBeenNthCalledWith(1, { phase: "downloading", percent: null });
+    expect(onProgress).toHaveBeenNthCalledWith(2, { phase: "downloading", percent: null });
+  });
+
+  it("installUpdate logs a failed download to the log file and rethrows", async () => {
+    mockCheck.mockResolvedValue({
+      version: "1.0.1",
+      body: null,
+      downloadAndInstall: vi.fn().mockRejectedValue(new Error("signature mismatch")),
+    });
+
+    await checkForUpdateNow();
+    await expect(installUpdate()).rejects.toThrow("signature mismatch");
+    expect(mockLogToFile).toHaveBeenCalledWith(
+      "error",
+      expect.stringContaining("signature mismatch"),
+    );
+    expect(mockRelaunch).not.toHaveBeenCalled();
+  });
+
+  it("updateProgressLabel describes each phase", () => {
+    expect(updateProgressLabel({ phase: "downloading", percent: 42 })).toBe("Downloading 42%");
+    expect(updateProgressLabel({ phase: "downloading", percent: null })).toBe("Downloading...");
+    expect(updateProgressLabel({ phase: "installing" })).toBe("Installing...");
+    expect(updateProgressLabel({ phase: "restarting" })).toBe("Restarting...");
   });
 
   it("installUpdate throws if no update available", async () => {

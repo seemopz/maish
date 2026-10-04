@@ -11,6 +11,7 @@ import {
   removeThreadLabel,
   moveThread,
 } from "@/services/emailActions";
+import { undoBatch } from "@/services/undoableActions";
 import {
   Inbox,
   Archive,
@@ -86,6 +87,7 @@ export function MoveToFolderDialog({
       if (!activeAccountId || threadIds.length === 0) return;
       onClose();
 
+      await undoBatch(async () => {
       for (const threadId of threadIds) {
         if (dest.id === "__archive__") {
           await archiveThread(activeAccountId, threadId, []);
@@ -117,6 +119,7 @@ export function MoveToFolderDialog({
           }
         }
       }
+      });
 
       // Refresh thread list
       window.dispatchEvent(new Event("maish-sync-done"));

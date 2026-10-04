@@ -625,6 +625,19 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         ],
       },
       {
+        id: "undo-actions",
+        icon: Undo2,
+        title: "Undo archive, delete, spam & move",
+        summary: "Take back the last action within 5 seconds.",
+        description:
+          "After you archive, trash, mark as spam or move conversations, a toast with an \"Undo\" button appears for 5 seconds. Undo brings every conversation of that action back, also after a multi-select. Until the toast disappears the change only exists on your device; it is sent to the mail server afterwards, or kept in the offline queue if you are offline.",
+        tips: [
+          { text: "Undo the last action", shortcut: "z" },
+          { text: "Only the most recent action can be undone; starting another one sends the previous one." },
+          { text: "Quitting Maish during the 5 seconds does not lose the action; it is sent on the next start." },
+        ],
+      },
+      {
         id: "multi-select",
         icon: MousePointer,
         title: "Multi-select & batch actions",

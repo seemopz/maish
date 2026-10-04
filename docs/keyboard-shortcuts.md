@@ -38,6 +38,7 @@ Maish is designed to be used entirely from the keyboard. All shortcuts are custo
 | `u` | Unsubscribe |
 | `t` | Create task from email (AI) |
 | `v` | Move to folder/label |
+| `z` | Undo archive / delete / spam / move (within 5 s) |
 | `Ctrl+Enter` | Send email |
 | `Ctrl+A` | Select all threads |
 | `Ctrl+Shift+A` | Select all from current position |

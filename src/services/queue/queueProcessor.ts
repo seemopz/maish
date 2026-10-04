@@ -3,6 +3,7 @@ import { useUIStore } from "@/stores/uiStore";
 import {
   getPendingOperations,
   updateOperationStatus,
+  claimOperation,
   deleteOperation,
   incrementRetry,
   getPendingOpsCount,
@@ -31,8 +32,8 @@ async function processQueue(): Promise<void> {
 
   for (const op of ops) {
     try {
-      // Mark as executing
-      await updateOperationStatus(op.id, "executing");
+      // Claim it; an undo commit may have taken the row in the meantime
+      if (!(await claimOperation(op.id))) continue;
 
       // Parse params and execute
       const params = JSON.parse(op.params) as Record<string, unknown>;

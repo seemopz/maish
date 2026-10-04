@@ -101,6 +101,19 @@ describe("uiStore", () => {
     expect(useUIStore.getState().emailDensity).toBe("spacious");
   });
 
+  it("swipe actions default to delete on the left and read/unread on the right, and persist", () => {
+    expect(useUIStore.getState().swipeLeftAction).toBe("trash");
+    expect(useUIStore.getState().swipeRightAction).toBe("toggleRead");
+
+    useUIStore.getState().setSwipeLeftAction("archive");
+    expect(setSetting).toHaveBeenCalledWith("swipe_left_action", "archive");
+    expect(useUIStore.getState().swipeLeftAction).toBe("archive");
+
+    useUIStore.getState().setSwipeRightAction("none");
+    expect(setSetting).toHaveBeenCalledWith("swipe_right_action", "none");
+    expect(useUIStore.getState().swipeRightAction).toBe("none");
+  });
+
   it("setDefaultReplyMode should persist to DB and update state", () => {
     expect(useUIStore.getState().defaultReplyMode).toBe("reply");
 

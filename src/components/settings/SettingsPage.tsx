@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { SWIPE_ACTIONS, SWIPE_ACTION_LABELS, type SwipeAction } from "@/utils/swipeActions";
 import { useParams } from "@tanstack/react-router";
 import { useUIStore } from "@/stores/uiStore";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
@@ -94,6 +95,10 @@ export function SettingsPage() {
   const setReadingPanePosition = useUIStore((s) => s.setReadingPanePosition);
   const emailDensity = useUIStore((s) => s.emailDensity);
   const setEmailDensity = useUIStore((s) => s.setEmailDensity);
+  const swipeLeftAction = useUIStore((s) => s.swipeLeftAction);
+  const setSwipeLeftAction = useUIStore((s) => s.setSwipeLeftAction);
+  const swipeRightAction = useUIStore((s) => s.swipeRightAction);
+  const setSwipeRightAction = useUIStore((s) => s.setSwipeRightAction);
   const fontScale = useUIStore((s) => s.fontScale);
   const setFontScale = useUIStore((s) => s.setFontScale);
   const defaultReplyMode = useUIStore((s) => s.defaultReplyMode);
@@ -488,6 +493,28 @@ export function SettingsPage() {
                         <option value="compact">Compact</option>
                         <option value="default">Default</option>
                         <option value="spacious">Spacious</option>
+                      </select>
+                    </SettingRow>
+                    <SettingRow label="Swipe left (two-finger trackpad)">
+                      <select
+                        value={swipeLeftAction}
+                        onChange={(e) => setSwipeLeftAction(e.target.value as SwipeAction)}
+                        className={selectClass}
+                      >
+                        {SWIPE_ACTIONS.map((a) => (
+                          <option key={a} value={a}>{SWIPE_ACTION_LABELS[a]}</option>
+                        ))}
+                      </select>
+                    </SettingRow>
+                    <SettingRow label="Swipe right (two-finger trackpad)">
+                      <select
+                        value={swipeRightAction}
+                        onChange={(e) => setSwipeRightAction(e.target.value as SwipeAction)}
+                        className={selectClass}
+                      >
+                        {SWIPE_ACTIONS.map((a) => (
+                          <option key={a} value={a}>{SWIPE_ACTION_LABELS[a]}</option>
+                        ))}
                       </select>
                     </SettingRow>
                     <SettingRow label="Font size">

@@ -105,7 +105,7 @@ maish/
 │   │   └── globalShortcut.ts # System-wide compose shortcut
 │   ├── stores/               # Zustand stores (9): ui, account, thread,
 │   │                         # composer, label, contextMenu, shortcut, smartFolder, task
-│   ├── hooks/                # useKeyboardShortcuts, useClickOutside
+│   ├── hooks/                # useKeyboardShortcuts, useClickOutside, useSwipeGesture
 │   ├── utils/                # crypto, date, emailBuilder, sanitize, imageBlocker,
 │   │                         # mailtoParser, fileUtils, templateVariables, noReply
 │   ├── constants/            # Keyboard shortcuts, help content

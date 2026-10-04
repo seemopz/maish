@@ -76,6 +76,7 @@ import { formatSyncError } from "./utils/networkErrors";
 import { nextSyncDisplay, syncProgressMessage } from "./utils/syncStatus";
 import { router } from "./router";
 import { getSelectedThreadId } from "./router/navigate";
+import { isSwipeAction } from "./utils/swipeActions";
 
 /**
  * Sync bridge: subscribes to router state changes and writes the selected
@@ -233,6 +234,12 @@ export default function App() {
         if (savedDensity === "compact" || savedDensity === "default" || savedDensity === "spacious") {
           ui.setEmailDensity(savedDensity);
         }
+
+        // Restore swipe actions
+        const savedSwipeLeft = await getSetting("swipe_left_action");
+        if (isSwipeAction(savedSwipeLeft)) ui.setSwipeLeftAction(savedSwipeLeft);
+        const savedSwipeRight = await getSetting("swipe_right_action");
+        if (isSwipeAction(savedSwipeRight)) ui.setSwipeRightAction(savedSwipeRight);
 
         // Restore default reply mode
         const savedReplyMode = await getSetting("default_reply_mode");

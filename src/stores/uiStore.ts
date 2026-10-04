@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { setSetting } from "@/services/db/settings";
+import { DEFAULT_SWIPE_LEFT, DEFAULT_SWIPE_RIGHT, type SwipeAction } from "@/utils/swipeActions";
 
 type Theme = "light" | "dark" | "system";
 type ReadingPanePosition = "right" | "bottom" | "hidden";
@@ -25,6 +26,8 @@ interface UIState {
   readFilter: ReadFilter;
   emailListWidth: number;
   emailDensity: EmailDensity;
+  swipeLeftAction: SwipeAction;
+  swipeRightAction: SwipeAction;
   defaultReplyMode: DefaultReplyMode;
   markAsReadBehavior: MarkAsReadBehavior;
   fontScale: FontScale;
@@ -50,6 +53,8 @@ interface UIState {
   setReadFilter: (filter: ReadFilter) => void;
   setEmailListWidth: (width: number) => void;
   setEmailDensity: (density: EmailDensity) => void;
+  setSwipeLeftAction: (action: SwipeAction) => void;
+  setSwipeRightAction: (action: SwipeAction) => void;
   setDefaultReplyMode: (mode: DefaultReplyMode) => void;
   setMarkAsReadBehavior: (behavior: MarkAsReadBehavior) => void;
   setFontScale: (scale: FontScale) => void;
@@ -75,6 +80,8 @@ export const useUIStore = create<UIState>((set) => ({
   readFilter: "all",
   emailListWidth: 320,
   emailDensity: "default",
+  swipeLeftAction: DEFAULT_SWIPE_LEFT,
+  swipeRightAction: DEFAULT_SWIPE_RIGHT,
   defaultReplyMode: "reply",
   markAsReadBehavior: "instant",
   fontScale: "default",
@@ -120,6 +127,14 @@ export const useUIStore = create<UIState>((set) => ({
   setEmailDensity: (emailDensity) => {
     setSetting("email_density", emailDensity).catch(() => {});
     set({ emailDensity });
+  },
+  setSwipeLeftAction: (swipeLeftAction) => {
+    setSetting("swipe_left_action", swipeLeftAction).catch(() => {});
+    set({ swipeLeftAction });
+  },
+  setSwipeRightAction: (swipeRightAction) => {
+    setSetting("swipe_right_action", swipeRightAction).catch(() => {});
+    set({ swipeRightAction });
   },
   setDefaultReplyMode: (defaultReplyMode) => {
     setSetting("default_reply_mode", defaultReplyMode).catch(() => {});

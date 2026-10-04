@@ -128,8 +128,9 @@ describe("queueProcessor", () => {
 
     await triggerQueueFlush();
 
-    expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "pending", "Failed to fetch");
+    expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "executing", "Failed to fetch");
     expect(incrementRetry).toHaveBeenCalledWith("op-1");
+    expect(updateOperationStatus).not.toHaveBeenCalledWith("op-1", "pending", expect.anything());
     expect(deleteOperation).not.toHaveBeenCalled();
   });
 
@@ -183,6 +184,24 @@ describe("queueProcessor", () => {
 
     startQueueProcessor();
     await vi.waitFor(() => expect(order).toEqual(["release", "compact"]));
+    stopQueueProcessor();
+  });
+
+  it("holds a flush back until the release finished", async () => {
+    let finish!: () => void;
+    vi.mocked(releaseExecutingOperations).mockImplementationOnce(
+      () => new Promise<void>((resolve) => { finish = resolve; }),
+    );
+
+    startQueueProcessor();
+    const flush = triggerQueueFlush();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(compactQueue).not.toHaveBeenCalled();
+
+    finish();
+    await flush;
+    expect(compactQueue).toHaveBeenCalled();
     stopQueueProcessor();
   });
 

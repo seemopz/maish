@@ -53,6 +53,7 @@ export function EmailRenderer({
   const [pendingLink, setPendingLink] = useState<LinkAnalysis | null>(null);
 
   const theme = useUIStore((s) => s.theme);
+  const mailZoom = useUIStore((s) => s.mailZoom);
   const isDark = theme === "dark"
     || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
@@ -174,6 +175,14 @@ export function EmailRenderer({
 </html>`;
   }, [bodyHtml, isDark, isPlainText]);
 
+  // The frame cannot read the store, so it is told the zoom whenever it changes
+  // and whenever a fresh document has loaded.
+  const sendZoom = useCallback(() => {
+    // "*" because the frame has an opaque origin; the message carries only a number.
+    iframeRef.current?.contentWindow?.postMessage({ type: "maish:zoom", zoom: mailZoom }, "*");
+  }, [mailZoom]);
+  useEffect(sendZoom, [sendZoom]);
+
   // Height reports and link clicks arrive from the frame as messages
   useLayoutEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -192,16 +201,25 @@ export function EmailRenderer({
       // are replayed on the iframe element, where an ancestor's swipe gesture
       // (`useSwipeGesture`) sees them like any other wheel event.
       if (data.type === "maish:wheel") {
-        const { deltaX, deltaY, deltaMode } = data as Record<string, unknown>;
+        const { deltaX, deltaY, deltaMode, ctrlKey } = data as Record<string, unknown>;
         if (typeof deltaX !== "number" || typeof deltaY !== "number") return;
         if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
         iframe.dispatchEvent(new WheelEvent("wheel", {
           deltaX,
           deltaY,
           deltaMode: deltaMode === 1 ? 1 : 0,
+          ctrlKey: ctrlKey === true,
           bubbles: true,
           cancelable: true,
         }));
+        return;
+      }
+
+      // Same for the side buttons of a mouse: the app listens for them on the document.
+      if (data.type === "maish:mouse") {
+        const { button } = data as Record<string, unknown>;
+        if (button !== 3 && button !== 4) return;
+        iframe.dispatchEvent(new MouseEvent("mouseup", { button, bubbles: true, cancelable: true }));
         return;
       }
 
@@ -274,6 +292,7 @@ export function EmailRenderer({
         ref={iframeRef}
         sandbox="allow-scripts"
         srcDoc={frameDoc}
+        onLoad={sendZoom}
         className={`w-full border-0 ${isDark && !isPlainText ? "rounded-md" : ""}`}
         style={{ overflow: "hidden" }}
         title="Email content"

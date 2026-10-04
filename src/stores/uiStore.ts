@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { setSetting } from "@/services/db/settings";
+import { clampMailZoom, MAIL_ZOOM_DEFAULT } from "@/utils/mailZoom";
 import { DEFAULT_SWIPE_LEFT, DEFAULT_SWIPE_RIGHT, type SwipeAction } from "@/utils/swipeActions";
 
 type Theme = "light" | "dark" | "system";
@@ -28,6 +29,8 @@ interface UIState {
   emailDensity: EmailDensity;
   swipeLeftAction: SwipeAction;
   swipeRightAction: SwipeAction;
+  /** Zoom factor of the mail body, 1 = 100 %. */
+  mailZoom: number;
   defaultReplyMode: DefaultReplyMode;
   markAsReadBehavior: MarkAsReadBehavior;
   fontScale: FontScale;
@@ -55,6 +58,7 @@ interface UIState {
   setEmailDensity: (density: EmailDensity) => void;
   setSwipeLeftAction: (action: SwipeAction) => void;
   setSwipeRightAction: (action: SwipeAction) => void;
+  setMailZoom: (zoom: number) => void;
   setDefaultReplyMode: (mode: DefaultReplyMode) => void;
   setMarkAsReadBehavior: (behavior: MarkAsReadBehavior) => void;
   setFontScale: (scale: FontScale) => void;
@@ -72,6 +76,10 @@ interface UIState {
   setSyncState: (state: SyncState, message?: string | null) => void;
 }
 
+// A pinch sends a stream of zoom steps; only the last one is worth writing down.
+let zoomSaveTimer: ReturnType<typeof setTimeout> | undefined;
+const ZOOM_SAVE_DELAY_MS = 300;
+
 export const useUIStore = create<UIState>((set) => ({
   theme: "system",
   sidebarCollapsed: false,
@@ -82,6 +90,7 @@ export const useUIStore = create<UIState>((set) => ({
   emailDensity: "default",
   swipeLeftAction: DEFAULT_SWIPE_LEFT,
   swipeRightAction: DEFAULT_SWIPE_RIGHT,
+  mailZoom: MAIL_ZOOM_DEFAULT,
   defaultReplyMode: "reply",
   markAsReadBehavior: "instant",
   fontScale: "default",
@@ -135,6 +144,14 @@ export const useUIStore = create<UIState>((set) => ({
   setSwipeRightAction: (swipeRightAction) => {
     setSetting("swipe_right_action", swipeRightAction).catch(() => {});
     set({ swipeRightAction });
+  },
+  setMailZoom: (zoom) => {
+    const mailZoom = clampMailZoom(zoom);
+    clearTimeout(zoomSaveTimer);
+    zoomSaveTimer = setTimeout(() => {
+      setSetting("mail_zoom", String(mailZoom)).catch(() => {});
+    }, ZOOM_SAVE_DELAY_MS);
+    set({ mailZoom });
   },
   setDefaultReplyMode: (defaultReplyMode) => {
     setSetting("default_reply_mode", defaultReplyMode).catch(() => {});

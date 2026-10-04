@@ -13,6 +13,8 @@
   var LINK = "maish:link";
   var HEIGHT = "maish:height";
   var WHEEL = "maish:wheel";
+  var MOUSE = "maish:mouse";
+  var ZOOM = "maish:zoom";
   // A trackpad sends no "fingers lifted" event; this much silence ends a gesture.
   var GESTURE_IDLE_MS = 150;
 
@@ -56,7 +58,19 @@
   document.addEventListener(
     "wheel",
     function (event) {
-      if (event.ctrlKey) return; // pinch-zoom arrives as ctrl+wheel
+      if (event.ctrlKey) {
+        // Pinch-zoom arrives as ctrl+wheel; the app zooms the body, so the
+        // webview must not zoom the page as well.
+        event.preventDefault();
+        send({
+          type: WHEEL,
+          ctrlKey: true,
+          deltaX: 0,
+          deltaY: event.deltaY,
+          deltaMode: event.deltaMode,
+        });
+        return;
+      }
       // Who owns a gesture is decided on its first event with motion.
       if (event.deltaX === 0 && event.deltaY === 0) return;
       if (event.timeStamp - lastWheel > GESTURE_IDLE_MS) {
@@ -71,8 +85,33 @@
         deltaMode: event.deltaMode,
       });
     },
-    { passive: true },
+    { passive: false },
   );
+
+  // The side buttons of a mouse (3 = back, 4 = forward) step through the mail
+  // list. The frame swallows them so the webview does not navigate on its own.
+  function sideButton(event) {
+    return event.button === 3 || event.button === 4;
+  }
+  document.addEventListener("mousedown", function (event) {
+    if (sideButton(event)) event.preventDefault();
+  });
+  document.addEventListener("mouseup", function (event) {
+    if (!sideButton(event)) return;
+    event.preventDefault();
+    send({ type: MOUSE, button: event.button });
+  });
+
+  // The app owns the zoom level and tells the frame what to apply. The body is
+  // zoomed, not the root, so the root's scrollHeight stays in viewport pixels.
+  window.addEventListener("message", function (event) {
+    if (event.source !== parent) return;
+    var data = event.data;
+    if (!data || data.type !== ZOOM) return;
+    if (typeof data.zoom !== "number" || !isFinite(data.zoom) || data.zoom <= 0) return;
+    document.body.style.zoom = String(data.zoom);
+    reportHeight();
+  });
 
   var lastHeight = -1;
 

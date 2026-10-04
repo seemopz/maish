@@ -1,11 +1,13 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ReadingPane } from "./ReadingPane";
 import { useThreadStore } from "@/stores/threadStore";
+import { useUIStore } from "@/stores/uiStore";
 import { SWIPE_IDLE_MS } from "@/hooks/useSwipeGesture";
 
 const navigateToThread = vi.fn();
 let selectedId: string | null = "b";
 
+vi.mock("@/services/db/settings", () => ({ setSetting: vi.fn(() => Promise.resolve()) }));
 vi.mock("@/router/navigate", () => ({ navigateToThread: (id: string) => navigateToThread(id) }));
 vi.mock("@/hooks/useRouteNavigation", () => ({ useSelectedThreadId: () => selectedId }));
 vi.mock("../email/ThreadView", () => ({ ThreadView: () => <div data-testid="thread-view" /> }));
@@ -64,5 +66,62 @@ describe("ReadingPane swipe", () => {
     input.focus();
     swipe(screen.getByTestId("thread-view").parentElement!.parentElement!, 50);
     expect(navigateToThread).not.toHaveBeenCalled();
+  });
+});
+
+describe("ReadingPane zoom", () => {
+  const pane = () => screen.getByTestId("thread-view").parentElement!.parentElement!;
+
+  beforeEach(() => {
+    selectedId = "b";
+    const threads = ["a", "b", "c"].map(thread);
+    useThreadStore.setState({ threads, threadMap: new Map(threads.map((t) => [t.id, t])) });
+    useUIStore.setState({ mailZoom: 1 });
+  });
+
+  it("zooms in on a pinch (ctrl+wheel, fingers apart) and keeps the page from zooming", () => {
+    render(<ReadingPane />);
+    const notCancelled = fireEvent.wheel(pane(), { ctrlKey: true, deltaY: -10 });
+    expect(useUIStore.getState().mailZoom).toBeGreaterThan(1);
+    expect(notCancelled).toBe(false);
+  });
+
+  it("zooms out on a pinch the other way", () => {
+    render(<ReadingPane />);
+    fireEvent.wheel(pane(), { ctrlKey: true, deltaY: 10 });
+    expect(useUIStore.getState().mailZoom).toBeLessThan(1);
+  });
+
+  it("leaves a plain wheel alone", () => {
+    render(<ReadingPane />);
+    fireEvent.wheel(pane(), { deltaY: -10 });
+    expect(useUIStore.getState().mailZoom).toBe(1);
+  });
+
+  it("steps with Ctrl+Plus and Ctrl+Minus and resets with Ctrl+0", () => {
+    render(<ReadingPane />);
+    fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+    expect(useUIStore.getState().mailZoom).toBe(1.1);
+    fireEvent.keyDown(window, { key: "=", metaKey: true });
+    expect(useUIStore.getState().mailZoom).toBe(1.2);
+    fireEvent.keyDown(window, { key: "-", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "-", ctrlKey: true });
+    expect(useUIStore.getState().mailZoom).toBe(1);
+    fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "0", ctrlKey: true });
+    expect(useUIStore.getState().mailZoom).toBe(1);
+  });
+
+  it("ignores the keys without Ctrl and while no mail is open", () => {
+    render(<ReadingPane />);
+    fireEvent.keyDown(window, { key: "+" });
+    expect(useUIStore.getState().mailZoom).toBe(1);
+  });
+
+  it("does nothing while no mail is open", () => {
+    selectedId = null;
+    render(<ReadingPane />);
+    fireEvent.keyDown(window, { key: "+", ctrlKey: true });
+    expect(useUIStore.getState().mailZoom).toBe(1);
   });
 });

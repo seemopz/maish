@@ -162,6 +162,7 @@ pub fn run() {
             db_tx::db_tx_select,
         ])
         .manage(db_tx::DbTxState::new())
+        .manage(imap::pool::ImapPool::new())
         .setup(|app| {
             {
                 let level = if cfg!(debug_assertions) {

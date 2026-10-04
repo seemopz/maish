@@ -9,10 +9,12 @@ vi.mock("@/stores/uiStore", () => ({
 vi.mock("../db/pendingOperations", () => ({
   getPendingOperations: vi.fn(() => Promise.resolve([])),
   updateOperationStatus: vi.fn(() => Promise.resolve()),
+  claimOperation: vi.fn(() => Promise.resolve(true)),
   deleteOperation: vi.fn(() => Promise.resolve()),
   incrementRetry: vi.fn(() => Promise.resolve()),
   getPendingOpsCount: vi.fn(() => Promise.resolve(0)),
   compactQueue: vi.fn(() => Promise.resolve(0)),
+  releaseExecutingOperations: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../emailActions", () => ({
@@ -38,9 +40,11 @@ import { useUIStore } from "@/stores/uiStore";
 import {
   getPendingOperations,
   updateOperationStatus,
+  claimOperation,
   deleteOperation,
   incrementRetry,
   compactQueue,
+  releaseExecutingOperations,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
 import { classifyError } from "@/utils/networkErrors";
@@ -91,7 +95,7 @@ describe("queueProcessor", () => {
 
     await triggerQueueFlush();
 
-    expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "executing");
+    expect(claimOperation).toHaveBeenCalledWith("op-1");
     expect(executeQueuedAction).toHaveBeenCalledWith("acct-1", "archive", {
       threadId: "t1",
       messageIds: [],
@@ -124,8 +128,9 @@ describe("queueProcessor", () => {
 
     await triggerQueueFlush();
 
-    expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "pending", "Failed to fetch");
+    expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "executing", "Failed to fetch");
     expect(incrementRetry).toHaveBeenCalledWith("op-1");
+    expect(updateOperationStatus).not.toHaveBeenCalledWith("op-1", "pending", expect.anything());
     expect(deleteOperation).not.toHaveBeenCalled();
   });
 
@@ -165,5 +170,58 @@ describe("queueProcessor", () => {
   it("start and stop work without errors", () => {
     startQueueProcessor();
     stopQueueProcessor();
+  });
+
+  it("releases operations left executing before the first run", async () => {
+    const order: string[] = [];
+    vi.mocked(releaseExecutingOperations).mockImplementationOnce(async () => {
+      order.push("release");
+    });
+    vi.mocked(compactQueue).mockImplementationOnce(async () => {
+      order.push("compact");
+      return 0;
+    });
+
+    startQueueProcessor();
+    await vi.waitFor(() => expect(order).toEqual(["release", "compact"]));
+    stopQueueProcessor();
+  });
+
+  it("holds a flush back until the release finished", async () => {
+    let finish!: () => void;
+    vi.mocked(releaseExecutingOperations).mockImplementationOnce(
+      () => new Promise<void>((resolve) => { finish = resolve; }),
+    );
+
+    startQueueProcessor();
+    const flush = triggerQueueFlush();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(compactQueue).not.toHaveBeenCalled();
+
+    finish();
+    await flush;
+    expect(compactQueue).toHaveBeenCalled();
+    stopQueueProcessor();
+  });
+
+  it("does not start the checker when stopped before the release finished", async () => {
+    startQueueProcessor();
+    stopQueueProcessor();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(compactQueue).not.toHaveBeenCalled();
+  });
+
+  it("skips an operation another sender already claimed", async () => {
+    vi.mocked(getPendingOperations).mockResolvedValueOnce([
+      { id: "op-9", account_id: "acct-1", operation_type: "archive", resource_id: "t1", params: "{}" } as never,
+    ]);
+    vi.mocked(claimOperation).mockResolvedValueOnce(false);
+
+    await triggerQueueFlush();
+
+    expect(executeQueuedAction).not.toHaveBeenCalled();
   });
 });

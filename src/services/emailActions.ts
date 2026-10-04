@@ -1,11 +1,20 @@
 import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
-import { enqueuePendingOperation } from "@/services/db/pendingOperations";
+import {
+  enqueuePendingOperation,
+  claimOperation,
+  releaseOperation,
+  deleteOperation,
+  deleteUnclaimedOperation,
+  incrementRetry,
+} from "@/services/db/pendingOperations";
 import { classifyError } from "@/utils/networkErrors";
 import { getDb } from "@/services/db/connection";
 import { getMessageIdsForThread } from "@/services/db/messages";
 import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
+import { registerUndoable, UNDO_HOLD_SEC } from "@/services/undoableActions";
+import { logToFile } from "@/services/logFile";
 
 // ---------------------------------------------------------------------------
 // Action types
@@ -333,24 +342,11 @@ async function withResolvedMessageIds(
   }
 }
 
-export async function executeEmailAction(
+/** Steps 3 and 4: queue while offline, otherwise send, queueing again on a retryable error. */
+async function dispatchAction(
   accountId: string,
-  inputAction: EmailAction,
+  action: EmailAction,
 ): Promise<ActionResult> {
-  // 0. Resolve the messages this action applies to (before any local mutation)
-  const action = await withResolvedMessageIds(accountId, inputAction);
-
-  // 1. Optimistic UI update
-  applyOptimisticUpdate(action);
-
-  // 2. Local DB update
-  try {
-    await applyLocalDbUpdate(accountId, action);
-  } catch (err) {
-    console.warn("Local DB update failed:", err);
-  }
-
-  // 3. If offline, queue
   if (!useUIStore.getState().isOnline) {
     await enqueuePendingOperation(
       accountId,
@@ -361,7 +357,6 @@ export async function executeEmailAction(
     return { success: true, queued: true };
   }
 
-  // 4. Try online execution
   try {
     const data = await executeViaProvider(accountId, action);
     return { success: true, data };
@@ -387,6 +382,159 @@ export async function executeEmailAction(
 }
 
 // ---------------------------------------------------------------------------
+// Undo
+// ---------------------------------------------------------------------------
+
+interface UndoSpec {
+  kind: string;
+  describe: (count: number) => string;
+}
+
+function conversations(count: number, singular: string, plural: string): string {
+  return count === 1 ? singular : `${count} ${plural}`;
+}
+
+/** The label an action adds to the thread, which an undo has to take off again. */
+function addedLabel(action: EmailAction): string | null {
+  if (action.type === "trash") return "TRASH";
+  if (action.type === "spam") return action.isSpam ? "SPAM" : "INBOX";
+  return null;
+}
+
+/**
+ * Remember the thread's labels so an undo restores what was really there:
+ * archiving from Starred must not put a thread into the inbox it was never in.
+ */
+async function captureRevert(
+  accountId: string,
+  action: EmailAction & { threadId: string },
+): Promise<() => Promise<void>> {
+  const db = await getDb();
+  const rows = await db.select<{ label_id: string }[]>(
+    "SELECT label_id FROM thread_labels WHERE account_id = $1 AND thread_id = $2",
+    [accountId, action.threadId],
+  );
+  const labels = rows.map((r) => r.label_id);
+  const added = addedLabel(action);
+  return async () => {
+    const conn = await getDb();
+    for (const label of labels) {
+      await conn.execute(
+        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, $3)",
+        [accountId, action.threadId, label],
+      );
+    }
+    if (added && !labels.includes(added)) {
+      await conn.execute(
+        "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = $3",
+        [accountId, action.threadId, added],
+      );
+    }
+  };
+}
+
+/**
+ * Send an action that waited out its undo window and is already in the queue.
+ * Offline, or on a retryable error, the queued row stays and the processor
+ * takes over; otherwise it is removed once the server has the change.
+ */
+async function sendQueued(
+  accountId: string,
+  action: EmailAction,
+  opId: string,
+): Promise<ActionResult> {
+  if (!useUIStore.getState().isOnline) {
+    await releaseOperation(opId);
+    return { success: true, queued: true };
+  }
+  // The row may be gone (compacted away) or already taken by the queue processor.
+  if (!(await claimOperation(opId))) return { success: true, queued: true };
+  try {
+    const data = await executeViaProvider(accountId, action);
+    await deleteOperation(opId);
+    return { success: true, data };
+  } catch (err) {
+    const classified = classifyError(err);
+    if (classified.isRetryable) {
+      await incrementRetry(opId);
+      return { success: true, queued: true };
+    }
+    await deleteOperation(opId);
+    revertOptimisticUpdate(action);
+    console.error(`Email action ${action.type} failed permanently:`, err);
+    return { success: false, error: classified.message };
+  }
+}
+
+export async function executeEmailAction(
+  accountId: string,
+  inputAction: EmailAction,
+  undo?: UndoSpec,
+): Promise<ActionResult> {
+  // 0. Resolve the messages this action applies to (before any local mutation)
+  const action = await withResolvedMessageIds(accountId, inputAction);
+
+  let revert: (() => Promise<void>) | null = null;
+  if (undo && "threadId" in action && action.threadId) {
+    try {
+      revert = await captureRevert(accountId, action as EmailAction & { threadId: string });
+    } catch (err) {
+      // Without a snapshot there is nothing to restore: run the action without undo.
+      console.warn("Could not capture state for undo:", err);
+    }
+  }
+
+  // 1. Optimistic UI update
+  applyOptimisticUpdate(action);
+
+  // 2. Local DB update
+  try {
+    await applyLocalDbUpdate(accountId, action);
+  } catch (err) {
+    console.warn("Local DB update failed:", err);
+  }
+
+  // 3. Undoable actions wait out the undo window before they leave the device.
+  // The call is queued now with a delayed retry time, so it survives a quit.
+  if (undo && revert) {
+    try {
+      const opId = await enqueuePendingOperation(
+        accountId,
+        action.type,
+        getResourceId(action),
+        actionToParams(action),
+        UNDO_HOLD_SEC,
+      );
+      const restoreLabels = revert;
+      registerUndoable(undo.kind, undo.describe, {
+        revert: async () => {
+          if (!(await deleteUnclaimedOperation(opId))) {
+            // The queue processor got there first: the server has the change,
+            // so restoring the labels locally would make the two disagree.
+            logToFile("warn", `Undo of ${action.type} came too late: it was already sent`);
+            return;
+          }
+          await restoreLabels();
+        },
+        commit: async () => {
+          const result = await sendQueued(accountId, action, opId);
+          if (!result.success) {
+            logToFile("error", `Email action ${action.type} failed: ${result.error ?? "unknown error"}`);
+          }
+        },
+      });
+      return { success: true };
+    } catch (err) {
+      // Not queued, so not protected: send it now instead of holding it in memory.
+      console.warn("Could not queue action for undo:", err);
+    }
+  }
+
+  // 4. Offline queue or provider
+  return dispatchAction(accountId, action);
+}
+
+// ---------------------------------------------------------------------------
 // Execute a queued operation (used by queue processor)
 // ---------------------------------------------------------------------------
 
@@ -405,28 +553,45 @@ export async function executeQueuedAction(
 // Convenience wrappers
 // ---------------------------------------------------------------------------
 
+/** Pass `{ undo: false }` for background work that should not raise the undo toast. */
+export interface UndoOptions {
+  undo?: boolean;
+}
+
 export function archiveThread(
   accountId: string,
   threadId: string,
   messageIds: string[],
+  { undo = true }: UndoOptions = {},
 ): Promise<ActionResult> {
-  return executeEmailAction(accountId, {
-    type: "archive",
-    threadId,
-    messageIds,
-  });
+  return executeEmailAction(
+    accountId,
+    { type: "archive", threadId, messageIds },
+    undo
+      ? {
+          kind: "archive",
+          describe: (n) => conversations(n, "Conversation archived", "conversations archived"),
+        }
+      : undefined,
+  );
 }
 
 export function trashThread(
   accountId: string,
   threadId: string,
   messageIds: string[],
+  { undo = true }: UndoOptions = {},
 ): Promise<ActionResult> {
-  return executeEmailAction(accountId, {
-    type: "trash",
-    threadId,
-    messageIds,
-  });
+  return executeEmailAction(
+    accountId,
+    { type: "trash", threadId, messageIds },
+    undo
+      ? {
+          kind: "trash",
+          describe: (n) => conversations(n, "Moved to Trash", "conversations moved to Trash"),
+        }
+      : undefined,
+  );
 }
 
 export function permanentDeleteThread(
@@ -474,13 +639,21 @@ export function spamThread(
   threadId: string,
   messageIds: string[],
   isSpam: boolean,
+  { undo = true }: UndoOptions = {},
 ): Promise<ActionResult> {
-  return executeEmailAction(accountId, {
-    type: "spam",
-    threadId,
-    messageIds,
-    isSpam,
-  });
+  return executeEmailAction(
+    accountId,
+    { type: "spam", threadId, messageIds, isSpam },
+    undo
+      ? {
+          kind: `spam:${isSpam}`,
+          describe: (n) =>
+            isSpam
+              ? conversations(n, "Marked as spam", "conversations marked as spam")
+              : conversations(n, "Moved out of spam", "conversations moved out of spam"),
+        }
+      : undefined,
+  );
 }
 
 export function moveThread(
@@ -488,13 +661,18 @@ export function moveThread(
   threadId: string,
   messageIds: string[],
   folderPath: string,
+  { undo = true }: UndoOptions = {},
 ): Promise<ActionResult> {
-  return executeEmailAction(accountId, {
-    type: "moveToFolder",
-    threadId,
-    messageIds,
-    folderPath,
-  });
+  return executeEmailAction(
+    accountId,
+    { type: "moveToFolder", threadId, messageIds, folderPath },
+    undo
+      ? {
+          kind: `move:${folderPath}`,
+          describe: (n) => conversations(n, "Conversation moved", "conversations moved"),
+        }
+      : undefined,
+  );
 }
 
 export function addThreadLabel(

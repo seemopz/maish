@@ -3,10 +3,12 @@ import { useUIStore } from "@/stores/uiStore";
 import {
   getPendingOperations,
   updateOperationStatus,
+  claimOperation,
   deleteOperation,
   incrementRetry,
   getPendingOpsCount,
   compactQueue,
+  releaseExecutingOperations,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
 import { classifyError } from "@/utils/networkErrors";
@@ -14,10 +16,15 @@ import { classifyError } from "@/utils/networkErrors";
 const BATCH_SIZE = 50;
 
 let checker: BackgroundChecker | null = null;
+// Settles once rows left 'executing' by a previous run are back to 'pending'.
+let released: Promise<void> | null = null;
 
 async function processQueue(): Promise<void> {
   // Skip if offline
   if (!useUIStore.getState().isOnline) return;
+
+  // A flush before the release would claim an operation the release then resets and sends twice
+  await released;
 
   // Compact first to eliminate redundant ops
   await compactQueue();
@@ -31,8 +38,8 @@ async function processQueue(): Promise<void> {
 
   for (const op of ops) {
     try {
-      // Mark as executing
-      await updateOperationStatus(op.id, "executing");
+      // Claim it; an undo commit may have taken the row in the meantime
+      if (!(await claimOperation(op.id))) continue;
 
       // Parse params and execute
       const params = JSON.parse(op.params) as Record<string, unknown>;
@@ -44,8 +51,8 @@ async function processQueue(): Promise<void> {
       const classified = classifyError(err);
 
       if (classified.isRetryable) {
-        // Increment retry with exponential backoff
-        await updateOperationStatus(op.id, "pending", classified.message);
+        // Keep the row claimed while the error text is written; incrementRetry requeues it behind the backoff
+        await updateOperationStatus(op.id, "executing", classified.message);
         await incrementRetry(op.id);
       } else {
         // Permanent failure
@@ -64,8 +71,14 @@ async function updatePendingCount(): Promise<void> {
 
 export function startQueueProcessor(): void {
   if (checker) return;
-  checker = createBackgroundChecker("QueueProcessor", processQueue, 30_000);
-  checker.start();
+  const instance = createBackgroundChecker("QueueProcessor", processQueue, 30_000);
+  checker = instance;
+  // Nothing is in flight yet, so a row still 'executing' is a send that was cut off.
+  released = releaseExecutingOperations()
+    .catch((err) => console.error("[QueueProcessor] release of executing operations failed:", err))
+    .then(() => {
+      if (checker === instance) instance.start();
+    });
 }
 
 export function stopQueueProcessor(): void {

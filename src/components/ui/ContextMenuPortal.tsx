@@ -6,6 +6,7 @@ import { useAccountStore } from "@/stores/accountStore";
 import { getActiveLabel } from "@/router/navigate";
 import { useComposerStore } from "@/stores/composerStore";
 import { useLabelStore } from "@/stores/labelStore";
+import { undoBatch } from "@/services/undoableActions";
 import { archiveThread, trashThread, permanentDeleteThread, markThreadRead, starThread, spamThread, addThreadLabel, removeThreadLabel } from "@/services/emailActions";
 import { deleteThread as deleteThreadFromDb, pinThread as pinThreadDb, unpinThread as unpinThreadDb, muteThread as muteThreadDb, unmuteThread as unmuteThreadDb } from "@/services/db/threads";
 import { deleteDraftsForThread } from "@/services/gmail/draftDeletion";
@@ -296,12 +297,15 @@ function ThreadMenu({
   };
 
   const handleArchive = async () => {
-    for (const id of targetIds) {
-      await archiveThread(activeAccountId, id, []);
-    }
+    await undoBatch(async () => {
+      for (const id of targetIds) {
+        await archiveThread(activeAccountId, id, []);
+      }
+    });
   };
 
   const handleDelete = async () => {
+    await undoBatch(async () => {
     for (const id of targetIds) {
       if (isTrashView) {
         await permanentDeleteThread(activeAccountId, id, []);
@@ -318,6 +322,7 @@ function ThreadMenu({
         await trashThread(activeAccountId, id, []);
       }
     }
+    });
   };
 
   const handleToggleRead = async () => {
@@ -351,9 +356,11 @@ function ThreadMenu({
   };
 
   const handleSpam = async () => {
-    for (const id of targetIds) {
-      await spamThread(activeAccountId, id, [], !isSpamView);
-    }
+    await undoBatch(async () => {
+      for (const id of targetIds) {
+        await spamThread(activeAccountId, id, [], !isSpamView);
+      }
+    });
   };
 
   const handleSnooze = () => {
@@ -367,7 +374,7 @@ function ThreadMenu({
       const newMuted = !t.isMuted;
       if (newMuted) {
         await muteThreadDb(activeAccountId, id);
-        await archiveThread(activeAccountId, id, []);
+        await archiveThread(activeAccountId, id, [], { undo: false });
       } else {
         await unmuteThreadDb(activeAccountId, id);
         useThreadStore.getState().updateThread(id, { isMuted: false });

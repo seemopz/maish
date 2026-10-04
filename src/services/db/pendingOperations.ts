@@ -19,15 +19,57 @@ export async function enqueuePendingOperation(
   operationType: string,
   resourceId: string,
   params: Record<string, unknown>,
+  /** Seconds before the queue processor may pick the operation up. */
+  delaySec = 0,
 ): Promise<string> {
   const db = await getDb();
   const id = crypto.randomUUID();
+  const nextRetryAt = delaySec > 0 ? Math.floor(Date.now() / 1000) + delaySec : null;
   await db.execute(
-    `INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [id, accountId, operationType, resourceId, JSON.stringify(params)],
+    `INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, next_retry_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [id, accountId, operationType, resourceId, JSON.stringify(params), nextRetryAt],
   );
   return id;
+}
+
+/**
+ * Take an operation for sending. Only one caller wins: the queue processor and
+ * a deferred undo commit race for the same row, and a second send of an IMAP
+ * move would run into UIDs that no longer exist.
+ */
+export async function claimOperation(id: string): Promise<boolean> {
+  const db = await getDb();
+  const result = await db.execute(
+    `UPDATE pending_operations SET status = 'executing' WHERE id = $1 AND status = 'pending'`,
+    [id],
+  );
+  return result.rowsAffected > 0;
+}
+
+/** Give a claimed or delayed operation back to the queue for the processor to pick up. */
+export async function releaseOperation(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE pending_operations SET status = 'pending', next_retry_at = NULL WHERE id = $1`,
+    [id],
+  );
+}
+
+/** Put operations whose send was cut off (crash, quit) back in the queue. Call only while nothing is in flight. */
+export async function releaseExecutingOperations(): Promise<void> {
+  const db = await getDb();
+  await db.execute(`UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'`);
+}
+
+/** Remove an operation that has not been claimed. False means it is already on its way. */
+export async function deleteUnclaimedOperation(id: string): Promise<boolean> {
+  const db = await getDb();
+  const result = await db.execute(
+    `DELETE FROM pending_operations WHERE id = $1 AND status = 'pending'`,
+    [id],
+  );
+  return result.rowsAffected > 0;
 }
 
 export async function getPendingOperations(
@@ -73,6 +115,7 @@ export async function deleteOperation(id: string): Promise<void> {
 
 const BACKOFF_SCHEDULE = [60, 300, 900, 3600];
 
+/** Count a failed attempt and requeue the claimed operation behind its backoff, or mark it failed. */
 export async function incrementRetry(id: string): Promise<void> {
   const db = await getDb();
   const rows = await db.select<{ retry_count: number; max_retries: number }[]>(
@@ -96,7 +139,7 @@ export async function incrementRetry(id: string): Promise<void> {
   const nextRetryAt = Math.floor(Date.now() / 1000) + delaySec;
 
   await db.execute(
-    `UPDATE pending_operations SET retry_count = $1, next_retry_at = $2 WHERE id = $3`,
+    `UPDATE pending_operations SET status = 'pending', retry_count = $1, next_retry_at = $2 WHERE id = $3`,
     [newCount, nextRetryAt, id],
   );
 }

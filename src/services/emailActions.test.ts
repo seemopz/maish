@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Mock dependencies
 vi.mock("@/stores/uiStore", () => ({
@@ -16,12 +16,19 @@ vi.mock("@/stores/threadStore", () => ({
   },
 }));
 
+vi.mock("@/services/logFile", () => ({ logToFile: vi.fn() }));
+
 vi.mock("@/services/email/providerFactory", () => ({
   getEmailProvider: vi.fn(),
 }));
 
 vi.mock("@/services/db/pendingOperations", () => ({
   enqueuePendingOperation: vi.fn(() => Promise.resolve("op-1")),
+  deleteOperation: vi.fn(() => Promise.resolve()),
+  claimOperation: vi.fn(() => Promise.resolve(true)),
+  releaseOperation: vi.fn(() => Promise.resolve()),
+  deleteUnclaimedOperation: vi.fn(() => Promise.resolve(true)),
+  incrementRetry: vi.fn(() => Promise.resolve()),
 }));
 
 const { mockDbExecute, mockDbSelect } = vi.hoisted(() => ({
@@ -46,7 +53,14 @@ vi.mock("@/router/navigate", () => ({
 import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
-import { enqueuePendingOperation } from "@/services/db/pendingOperations";
+import {
+  enqueuePendingOperation,
+  deleteOperation,
+  claimOperation,
+  releaseOperation,
+  deleteUnclaimedOperation,
+  incrementRetry,
+} from "@/services/db/pendingOperations";
 import {
   archiveThread,
   trashThread,
@@ -59,6 +73,8 @@ import {
   executeQueuedAction,
 } from "./emailActions";
 import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
+import { useUndoStore } from "@/stores/undoStore";
+import { flushPendingUndo, undoPending, undoBatch, UNDO_HOLD_SEC } from "./undoableActions";
 import { createMockEmailProvider, createMockUIStoreState, createMockThreadStoreState } from "@/test/mocks";
 
 const mockProvider = createMockEmailProvider();
@@ -80,7 +96,7 @@ describe("emailActions", () => {
 
   describe("online execution", () => {
     it("archives a thread via provider", async () => {
-      const result = await archiveThread("acct-1", "t1", ["m1"]);
+      const result = await archiveThread("acct-1", "t1", ["m1"], { undo: false });
       expect(result.success).toBe(true);
       expect(result.queued).toBeUndefined();
       expect(mockRemoveThread).toHaveBeenCalledWith("t1");
@@ -88,7 +104,7 @@ describe("emailActions", () => {
     });
 
     it("trashes a thread via provider", async () => {
-      const result = await trashThread("acct-1", "t1", ["m1"]);
+      const result = await trashThread("acct-1", "t1", ["m1"], { undo: false });
       expect(result.success).toBe(true);
       expect(mockProvider.trash).toHaveBeenCalledWith("t1", ["m1"]);
     });
@@ -108,7 +124,7 @@ describe("emailActions", () => {
     });
 
     it("reports spam via provider", async () => {
-      const result = await spamThread("acct-1", "t1", ["m1"], true);
+      const result = await spamThread("acct-1", "t1", ["m1"], true, { undo: false });
       expect(result.success).toBe(true);
       expect(mockRemoveThread).toHaveBeenCalledWith("t1");
       expect(mockProvider.spam).toHaveBeenCalledWith("t1", ["m1"], true);
@@ -121,7 +137,7 @@ describe("emailActions", () => {
     });
 
     it("queues archive when offline", async () => {
-      const result = await archiveThread("acct-1", "t1", ["m1"]);
+      const result = await archiveThread("acct-1", "t1", ["m1"], { undo: false });
       expect(result.success).toBe(true);
       expect(result.queued).toBe(true);
       expect(mockProvider.archive).not.toHaveBeenCalled();
@@ -144,7 +160,7 @@ describe("emailActions", () => {
       vi.mocked(useUIStore.getState).mockReturnValue({ isOnline: true } as never);
       mockProvider.archive.mockRejectedValueOnce(new Error("Failed to fetch"));
 
-      const result = await archiveThread("acct-1", "t1", ["m1"]);
+      const result = await archiveThread("acct-1", "t1", ["m1"], { undo: false });
       expect(result.success).toBe(true);
       expect(result.queued).toBe(true);
       expect(enqueuePendingOperation).toHaveBeenCalled();
@@ -311,7 +327,7 @@ describe("emailActions", () => {
     it("resolves the thread's message IDs when the caller passes none", async () => {
       mockDbSelect.mockResolvedValue(rows);
 
-      await archiveThread("acct-1", "t1", []);
+      await archiveThread("acct-1", "t1", [], { undo: false });
 
       expect(mockProvider.archive).toHaveBeenCalledWith("t1", [
         "imap-acct-1-INBOX-100",
@@ -323,11 +339,11 @@ describe("emailActions", () => {
       mockDbSelect.mockResolvedValue(rows);
       const ids = ["imap-acct-1-INBOX-100", "imap-acct-1-INBOX-200"];
 
-      await trashThread("acct-1", "t1", []);
+      await trashThread("acct-1", "t1", [], { undo: false });
       await starThread("acct-1", "t1", [], true);
       await markThreadRead("acct-1", "t1", [], true);
-      await spamThread("acct-1", "t1", [], true);
-      await moveThread("acct-1", "t1", [], "Work");
+      await spamThread("acct-1", "t1", [], true, { undo: false });
+      await moveThread("acct-1", "t1", [], "Work", { undo: false });
 
       expect(mockProvider.trash).toHaveBeenCalledWith("t1", ids);
       expect(mockProvider.star).toHaveBeenCalledWith("t1", ids, true);
@@ -339,7 +355,7 @@ describe("emailActions", () => {
     it("keeps message IDs the caller supplied", async () => {
       mockDbSelect.mockResolvedValue(rows);
 
-      await archiveThread("acct-1", "t1", ["m1"]);
+      await archiveThread("acct-1", "t1", ["m1"], { undo: false });
 
       expect(mockProvider.archive).toHaveBeenCalledWith("t1", ["m1"]);
       expect(mockDbSelect).not.toHaveBeenCalled();
@@ -365,7 +381,7 @@ describe("emailActions", () => {
       mockDbSelect.mockResolvedValue(rows);
       vi.mocked(useUIStore.getState).mockReturnValue({ isOnline: false } as never);
 
-      await archiveThread("acct-1", "t1", []);
+      await archiveThread("acct-1", "t1", [], { undo: false });
 
       expect(enqueuePendingOperation).toHaveBeenCalledWith(
         "acct-1",
@@ -394,10 +410,172 @@ describe("emailActions", () => {
     it("falls back to an empty list when the lookup fails", async () => {
       mockDbSelect.mockRejectedValue(new Error("db gone"));
 
-      const result = await archiveThread("acct-1", "t1", []);
+      const result = await archiveThread("acct-1", "t1", [], { undo: false });
 
       expect(result.success).toBe(true);
       expect(mockProvider.archive).toHaveBeenCalledWith("t1", []);
     });
+  });
+});
+
+describe("emailActions undo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({ isOnline: true }));
+    vi.mocked(useThreadStore.getState).mockReturnValue(
+      createMockThreadStoreState({ updateThread: mockUpdateThread, removeThread: mockRemoveThread }),
+    );
+    vi.mocked(getEmailProvider).mockResolvedValue(mockProvider);
+    mockDbSelect.mockResolvedValue([]);
+  });
+
+  afterEach(async () => {
+    await flushPendingUndo();
+  });
+
+  it("applies the change locally but holds the server call during the undo window", async () => {
+    const result = await archiveThread("acct-1", "t1", ["m1"]);
+
+    expect(result.success).toBe(true);
+    expect(mockRemoveThread).toHaveBeenCalledWith("t1");
+    expect(mockProvider.archive).not.toHaveBeenCalled();
+    expect(useUndoStore.getState().message).toBe("Conversation archived");
+  });
+
+  it("stores the call in the queue at once, held far past the window, so a quit loses nothing and a long multi-select is not sent early", async () => {
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    expect(enqueuePendingOperation).toHaveBeenCalledWith(
+      "acct-1",
+      "archive",
+      "t1",
+      { threadId: "t1", messageIds: ["m1"] },
+      UNDO_HOLD_SEC,
+    );
+  });
+
+  it("sends the call after the window and removes the queued copy", async () => {
+    await archiveThread("acct-1", "t1", ["m1"]);
+    await flushPendingUndo();
+
+    expect(mockProvider.archive).toHaveBeenCalledWith("t1", ["m1"]);
+    expect(claimOperation).toHaveBeenCalledWith("op-1");
+    expect(deleteOperation).toHaveBeenCalledWith("op-1");
+  });
+
+  it("leaves the queued copy to the processor while offline", async () => {
+    vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({ isOnline: false }));
+    await trashThread("acct-1", "t1", ["m1"]);
+
+    await flushPendingUndo();
+
+    expect(mockProvider.trash).not.toHaveBeenCalled();
+    expect(releaseOperation).toHaveBeenCalledWith("op-1");
+    expect(claimOperation).not.toHaveBeenCalled();
+    expect(deleteOperation).not.toHaveBeenCalled();
+  });
+
+  it("hands the queued copy back through incrementRetry on a retryable error", async () => {
+    mockProvider.archive.mockRejectedValueOnce(new Error("network error"));
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    await flushPendingUndo();
+
+    expect(releaseOperation).not.toHaveBeenCalled();
+    expect(incrementRetry).toHaveBeenCalledWith("op-1");
+    expect(deleteOperation).not.toHaveBeenCalled();
+  });
+
+  it("does not send a call the queue processor already claimed", async () => {
+    vi.mocked(claimOperation).mockResolvedValueOnce(false);
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    await flushPendingUndo();
+
+    expect(mockProvider.archive).not.toHaveBeenCalled();
+  });
+
+  it("undo that comes after the queue processor sent the call leaves the local state alone", async () => {
+    await archiveThread("acct-1", "t1", ["m1"]);
+    vi.mocked(deleteUnclaimedOperation).mockResolvedValueOnce(false);
+    mockDbExecute.mockClear();
+
+    await undoPending();
+
+    expect(mockDbExecute).not.toHaveBeenCalled();
+  });
+
+  it("sends at once when it cannot be queued", async () => {
+    vi.mocked(enqueuePendingOperation).mockRejectedValueOnce(new Error("db locked"));
+
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    expect(mockProvider.archive).toHaveBeenCalledWith("t1", ["m1"]);
+    expect(useUndoStore.getState().message).toBeNull();
+  });
+
+  it("undo takes the call out of the queue and sends nothing", async () => {
+    await archiveThread("acct-1", "t1", ["m1"]);
+    await undoPending();
+    await flushPendingUndo();
+
+    expect(deleteUnclaimedOperation).toHaveBeenCalledWith("op-1");
+    expect(mockProvider.archive).not.toHaveBeenCalled();
+  });
+
+  it("undo of a multi-select takes back every thread", async () => {
+    await undoBatch(async () => {
+      await archiveThread("acct-1", "t1", ["m1"]);
+      await archiveThread("acct-1", "t2", ["m2"]);
+    });
+    expect(useUndoStore.getState().message).toBe("2 conversations archived");
+
+    await undoPending();
+    await flushPendingUndo();
+    expect(deleteUnclaimedOperation).toHaveBeenCalledTimes(2);
+    expect(mockProvider.archive).not.toHaveBeenCalled();
+  });
+
+  it("undo of archive puts back the labels the thread had, and no others", async () => {
+    mockDbSelect.mockResolvedValue([{ label_id: "STARRED" }]);
+    await archiveThread("acct-1", "t1", ["m1"]);
+    mockDbExecute.mockClear();
+
+    await undoPending();
+
+    const sql = mockDbExecute.mock.calls.map((c) => (c as unknown[])[0] as string).join("\n");
+    expect(mockDbExecute).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE"), [
+      "acct-1",
+      "t1",
+      "STARRED",
+    ]);
+    expect(mockDbExecute).not.toHaveBeenCalledWith(expect.anything(), ["acct-1", "t1", "INBOX"]);
+    expect(sql).not.toContain("DELETE");
+  });
+
+  it("undo of trash restores INBOX and drops TRASH", async () => {
+    mockDbSelect.mockResolvedValue([{ label_id: "INBOX" }]);
+    await trashThread("acct-1", "t1", ["m1"]);
+    mockDbExecute.mockClear();
+
+    await undoPending();
+
+    expect(mockDbExecute).toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE"), [
+      "acct-1",
+      "t1",
+      "INBOX",
+    ]);
+    expect(mockDbExecute).toHaveBeenCalledWith(expect.stringContaining("DELETE"), [
+      "acct-1",
+      "t1",
+      "TRASH",
+    ]);
+  });
+
+  it("raises no toast and sends at once with undo: false", async () => {
+    await archiveThread("acct-1", "t1", ["m1"], { undo: false });
+
+    expect(mockProvider.archive).toHaveBeenCalledWith("t1", ["m1"]);
+    expect(useUndoStore.getState().message).toBeNull();
   });
 });

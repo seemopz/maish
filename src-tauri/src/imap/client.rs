@@ -12,9 +12,10 @@ use super::types::*;
 
 // ---------- Timeout constants ----------
 
-/// A lost SYN is retransmitted only after 1 s, 3 s, 7 s..., so one long attempt
-/// stalls a connection for its whole timeout. Several short attempts recover from
-/// a single lost packet in seconds; the total stays below the old 30 s.
+/// The kernel already retransmits a lost SYN within one attempt (after about
+/// 1 s, 3 s, 7 s...). Several short attempts add a fresh socket (new source port,
+/// new DNS lookup) when a path stays stalled, and an unreachable host fails after
+/// 18 s instead of 30 s.
 const TCP_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(6);
 const TCP_CONNECT_ATTEMPTS: u32 = 3;
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -40,9 +41,9 @@ where
         match tokio::time::timeout(per_attempt, connect()).await {
             Ok(Ok(stream)) => return Ok(stream),
             Ok(Err(e)) => return Err(format!("TCP connect to {host}:{port} failed: {e}")),
-            Err(_) => log::warn!(
-                "TCP connect to {host}:{port} timed out (attempt {attempt}/{attempts})"
-            ),
+            Err(_) => {
+                log::warn!("TCP connect to {host}:{port} timed out (attempt {attempt}/{attempts})")
+            }
         }
     }
     Err(format!(
@@ -1487,7 +1488,6 @@ fn extract_literal_size(line: &str) -> Option<usize> {
 
 /// Establish TCP + TLS or plain stream for "tls" and "none" security modes.
 async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
-
     match config.security.as_str() {
         "tls" => {
             let native_connector = build_tls_connector(config.accept_invalid_certs)?;
@@ -2016,9 +2016,13 @@ mod tests {
 
     #[tokio::test]
     async fn dead_host_fails_with_the_timeout_text() {
-        let err = connect_with_retry::<TcpStream, _>("10.255.255.1", 993, 2, Duration::from_millis(50), || {
-            std::future::pending()
-        })
+        let err = connect_with_retry::<TcpStream, _>(
+            "10.255.255.1",
+            993,
+            2,
+            Duration::from_millis(50),
+            std::future::pending,
+        )
         .await
         .unwrap_err();
 

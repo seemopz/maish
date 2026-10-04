@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ThreadView } from "./components/email/ThreadView";
 import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
+import { UndoActionToast } from "./components/ui/UndoActionToast";
 import { useAccountStore } from "./stores/accountStore";
 import { useUIStore } from "./stores/uiStore";
 import { runMigrations } from "./services/db/migrations";
@@ -149,6 +150,7 @@ export default function ThreadWindow() {
       <ThreadView thread={thread} />
       <Composer />
       <UndoSendToast />
+      <UndoActionToast />
     </div>
   );
 }

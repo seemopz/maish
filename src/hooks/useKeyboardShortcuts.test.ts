@@ -34,6 +34,7 @@ vi.mock("@/stores/shortcutStore", () => ({
         "app.commandPalette": "/",
         "app.toggleSidebar": "Ctrl+Shift+E",
         "app.help": "?",
+        "action.undo": "z",
       },
     }),
   },
@@ -66,11 +67,13 @@ vi.mock("@/services/gmail/draftDeletion", () => ({ deleteDraftsForThread: vi.fn(
 vi.mock("@/services/gmail/tokenManager", () => ({ getGmailClient: vi.fn() }));
 vi.mock("@/services/db/messages", () => ({ getMessagesForThread: vi.fn() }));
 vi.mock("@/components/email/MessageItem", () => ({ parseUnsubscribeUrl: vi.fn() }));
+vi.mock("@/services/undoableActions", () => ({ undoPending: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("@/services/gmail/syncManager", () => ({ triggerSync: vi.fn() }));
 
 import { renderHook } from "@testing-library/react";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
+import { undoPending } from "@/services/undoableActions";
 
 describe("useKeyboardShortcuts", () => {
   beforeEach(() => {
@@ -90,6 +93,14 @@ describe("useKeyboardShortcuts", () => {
     expect(listener).toHaveBeenCalledTimes(1);
 
     window.removeEventListener("maish-toggle-ask-inbox", listener);
+  });
+
+  it("undoes the last archive / delete / spam / move when 'z' is pressed", () => {
+    renderHook(() => useKeyboardShortcuts());
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", bubbles: true }));
+
+    expect(undoPending).toHaveBeenCalledTimes(1);
   });
 
   it("dispatches maish-toggle-command-palette when '/' is pressed", () => {

@@ -303,7 +303,7 @@ export function Composer() {
 
         // Send & archive: remove from inbox if replying to a thread
         if (useUIStore.getState().sendAndArchive && state.threadId) {
-          try { await archiveThread(activeAccountId, state.threadId, []); } catch { /* ignore */ }
+          try { await archiveThread(activeAccountId, state.threadId, [], { undo: false }); } catch { /* ignore */ }
         }
 
         // Update contacts frequency

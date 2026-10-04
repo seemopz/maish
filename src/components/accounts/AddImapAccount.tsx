@@ -554,7 +554,7 @@ export function AddImapAccount({
             <>Register at the Azure Portal (App Registrations) with redirect URI <code className="font-mono text-text-secondary">http://127.0.0.1:17248</code>.</>
           )}
           {providerId === "yahoo" && (
-            <>Register at the Yahoo Demaishper Network with redirect URI <code className="font-mono text-text-secondary">http://127.0.0.1:17248</code>.</>
+            <>Register at the Yahoo Developer Network with redirect URI <code className="font-mono text-text-secondary">http://127.0.0.1:17248</code>.</>
           )}
         </p>
       </div>

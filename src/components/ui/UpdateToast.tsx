@@ -4,11 +4,15 @@ import {
   setUpdateCallback,
   installUpdate,
   getAvailableUpdate,
+  updateProgressLabel,
+  type UpdateProgress,
 } from "@/services/updateManager";
 
 export function UpdateToast() {
   const [version, setVersion] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const toastRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -22,11 +26,14 @@ export function UpdateToast() {
 
   const handleInstall = useCallback(async () => {
     setInstalling(true);
+    setProgress(null);
+    setError(null);
     try {
-      await installUpdate();
+      await installUpdate(setProgress);
     } catch (err) {
-      console.error("Update install failed:", err);
+      setError(err instanceof Error ? err.message : String(err));
       setInstalling(false);
+      setProgress(null);
     }
   }, []);
 
@@ -50,6 +57,9 @@ export function UpdateToast() {
           <p className="text-sm font-medium text-text-primary">
             Maish v{version} is available
           </p>
+          {error && (
+            <p className="text-xs text-danger break-words">Update failed: {error}</p>
+          )}
           <div className="flex items-center gap-2">
             <button
               onClick={handleDismiss}
@@ -63,7 +73,13 @@ export function UpdateToast() {
               disabled={installing}
               className="text-xs font-medium text-accent hover:text-accent-hover transition-colors disabled:opacity-50"
             >
-              {installing ? "Updating..." : "Update Now"}
+              {installing
+                ? progress
+                  ? updateProgressLabel(progress)
+                  : "Updating..."
+                : error
+                  ? "Retry"
+                  : "Update Now"}
             </button>
           </div>
         </div>

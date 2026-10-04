@@ -1335,3 +1335,147 @@ describe("imapDeltaSync — UIDs the server listed but the fetch did not deliver
     expect(lastUidRecorded()).toBe(7);
   });
 });
+
+describe("empty folders and partial folder failures", () => {
+  const mockGetAccount = vi.mocked(getAccount);
+  const mockImapListFolders = vi.mocked(imapListFolders);
+  const mockImapSearchFolder = vi.mocked(imapSearchFolder);
+  const mockImapFetchMessages = vi.mocked(imapFetchMessages);
+  const mockImapDeltaCheck = vi.mocked(imapDeltaCheck);
+  const mockGetAllFolderSyncStates = vi.mocked(getAllFolderSyncStates);
+  const mockUpsertFolderSyncState = vi.mocked(upsertFolderSyncState);
+  const mockDeleteMessagesInFolder = vi.mocked(deleteMessagesInFolder);
+
+  const inbox = () => createMockImapFolder({ path: "INBOX", raw_path: "INBOX" });
+  const archive = () => createMockImapFolder({ path: "Archive", raw_path: "Archive" });
+  const stateFor = (folder: string, last_uid: number) => ({
+    account_id: "acc-1",
+    folder_path: folder,
+    uidvalidity: 1,
+    last_uid,
+    modseq: null,
+    last_sync_at: 0,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetAccount.mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
+    mockGetAllFolderSyncStates.mockResolvedValue([] as never);
+    mockImapSearchFolder.mockReset();
+    mockImapFetchMessages.mockReset();
+    mockImapDeltaCheck.mockReset();
+  });
+
+  describe("sync state of an empty folder", () => {
+    it("is left to the first delta for a folder the server reports as empty", async () => {
+      mockImapListFolders.mockResolvedValue([createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 0 })]);
+
+      await imapInitialSync("acc-1");
+
+      // list_folders reports exists = 0 when STATUS fails, so a row here would
+      // have last_uid 0 and the next delta would fetch the whole folder with no
+      // date window. As a new folder it is searched with SINCE and gets a real
+      // UIDVALIDITY/UIDNEXT.
+      expect(mockUpsertFolderSyncState).not.toHaveBeenCalled();
+    });
+
+    it("is recorded by the initial sync when the search finds nothing", async () => {
+      mockImapListFolders.mockResolvedValue([createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 5 })]);
+      mockImapSearchFolder.mockResolvedValue({
+        uids: [],
+        folder_status: createMockImapFolderStatus({ uidvalidity: 7, uidnext: 6 }),
+      });
+
+      await imapInitialSync("acc-1");
+
+      expect(mockUpsertFolderSyncState).toHaveBeenCalledWith(
+        expect.objectContaining({ folder_path: "INBOX", uidvalidity: 7, last_uid: 5 }),
+      );
+    });
+
+    it("is not recorded when the server gave no UIDNEXT for a folder that has messages", async () => {
+      mockImapListFolders.mockResolvedValue([createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 5 })]);
+      mockImapSearchFolder.mockResolvedValue({
+        uids: [],
+        folder_status: createMockImapFolderStatus({ uidvalidity: 7, uidnext: 0, exists: 5 }),
+      });
+
+      await imapInitialSync("acc-1");
+
+      // last_uid 0 would make the next delta fetch everything above UID 0.
+      expect(mockUpsertFolderSyncState).not.toHaveBeenCalled();
+    });
+
+    it("is not recorded by the delta sync when the server gave no UIDNEXT for a folder that has messages", async () => {
+      mockImapListFolders.mockResolvedValue([archive()]);
+      mockImapSearchFolder.mockResolvedValue({
+        uids: [],
+        folder_status: createMockImapFolderStatus({ uidvalidity: 3, uidnext: 0, exists: 9 }),
+      });
+
+      await imapDeltaSync("acc-1");
+
+      expect(mockUpsertFolderSyncState).not.toHaveBeenCalled();
+    });
+
+    it("is recorded by the delta sync for a new folder the search finds nothing in", async () => {
+      mockImapListFolders.mockResolvedValue([archive()]);
+      mockImapSearchFolder.mockResolvedValue({
+        uids: [],
+        folder_status: createMockImapFolderStatus({ uidvalidity: 3, uidnext: 1 }),
+      });
+
+      await imapDeltaSync("acc-1");
+
+      expect(mockUpsertFolderSyncState).toHaveBeenCalledWith(
+        expect.objectContaining({ folder_path: "Archive", uidvalidity: 3, last_uid: 0 }),
+      );
+    });
+
+    it("is recorded by the delta sync after a UIDVALIDITY change leaves nothing to fetch", async () => {
+      mockImapListFolders.mockResolvedValue([inbox()]);
+      mockGetAllFolderSyncStates.mockResolvedValue([stateFor("INBOX", 10)] as never);
+      mockImapDeltaCheck.mockResolvedValue([
+        { folder: "INBOX", uidvalidity: 2, new_uids: [], uidvalidity_changed: true },
+      ] as never);
+      mockDeleteMessagesInFolder.mockResolvedValue([]);
+      mockImapSearchFolder.mockResolvedValue({
+        uids: [],
+        folder_status: createMockImapFolderStatus({ uidvalidity: 2, uidnext: 1 }),
+      });
+
+      await imapDeltaSync("acc-1");
+
+      // Keeping the old row would leave last_uid 10 under the new UIDVALIDITY.
+      expect(mockUpsertFolderSyncState).toHaveBeenCalledWith(
+        expect.objectContaining({ folder_path: "INBOX", uidvalidity: 2, last_uid: 0 }),
+      );
+    });
+  });
+
+  describe("a folder that fails in the delta sync", () => {
+    it("does not fail the sync while another folder was checked", async () => {
+      mockImapListFolders.mockResolvedValue([inbox(), archive()]);
+      mockGetAllFolderSyncStates.mockResolvedValue([stateFor("INBOX", 4), stateFor("Archive", 4)] as never);
+      mockImapDeltaCheck.mockResolvedValue([
+        { folder: "INBOX", uidvalidity: 1, new_uids: [], uidvalidity_changed: false },
+        { folder: "Archive", uidvalidity: 1, new_uids: [5], uidvalidity_changed: false },
+      ] as never);
+      mockImapFetchMessages.mockRejectedValue(new Error("fetch failed"));
+
+      // Archive fails, INBOX had nothing new: that is a partial success.
+      await expect(imapDeltaSync("acc-1")).resolves.toEqual({ messages: [] });
+    });
+
+    it("still fails when every folder failed", async () => {
+      mockImapListFolders.mockResolvedValue([archive()]);
+      mockGetAllFolderSyncStates.mockResolvedValue([stateFor("Archive", 4)] as never);
+      mockImapDeltaCheck.mockResolvedValue([
+        { folder: "Archive", uidvalidity: 1, new_uids: [5], uidvalidity_changed: false },
+      ] as never);
+      mockImapFetchMessages.mockRejectedValue(new Error("fetch failed"));
+
+      await expect(imapDeltaSync("acc-1")).rejects.toThrow("All folders failed to sync");
+    });
+  });
+});

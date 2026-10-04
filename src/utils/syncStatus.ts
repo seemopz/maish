@@ -1,4 +1,5 @@
 import type { SyncState } from "@/stores/uiStore";
+import type { SyncProgress } from "@/services/gmail/sync";
 
 export interface SyncDisplay {
   state: SyncState;
@@ -40,4 +41,12 @@ export function nextSyncDisplay(
   const remaining = [...errors.values()];
   if (remaining.length > 0) return { state: "error", message: remaining[remaining.length - 1] ?? null };
   return { state: "idle", message: null };
+}
+
+/** The line shown while a sync runs; `progress` is absent until the first phase reports. */
+export function syncProgressMessage(progress?: SyncProgress): string {
+  if (progress?.phase === "messages") return `Syncing: ${progress.current}/${progress.total} messages`;
+  if (progress?.phase === "labels") return "Syncing labels...";
+  if (progress?.phase === "threads") return `Building threads... (${progress.current}/${progress.total})`;
+  return "Syncing...";
 }

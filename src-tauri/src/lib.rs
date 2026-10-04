@@ -49,6 +49,17 @@ fn open_devtools(app: tauri::AppHandle) {
     }
 }
 
+/// Write a line from the webview to the log file; `console.*` never reaches it.
+#[tauri::command]
+fn log_frontend(level: String, message: String) {
+    let level = match level.as_str() {
+        "error" => log::Level::Error,
+        "warn" => log::Level::Warn,
+        _ => log::Level::Info,
+    };
+    log::log!(target: "frontend", level, "{message}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Set explicit AUMID on Windows so toast notifications show "Maish"
@@ -93,6 +104,7 @@ pub fn run() {
             oauth::oauth_exchange_token,
             oauth::oauth_refresh_token,
             set_tray_tooltip,
+            log_frontend,
             close_splashscreen,
             open_devtools,
             commands::imap_test_connection,

@@ -3,6 +3,7 @@ import { render, screen, act } from "@testing-library/react";
 import { ThreadCard } from "./ThreadCard";
 import type { Thread } from "@/stores/threadStore";
 import { runSwipeAction } from "@/services/swipeActions";
+import { logToFile } from "@/services/logFile";
 
 vi.mock("@dnd-kit/core", () => ({
   useDraggable: () => ({
@@ -38,7 +39,8 @@ vi.mock("@/stores/uiStore", () => ({
   useUIStore: (selector: (s: Record<string, unknown>) => unknown) => selector(uiState),
 }));
 
-vi.mock("@/services/swipeActions", () => ({ runSwipeAction: vi.fn() }));
+vi.mock("@/services/swipeActions", () => ({ runSwipeAction: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/services/logFile", () => ({ logToFile: vi.fn() }));
 vi.mock("@/services/snooze/snoozeManager", () => ({ snoozeThread: vi.fn() }));
 vi.mock("./SnoozeDialog", () => ({
   SnoozeDialog: () => <div data-testid="snooze-dialog" />,
@@ -155,6 +157,15 @@ describe("ThreadCard", () => {
       swipe(container, -200);
       release();
       expect(runSwipeAction).toHaveBeenCalledWith("toggleRead", thread);
+    });
+
+    it("logs a failing swipe action instead of leaving an unhandled rejection", async () => {
+      vi.mocked(runSwipeAction).mockRejectedValueOnce(new Error("boom"));
+      const { container } = render(<ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} />);
+      swipe(container, 200);
+      release();
+      await act(async () => {});
+      expect(logToFile).toHaveBeenCalledWith("error", expect.stringContaining("boom"));
     });
 
     it("does nothing below the threshold", () => {

@@ -9,6 +9,7 @@ import { Paperclip, Star, Check, Pin, BellRing, VolumeX, Archive, Trash2, MailOp
 import { useSwipeGesture, type SwipeDirection } from "@/hooks/useSwipeGesture";
 import { resolveSwipeAction, describeSwipeAction, type SwipeAction } from "@/utils/swipeActions";
 import { runSwipeAction } from "@/services/swipeActions";
+import { logToFile } from "@/services/logFile";
 import { snoozeThread } from "@/services/snooze/snoozeManager";
 import { SnoozeDialog } from "./SnoozeDialog";
 import type { ReactNode } from "react";
@@ -70,7 +71,11 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
     onCommit: (direction: SwipeDirection) => {
       const action = direction === "left" ? swipeLeft : swipeRight;
       if (action === "snooze") setShowSnooze(true);
-      else void runSwipeAction(action, thread);
+      else {
+        runSwipeAction(action, thread).catch((err) =>
+          logToFile("error", `Swipe action ${action} failed: ${String(err)}`),
+        );
+      }
     },
   });
   const swipeAction = offset < 0 ? swipeLeft : swipeRight;
@@ -82,7 +87,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
       await snoozeThread(thread.accountId, thread.id, until);
       removeThread(thread.id);
     } catch (err) {
-      console.error("Failed to snooze:", err);
+      logToFile("error", `Swipe snooze failed: ${String(err)}`);
     }
   };
 

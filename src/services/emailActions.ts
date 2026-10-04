@@ -456,7 +456,6 @@ async function sendQueued(
   } catch (err) {
     const classified = classifyError(err);
     if (classified.isRetryable) {
-      await releaseOperation(opId);
       await incrementRetry(opId);
       return { success: true, queued: true };
     }

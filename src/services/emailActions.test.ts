@@ -475,13 +475,13 @@ describe("emailActions undo", () => {
     expect(deleteOperation).not.toHaveBeenCalled();
   });
 
-  it("releases the queued copy again on a retryable error", async () => {
+  it("hands the queued copy back through incrementRetry on a retryable error", async () => {
     mockProvider.archive.mockRejectedValueOnce(new Error("network error"));
     await archiveThread("acct-1", "t1", ["m1"]);
 
     await flushPendingUndo();
 
-    expect(releaseOperation).toHaveBeenCalledWith("op-1");
+    expect(releaseOperation).not.toHaveBeenCalled();
     expect(incrementRetry).toHaveBeenCalledWith("op-1");
     expect(deleteOperation).not.toHaveBeenCalled();
   });

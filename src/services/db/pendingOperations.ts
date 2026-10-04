@@ -56,6 +56,12 @@ export async function releaseOperation(id: string): Promise<void> {
   );
 }
 
+/** Put operations whose send was cut off (crash, quit) back in the queue. Call only while nothing is in flight. */
+export async function releaseExecutingOperations(): Promise<void> {
+  const db = await getDb();
+  await db.execute(`UPDATE pending_operations SET status = 'pending' WHERE status = 'executing'`);
+}
+
 /** Remove an operation that has not been claimed. False means it is already on its way. */
 export async function deleteUnclaimedOperation(id: string): Promise<boolean> {
   const db = await getDb();
@@ -109,6 +115,7 @@ export async function deleteOperation(id: string): Promise<void> {
 
 const BACKOFF_SCHEDULE = [60, 300, 900, 3600];
 
+/** Count a failed attempt and requeue the claimed operation behind its backoff, or mark it failed. */
 export async function incrementRetry(id: string): Promise<void> {
   const db = await getDb();
   const rows = await db.select<{ retry_count: number; max_retries: number }[]>(
@@ -132,7 +139,7 @@ export async function incrementRetry(id: string): Promise<void> {
   const nextRetryAt = Math.floor(Date.now() / 1000) + delaySec;
 
   await db.execute(
-    `UPDATE pending_operations SET retry_count = $1, next_retry_at = $2 WHERE id = $3`,
+    `UPDATE pending_operations SET status = 'pending', retry_count = $1, next_retry_at = $2 WHERE id = $3`,
     [newCount, nextRetryAt, id],
   );
 }

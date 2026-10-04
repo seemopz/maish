@@ -14,6 +14,7 @@ vi.mock("../db/pendingOperations", () => ({
   incrementRetry: vi.fn(() => Promise.resolve()),
   getPendingOpsCount: vi.fn(() => Promise.resolve(0)),
   compactQueue: vi.fn(() => Promise.resolve(0)),
+  releaseExecutingOperations: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../emailActions", () => ({
@@ -43,6 +44,7 @@ import {
   deleteOperation,
   incrementRetry,
   compactQueue,
+  releaseExecutingOperations,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
 import { classifyError } from "@/utils/networkErrors";
@@ -167,6 +169,30 @@ describe("queueProcessor", () => {
   it("start and stop work without errors", () => {
     startQueueProcessor();
     stopQueueProcessor();
+  });
+
+  it("releases operations left executing before the first run", async () => {
+    const order: string[] = [];
+    vi.mocked(releaseExecutingOperations).mockImplementationOnce(async () => {
+      order.push("release");
+    });
+    vi.mocked(compactQueue).mockImplementationOnce(async () => {
+      order.push("compact");
+      return 0;
+    });
+
+    startQueueProcessor();
+    await vi.waitFor(() => expect(order).toEqual(["release", "compact"]));
+    stopQueueProcessor();
+  });
+
+  it("does not start the checker when stopped before the release finished", async () => {
+    startQueueProcessor();
+    stopQueueProcessor();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(compactQueue).not.toHaveBeenCalled();
   });
 
   it("skips an operation another sender already claimed", async () => {

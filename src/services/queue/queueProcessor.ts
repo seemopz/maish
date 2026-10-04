@@ -8,6 +8,7 @@ import {
   incrementRetry,
   getPendingOpsCount,
   compactQueue,
+  releaseExecutingOperations,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
 import { classifyError } from "@/utils/networkErrors";
@@ -65,8 +66,14 @@ async function updatePendingCount(): Promise<void> {
 
 export function startQueueProcessor(): void {
   if (checker) return;
-  checker = createBackgroundChecker("QueueProcessor", processQueue, 30_000);
-  checker.start();
+  const instance = createBackgroundChecker("QueueProcessor", processQueue, 30_000);
+  checker = instance;
+  // Nothing is in flight yet, so a row still 'executing' is a send that was cut off.
+  releaseExecutingOperations()
+    .catch((err) => console.error("[QueueProcessor] release of executing operations failed:", err))
+    .then(() => {
+      if (checker === instance) instance.start();
+    });
 }
 
 export function stopQueueProcessor(): void {

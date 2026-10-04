@@ -17,6 +17,7 @@ import {
   Eye,
   Layout,
   Undo2,
+  MoveHorizontal,
   CalendarClock,
   CalendarSync,
   Archive,
@@ -636,6 +637,21 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           { text: "Only the most recent action can be undone; starting another one sends the previous one." },
           { text: "Quitting Maish during the 5 seconds does not lose the action; it is sent on the next start." },
         ],
+      },
+      {
+        id: "swipe-actions",
+        icon: MoveHorizontal,
+        title: "Swipe actions",
+        summary: "Swipe a conversation with two fingers to act on it.",
+        description:
+          "On a trackpad, swipe left or right with two fingers over a conversation in the list. The card follows your fingers and a coloured field with the action's icon appears underneath. Release after about 40 % of the card's width to run the action; release earlier and the card snaps back. By default left deletes and right marks the conversation read or unread.",
+        tips: [
+          { text: "Choose the action for each direction (delete, archive, read/unread, star, snooze, spam or off) in Settings > General." },
+          { text: "Delete, archive, spam and move can be undone for 5 seconds with the toast or the z key." },
+          { text: "Swiping works on one conversation at a time and is off while several are selected, in Drafts, and for Delete inside Trash." },
+          { text: "Vertical scrolling is never taken over: a gesture that starts vertical stays a scroll." },
+        ],
+        relatedSettingsTab: "general",
       },
       {
         id: "multi-select",

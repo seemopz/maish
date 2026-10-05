@@ -134,7 +134,10 @@ describe("ThreadCard", () => {
     const release = () => act(() => void vi.advanceTimersByTime(200));
 
     beforeEach(() => vi.useFakeTimers());
-    afterEach(() => vi.useRealTimers());
+    afterEach(() => {
+      vi.advanceTimersByTime(200); // ends the module-wide swipe lock
+      vi.useRealTimers();
+    });
 
     it("shows the action field under the card while swiping", () => {
       const { container } = render(<ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} />);

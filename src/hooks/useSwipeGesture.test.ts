@@ -146,8 +146,11 @@ describe("useSwipeGesture", () => {
   });
 
   it("commits a slow, controlled swipe that eases off before the fingers lift", () => {
-    const { el } = setup();
-    for (const dx of [4, 8, 12, 16, 16, 14, 12, 10, 8, 6, 4, 3, 2]) wheel(el, dx);
+    const { el, hook } = setup();
+    for (const dx of [4, 8, 12, 16, 16, 14, 12, 10, 8, 6, 6, 5]) wheel(el, dx);
+    // Easing off is not momentum: the swipe is still held, and decided by the silence.
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(hook.result.current.offset).toBe(-117);
     quiet();
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith("left");

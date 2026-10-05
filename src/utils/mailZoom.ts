@@ -24,3 +24,19 @@ export function parseMailZoom(value: unknown): number | null {
   const zoom = Number.parseFloat(value);
   return Number.isFinite(zoom) ? roundMailZoom(clampMailZoom(zoom)) : null;
 }
+
+export type MailZoomKey = "in" | "out" | "reset";
+
+/**
+ * The zoom a key press asks for: Ctrl/Cmd with `+`, `-` or `0`. These
+ * combinations are reserved — they cannot be bound to another shortcut.
+ */
+export function mailZoomKey(
+  e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey">,
+): MailZoomKey | null {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return null;
+  if (e.key === "+" || e.key === "=") return "in";
+  if (e.key === "-" || e.key === "_") return "out";
+  if (e.key === "0") return "reset";
+  return null;
+}

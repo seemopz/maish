@@ -15,6 +15,7 @@
   var WHEEL = "maish:wheel";
   var MOUSE = "maish:mouse";
   var ZOOM = "maish:zoom";
+  var KEY = "maish:key";
   // A trackpad sends no "fingers lifted" event; this much silence ends a gesture.
   var GESTURE_IDLE_MS = 150;
 
@@ -87,6 +88,17 @@
     },
     { passive: false },
   );
+
+  // Keys typed while the focus is inside the frame never reach the app. Only the
+  // zoom keys (Ctrl/Cmd with +, -, 0) are handed over; the webview must not zoom
+  // the page on them either.
+  var ZOOM_KEYS = ["+", "=", "-", "_", "0"];
+  document.addEventListener("keydown", function (event) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    if (ZOOM_KEYS.indexOf(event.key) === -1) return;
+    event.preventDefault();
+    send({ type: KEY, key: event.key, ctrlKey: event.ctrlKey, metaKey: event.metaKey });
+  });
 
   // The side buttons of a mouse (3 = back, 4 = forward) step through the mail
   // list. The frame swallows them so the webview does not navigate on its own.

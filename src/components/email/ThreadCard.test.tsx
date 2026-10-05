@@ -170,7 +170,7 @@ describe("ThreadCard", () => {
 
     it("does nothing below the threshold", () => {
       const { container } = render(<ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} />);
-      swipe(container, 100);
+      swipe(container, 60);
       release();
       expect(runSwipeAction).not.toHaveBeenCalled();
       expect(container.querySelector("button")!.style.transform).toBe("");

@@ -3,15 +3,22 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 export type SwipeDirection = "left" | "right";
 
 /** Share of the element's width a swipe has to cover to trigger on release. */
-export const SWIPE_THRESHOLD = 0.4;
+export const SWIPE_THRESHOLD = 0.25;
+/** ...but never more than this many px, so a wide pane does not need a long swipe. */
+export const SWIPE_MAX_PX = 120;
 /** A trackpad sends no "fingers lifted" event; this much silence ends the gesture. */
 export const SWIPE_IDLE_MS = 150;
 /** Horizontal travel (px) before a swipe owns the wheel; until then vertical motion can cancel it. */
 const LOCK_PX = 12;
 /** Wheel events in line mode (deltaMode 1) count this many px per line. */
 const LINE_PX = 16;
-/** This many shrinking events in a row, each at most half the peak, mean the fingers are off and momentum is playing out. */
-const MOMENTUM_RUN = 4;
+/**
+ * This many strictly shrinking events in a row, the last at most a third of the
+ * peak, mean the fingers are off and momentum is playing out. Easing off at the
+ * end of a slow swipe is shorter and less smooth than that.
+ */
+const MOMENTUM_RUN = 6;
+const MOMENTUM_FRACTION = 1 / 3;
 /** A finger has to travel this far (px) before the direction is decided. */
 const TOUCH_SLOP_PX = 10;
 /** The click a finger swipe leaves behind is swallowed for this long (ms). */
@@ -33,14 +40,33 @@ export interface SwipeState {
 
 const IDLE_STATE: SwipeState = { offset: 0, armed: false };
 
+const thresholdFor = (width: number) => Math.min(SWIPE_THRESHOLD * width, SWIPE_MAX_PX);
+
+/**
+ * Wheel events are ignored, on every element, until they have been quiet for
+ * `SWIPE_IDLE_MS`. It is set when a gesture ends on momentum or starts vertical.
+ * Per hook it would not hold: a committed card is removed, the next one slides
+ * under the pointer, and its fresh hook would read the momentum tail as a new swipe.
+ */
+let tailIgnored = false;
+let tailTimer: ReturnType<typeof setTimeout> | undefined;
+
+function ignoreTail() {
+  tailIgnored = true;
+  clearTimeout(tailTimer);
+  tailTimer = setTimeout(() => {
+    tailIgnored = false;
+  }, SWIPE_IDLE_MS);
+}
+
 /**
  * Horizontal swipe on an element, from two sources: a two-finger trackpad swipe
  * read from `wheel` events (`deltaX`), and a one-finger swipe read from touch
  * pointer events (the element needs `touch-action: pan-y` so the browser keeps
  * only the vertical pan). A gesture that starts vertical stays with the
  * browser's scrolling. A trackpad swipe ends when the events stop, or as soon as
- * the deltas decay like momentum; the tail of the momentum is then ignored so it
- * cannot start a second swipe. A finger swipe ends on lift-off, and the click
+ * the deltas decay like momentum; the tail of the momentum is then ignored, on
+ * every element until it has been quiet, so it cannot start a second swipe. A finger swipe ends on lift-off, and the click
  * that would follow is swallowed. Mouse pointers never swipe (they drag).
  */
 export function useSwipeGesture(
@@ -57,7 +83,7 @@ export function useSwipeGesture(
     const el = ref.current;
     if (!enabled || !el) return;
 
-    let mode: "idle" | "swiping" | "ignored" = "idle";
+    let mode: "idle" | "swiping" = "idle";
     let offset = 0;
     let width = 0;
     let locked = false;
@@ -78,20 +104,23 @@ export function useSwipeGesture(
     const release = () => {
       if (mode !== "swiping") return;
       const direction: SwipeDirection = offset < 0 ? "left" : "right";
-      const hit = Math.abs(offset) >= SWIPE_THRESHOLD * width;
+      const hit = Math.abs(offset) >= thresholdFor(width);
       reset();
       if (hit) options.current.onCommit(direction);
     };
 
     const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey) return; // pinch-zoom arrives as ctrl+wheel
+      if (tailIgnored) {
+        ignoreTail();
+        return;
+      }
       clearTimeout(timer);
       timer = setTimeout(() => {
         release();
         mode = "idle";
       }, SWIPE_IDLE_MS);
 
-      if (mode === "ignored") return;
       const scale = e.deltaMode === 1 ? LINE_PX : 1;
       // Fingers moving left make deltaX positive; the card follows the fingers.
       const dx = -e.deltaX * scale;
@@ -100,14 +129,15 @@ export function useSwipeGesture(
       if (mode === "idle") {
         if (dx === 0 && dy === 0) return;
         if (Math.abs(dy) >= Math.abs(dx)) {
-          mode = "ignored";
+          ignoreTail();
           return;
         }
         mode = "swiping";
         width = el.offsetWidth;
       } else if (!locked && Math.abs(dy) > Math.abs(dx)) {
         reset();
-        mode = "ignored";
+        mode = "idle";
+        ignoreTail();
         return;
       }
 
@@ -122,9 +152,10 @@ export function useSwipeGesture(
       }
       lastAbs = abs;
       e.preventDefault();
-      if (shrinking >= MOMENTUM_RUN && abs <= peak / 2) {
+      if (shrinking >= MOMENTUM_RUN && abs <= peak * MOMENTUM_FRACTION) {
         release();
-        mode = "ignored";
+        mode = "idle";
+        ignoreTail();
         return;
       }
 
@@ -133,7 +164,7 @@ export function useSwipeGesture(
       if (next > 0 && !options.current.allowRight) next = 0;
       offset = Math.max(-width, Math.min(width, next));
       if (Math.abs(offset) >= LOCK_PX) locked = true;
-      setState({ offset, armed: Math.abs(offset) >= SWIPE_THRESHOLD * width });
+      setState({ offset, armed: Math.abs(offset) >= thresholdFor(width) });
     };
 
     // One finger. A pointer that is not `touch` is ignored.
@@ -176,7 +207,7 @@ export function useSwipeGesture(
       if (next < 0 && !options.current.allowLeft) next = 0;
       if (next > 0 && !options.current.allowRight) next = 0;
       offset = Math.max(-width, Math.min(width, next));
-      setState({ offset, armed: Math.abs(offset) >= SWIPE_THRESHOLD * width });
+      setState({ offset, armed: Math.abs(offset) >= thresholdFor(width) });
     };
 
     const onPointerUp = (e: PointerEvent) => {
@@ -185,7 +216,7 @@ export function useSwipeGesture(
       touchMode = "idle";
       if (!swiped) return;
       const direction: SwipeDirection = offset < 0 ? "left" : "right";
-      const hit = Math.abs(offset) >= SWIPE_THRESHOLD * width;
+      const hit = Math.abs(offset) >= thresholdFor(width);
       reset();
       swallowClick();
       if (hit) options.current.onCommit(direction);

@@ -31,6 +31,7 @@ describe("ReadingPane swipe", () => {
   });
 
   afterEach(() => {
+    vi.advanceTimersByTime(SWIPE_IDLE_MS + 1); // ends the module-wide swipe lock
     vi.useRealTimers();
   });
 

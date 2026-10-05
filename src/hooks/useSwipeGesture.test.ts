@@ -45,6 +45,7 @@ describe("useSwipeGesture", () => {
     onCommit.mockClear();
   });
   afterEach(() => {
+    quiet(); // ends the module-wide lock a test may have left behind
     vi.useRealTimers();
   });
 
@@ -55,7 +56,7 @@ describe("useSwipeGesture", () => {
     expect(hook.result.current.offset).toBe(-50);
   });
 
-  it("commits left when released past 40 % of the width", () => {
+  it("commits left when released past 25 % of the width", () => {
     const { el } = setup();
     wheel(el, 100);
     wheel(el, 80);
@@ -73,8 +74,8 @@ describe("useSwipeGesture", () => {
 
   it("snaps back without committing below the threshold", () => {
     const { el, hook } = setup();
-    wheel(el, 100);
-    wheel(el, 40); // 140 < 160
+    wheel(el, 60);
+    wheel(el, 20); // 80 < 100
     quiet();
     expect(onCommit).not.toHaveBeenCalled();
     expect(hook.result.current.offset).toBe(0);
@@ -82,9 +83,9 @@ describe("useSwipeGesture", () => {
 
   it("reports armed once the threshold is crossed", () => {
     const { el, hook } = setup();
-    wheel(el, 100);
+    wheel(el, 60);
     expect(hook.result.current.armed).toBe(false);
-    wheel(el, 70);
+    wheel(el, 50);
     expect(hook.result.current.armed).toBe(true);
   });
 
@@ -138,10 +139,69 @@ describe("useSwipeGesture", () => {
 
   it("does not let momentum from a sub-threshold swipe start another one", () => {
     const { el, hook } = setup();
-    for (const dx of [20, 30, 25, 18, 10, 6, 3, 2, 1]) wheel(el, dx);
+    for (const dx of [10, 15, 12, 9, 5, 3, 2, 1, 1]) wheel(el, dx);
     expect(onCommit).not.toHaveBeenCalled();
     expect(hook.result.current.offset).toBe(0);
     quiet();
+  });
+
+  it("commits a slow, controlled swipe that eases off before the fingers lift", () => {
+    const { el, hook } = setup();
+    for (const dx of [4, 8, 12, 16, 16, 14, 12, 10, 8, 6, 6, 5]) wheel(el, dx);
+    // Easing off is not momentum: the swipe is still held, and decided by the silence.
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(hook.result.current.offset).toBe(-117);
+    quiet();
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith("left");
+  });
+
+  it("does not commit a short two-finger tap or scroll", () => {
+    const { el } = setup();
+    for (const dx of [10, 15, 10, 5]) wheel(el, dx);
+    quiet();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("caps the threshold on a wide element", () => {
+    const { el } = setup({}, 1200);
+    wheel(el, 130);
+    quiet();
+    expect(onCommit).toHaveBeenCalledWith("left");
+  });
+
+  describe("momentum after a commit", () => {
+    // A flick: ramp up, then a long exponential decay the OS plays out after the fingers left.
+    const flick = (() => {
+      const out = [40, 80, 120, 160];
+      for (let v = 160 * 0.85; v >= 1; v *= 0.85) out.push(Math.round(v));
+      return out;
+    })();
+
+    it("does not start a second swipe on the card that slides under the pointer", () => {
+      const a = setup();
+      const b = setup();
+      let i = 0;
+      while (onCommit.mock.calls.length === 0 && i < flick.length) wheel(a.el, flick[i++]);
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      // Card A is gone; the tail now reaches card B, which has a fresh hook.
+      while (i < flick.length) wheel(b.el, flick[i++]);
+      quiet();
+      expect(onCommit).toHaveBeenCalledTimes(1);
+      expect(b.hook.result.current.offset).toBe(0);
+    });
+
+    it("swipes again once the tail has been quiet", () => {
+      const a = setup();
+      const b = setup();
+      let i = 0;
+      while (onCommit.mock.calls.length === 0 && i < flick.length) wheel(a.el, flick[i++]);
+      while (i < flick.length) wheel(b.el, flick[i++]);
+      quiet();
+      wheel(b.el, 200);
+      quiet();
+      expect(onCommit).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("clamps the offset to the element width", () => {
@@ -218,8 +278,8 @@ describe("useSwipeGesture", () => {
     it("snaps back below the threshold", () => {
       const { el, hook } = setup();
       pointer(el, "pointerdown", 50);
-      pointer(el, "pointermove", 150); // 100 < 160
-      pointer(el, "pointerup", 150);
+      pointer(el, "pointermove", 110); // 60 < 100
+      pointer(el, "pointerup", 110);
       expect(onCommit).not.toHaveBeenCalled();
       expect(hook.result.current.offset).toBe(0);
     });

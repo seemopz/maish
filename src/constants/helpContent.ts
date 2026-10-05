@@ -246,7 +246,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           "On a trackpad, swipe left with two fingers over an open mail to open the next one in the list, or swipe right for the previous one. It steps through the same order as j and k, and does nothing at the first or last mail. A swipe that starts on a wide table or code block in the message that can still scroll sideways scrolls that content instead.",
         tips: [
           { text: "Next / previous mail with the keyboard", shortcut: "j / k" },
-          { text: "Release after about 40 % of the pane's width to turn the page; release earlier and it snaps back." },
+          { text: "Release after about a quarter of the pane's width (at most 120 px) to turn the page; release earlier and it snaps back." },
         ],
       },
       {
@@ -681,7 +681,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: "Swipe actions",
         summary: "Swipe a conversation with two fingers to act on it.",
         description:
-          "On a trackpad, swipe left or right with two fingers over a conversation in the list; on a touchscreen, swipe with one finger. The card follows your fingers and a coloured field with the action's icon appears underneath. Release after about 40 % of the card's width to run the action; release earlier and the card snaps back. By default left deletes and right marks the conversation read or unread.",
+          "On a trackpad, swipe left or right with two fingers over a conversation in the list; on a touchscreen, swipe with one finger. The card follows your fingers and a coloured field with the action's icon appears underneath. Release after about a quarter of the card's width (at most 120 px) to run the action; release earlier and the card snaps back. By default left deletes and right marks the conversation read or unread.",
         tips: [
           { text: "Choose the action for each direction (delete, archive, read/unread, star, snooze, spam or off) in Settings > General." },
           { text: "Delete, archive, spam and move can be undone for 5 seconds with the toast or the z key." },

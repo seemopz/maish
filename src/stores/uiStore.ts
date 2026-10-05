@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { setSetting } from "@/services/db/settings";
 import { clampMailZoom, roundMailZoom, MAIL_ZOOM_DEFAULT } from "@/utils/mailZoom";
-import { DEFAULT_SWIPE_LEFT, DEFAULT_SWIPE_RIGHT, type SwipeAction } from "@/utils/swipeActions";
+import { DEFAULT_SWIPE_LEFT, DEFAULT_SWIPE_RIGHT, normalizeSwipeActions, type SwipeButtonAction } from "@/utils/swipeActions";
 
 type Theme = "light" | "dark" | "system";
 type ReadingPanePosition = "right" | "bottom" | "hidden";
@@ -27,8 +27,11 @@ interface UIState {
   readFilter: ReadFilter;
   emailListWidth: number;
   emailDensity: EmailDensity;
-  swipeLeftAction: SwipeAction;
-  swipeRightAction: SwipeAction;
+  /** Buttons a swipe to the left opens, in order; the first is what a full swipe runs. */
+  swipeLeftActions: SwipeButtonAction[];
+  swipeRightActions: SwipeButtonAction[];
+  /** The thread card whose swipe buttons are open (one at a time). */
+  openSwipe: { threadId: string; side: "left" | "right" } | null;
   /** Zoom factor of the mail body, 1 = 100 %. */
   mailZoom: number;
   defaultReplyMode: DefaultReplyMode;
@@ -56,8 +59,9 @@ interface UIState {
   setReadFilter: (filter: ReadFilter) => void;
   setEmailListWidth: (width: number) => void;
   setEmailDensity: (density: EmailDensity) => void;
-  setSwipeLeftAction: (action: SwipeAction) => void;
-  setSwipeRightAction: (action: SwipeAction) => void;
+  setSwipeLeftActions: (actions: SwipeButtonAction[]) => void;
+  setSwipeRightActions: (actions: SwipeButtonAction[]) => void;
+  setOpenSwipe: (open: { threadId: string; side: "left" | "right" } | null) => void;
   setMailZoom: (zoom: number) => void;
   setDefaultReplyMode: (mode: DefaultReplyMode) => void;
   setMarkAsReadBehavior: (behavior: MarkAsReadBehavior) => void;
@@ -88,8 +92,9 @@ export const useUIStore = create<UIState>((set) => ({
   readFilter: "all",
   emailListWidth: 320,
   emailDensity: "default",
-  swipeLeftAction: DEFAULT_SWIPE_LEFT,
-  swipeRightAction: DEFAULT_SWIPE_RIGHT,
+  swipeLeftActions: [...DEFAULT_SWIPE_LEFT],
+  swipeRightActions: [...DEFAULT_SWIPE_RIGHT],
+  openSwipe: null,
   mailZoom: MAIL_ZOOM_DEFAULT,
   defaultReplyMode: "reply",
   markAsReadBehavior: "instant",
@@ -137,14 +142,17 @@ export const useUIStore = create<UIState>((set) => ({
     setSetting("email_density", emailDensity).catch(() => {});
     set({ emailDensity });
   },
-  setSwipeLeftAction: (swipeLeftAction) => {
-    setSetting("swipe_left_action", swipeLeftAction).catch(() => {});
-    set({ swipeLeftAction });
+  setSwipeLeftActions: (actions) => {
+    const swipeLeftActions = normalizeSwipeActions(actions);
+    setSetting("swipe_left_actions", JSON.stringify(swipeLeftActions)).catch(() => {});
+    set({ swipeLeftActions });
   },
-  setSwipeRightAction: (swipeRightAction) => {
-    setSetting("swipe_right_action", swipeRightAction).catch(() => {});
-    set({ swipeRightAction });
+  setSwipeRightActions: (actions) => {
+    const swipeRightActions = normalizeSwipeActions(actions);
+    setSetting("swipe_right_actions", JSON.stringify(swipeRightActions)).catch(() => {});
+    set({ swipeRightActions });
   },
+  setOpenSwipe: (openSwipe) => set({ openSwipe }),
   setMailZoom: (zoom) => {
     const mailZoom = clampMailZoom(zoom);
     clearTimeout(zoomSaveTimer);

@@ -679,11 +679,12 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: "swipe-actions",
         icon: MoveHorizontal,
         title: "Swipe actions",
-        summary: "Swipe a conversation with two fingers to act on it.",
+        summary: "A light swipe shows buttons, a full swipe runs the first one.",
         description:
-          "On a trackpad, swipe left or right with two fingers over a conversation in the list; on a touchscreen, swipe with one finger. The card follows your fingers and a coloured field with the action's icon appears underneath. Release after about a quarter of the card's width (at most 120 px) to run the action; release earlier and the card snaps back. By default left deletes and right marks the conversation read or unread.",
+          "On a trackpad, swipe left or right with two fingers over a conversation in the list; on a touchscreen, swipe with one finger. The card follows your fingers and the buttons of that side appear underneath, each with an icon and a label. A light swipe (release after about 60 px) leaves the card open so you can click a button; nothing runs until you do. A full swipe (about half the card's width) runs the first button, the default, at once. By default left offers Delete and Archive, right offers Mark read / unread and Snooze.",
         tips: [
-          { text: "Choose the action for each direction (delete, archive, read/unread, star, snooze, spam or off) in Settings > General." },
+          { text: "An open card closes when you swipe back, click it or anywhere else, scroll the list, press Escape or open another card." },
+          { text: "Choose up to three buttons for each side (delete, archive, read/unread, star, snooze, spam) in Settings > General. The first one is what a full swipe runs; leave it on Off to switch that side off." },
           { text: "Delete, archive, spam and move can be undone for 5 seconds with the toast or the z key." },
           { text: "Swiping works on one conversation at a time and is off while several are selected, in Drafts, and for Delete inside Trash." },
           { text: "Vertical scrolling is never taken over: a gesture that starts vertical stays a scroll." },

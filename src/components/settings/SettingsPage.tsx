@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { SWIPE_ACTIONS, SWIPE_ACTION_LABELS, type SwipeAction } from "@/utils/swipeActions";
+import { SWIPE_ACTIONS, SWIPE_ACTION_LABELS, MAX_SWIPE_ACTIONS, isSwipeAction, type SwipeButtonAction } from "@/utils/swipeActions";
 import { useParams } from "@tanstack/react-router";
 import { useUIStore } from "@/stores/uiStore";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
@@ -96,10 +96,10 @@ export function SettingsPage() {
   const setReadingPanePosition = useUIStore((s) => s.setReadingPanePosition);
   const emailDensity = useUIStore((s) => s.emailDensity);
   const setEmailDensity = useUIStore((s) => s.setEmailDensity);
-  const swipeLeftAction = useUIStore((s) => s.swipeLeftAction);
-  const setSwipeLeftAction = useUIStore((s) => s.setSwipeLeftAction);
-  const swipeRightAction = useUIStore((s) => s.swipeRightAction);
-  const setSwipeRightAction = useUIStore((s) => s.setSwipeRightAction);
+  const swipeLeftActions = useUIStore((s) => s.swipeLeftActions);
+  const setSwipeLeftActions = useUIStore((s) => s.setSwipeLeftActions);
+  const swipeRightActions = useUIStore((s) => s.swipeRightActions);
+  const setSwipeRightActions = useUIStore((s) => s.setSwipeRightActions);
   const fontScale = useUIStore((s) => s.fontScale);
   const setFontScale = useUIStore((s) => s.setFontScale);
   const defaultReplyMode = useUIStore((s) => s.defaultReplyMode);
@@ -496,28 +496,8 @@ export function SettingsPage() {
                         <option value="spacious">Spacious</option>
                       </select>
                     </SettingRow>
-                    <SettingRow label="Swipe left (two-finger trackpad)">
-                      <select
-                        value={swipeLeftAction}
-                        onChange={(e) => setSwipeLeftAction(e.target.value as SwipeAction)}
-                        className={selectClass}
-                      >
-                        {SWIPE_ACTIONS.map((a) => (
-                          <option key={a} value={a}>{SWIPE_ACTION_LABELS[a]}</option>
-                        ))}
-                      </select>
-                    </SettingRow>
-                    <SettingRow label="Swipe right (two-finger trackpad)">
-                      <select
-                        value={swipeRightAction}
-                        onChange={(e) => setSwipeRightAction(e.target.value as SwipeAction)}
-                        className={selectClass}
-                      >
-                        {SWIPE_ACTIONS.map((a) => (
-                          <option key={a} value={a}>{SWIPE_ACTION_LABELS[a]}</option>
-                        ))}
-                      </select>
-                    </SettingRow>
+                    <SwipeActionsRow label="Swipe left" actions={swipeLeftActions} onChange={setSwipeLeftActions} />
+                    <SwipeActionsRow label="Swipe right" actions={swipeRightActions} onChange={setSwipeRightActions} />
                     <SettingRow label="Font size">
                       <select
                         value={fontScale}
@@ -2217,6 +2197,49 @@ function Section({
         {children}
       </div>
     </section>
+  );
+}
+
+/**
+ * The buttons a swipe opens on one side, in order. A light swipe shows them, a
+ * full swipe runs the first. Leaving a slot empty drops it and the ones after it.
+ */
+function SwipeActionsRow({
+  label,
+  actions,
+  onChange,
+}: {
+  label: string;
+  actions: SwipeButtonAction[];
+  onChange: (actions: SwipeButtonAction[]) => void;
+}) {
+  const slots = Array.from({ length: MAX_SWIPE_ACTIONS }, (_, i) => actions[i] ?? "");
+  const setSlot = (i: number, value: string) => {
+    const next = [...slots];
+    next[i] = isSwipeAction(value) && value !== "none" ? value : "";
+    onChange(next.filter((a): a is SwipeButtonAction => a !== ""));
+  };
+  return (
+    <SettingRow label={`${label} (two-finger trackpad, touch)`}>
+      <div className="flex gap-2">
+        {slots.map((value, i) => (
+          <select
+            key={i}
+            value={value}
+            aria-label={`${label}, ${i === 0 ? "full swipe" : `button ${i + 1}`}`}
+            title={i === 0 ? "Full swipe runs this one" : `Button ${i + 1}`}
+            onChange={(e) => setSlot(i, e.target.value)}
+            disabled={i > 0 && slots[i - 1] === ""}
+            className={selectClass}
+          >
+            <option value="">{i === 0 ? "Off" : "None"}</option>
+            {SWIPE_ACTIONS.filter((a) => a !== "none").map((a) => (
+              <option key={a} value={a}>{SWIPE_ACTION_LABELS[a]}</option>
+            ))}
+          </select>
+        ))}
+      </div>
+    </SettingRow>
   );
 }
 

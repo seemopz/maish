@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { ThreadCard } from "./ThreadCard";
+import { SWIPE_IDLE_MS } from "@/hooks/useSwipeGesture";
 import type { Thread } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
 import { runSwipeAction } from "@/services/swipeActions";
@@ -129,14 +130,14 @@ describe("ThreadCard", () => {
         });
       }
     }
-    const release = () => act(() => void vi.advanceTimersByTime(200));
+    const release = () => act(() => void vi.advanceTimersByTime(SWIPE_IDLE_MS + 1));
     const card = (container: HTMLElement) => container.querySelector("button[aria-selected]") as HTMLElement;
     const renderCard = (thread = makeThread()) =>
       render(<ThreadCard thread={thread} isSelected={false} onClick={onClick} />);
 
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => {
-      vi.advanceTimersByTime(200); // ends the module-wide swipe lock
+      vi.advanceTimersByTime(SWIPE_IDLE_MS + 1); // ends the module-wide swipe lock
       vi.useRealTimers();
     });
 

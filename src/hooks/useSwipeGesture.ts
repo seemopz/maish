@@ -16,8 +16,14 @@ const FULL_SWIPE_MAX_PX = 220;
 const FULL_SWIPE_BEYOND_REVEAL_PX = 48;
 /** ...twice as far when the swipe starts on an open card, which already sits at the buttons. */
 const FULL_SWIPE_BEYOND_REVEAL_OPEN_PX = 96;
-/** A trackpad sends no "fingers lifted" event; this much silence ends the gesture. */
-export const SWIPE_IDLE_MS = 150;
+/**
+ * A trackpad sends no "fingers lifted" event; this much silence ends the gesture.
+ * Resting fingers send nothing either, so it is long enough to hold a pause
+ * without the card settling under the fingers (momentum ends a swipe sooner).
+ */
+export const SWIPE_IDLE_MS = 400;
+/** The momentum tail of a finished swipe counts as over after this much silence. */
+const TAIL_QUIET_MS = 150;
 /** Horizontal travel (px) before a swipe owns the wheel; until then vertical motion can cancel it. */
 const LOCK_PX = 12;
 /** Wheel events in line mode (deltaMode 1) count this many px per line. */
@@ -76,7 +82,7 @@ export function commitThreshold(width: number, revealPx = 0, startedOpen = false
 
 /**
  * Wheel events are ignored, on every element, until they have been quiet for
- * `SWIPE_IDLE_MS`. It is set when a gesture ends on momentum or starts vertical.
+ * `TAIL_QUIET_MS`. It is set when a gesture ends on momentum or starts vertical.
  * Per hook it would not hold: a committed card is removed, the next one slides
  * under the pointer, and its fresh hook would read the momentum tail as a new swipe.
  */
@@ -92,7 +98,7 @@ function ignoreTail(horizontal = false) {
   tailTimer = setTimeout(() => {
     tailIgnored = false;
     tailHorizontal = false;
-  }, SWIPE_IDLE_MS);
+  }, TAIL_QUIET_MS);
 }
 
 /**

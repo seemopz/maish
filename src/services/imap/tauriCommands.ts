@@ -93,6 +93,8 @@ export interface DeltaCheckResult {
   uidvalidity: number;
   new_uids: number[];
   uidvalidity_changed: boolean;
+  /** Set when SELECT or UID SEARCH failed: the folder was not checked. */
+  error?: string | null;
 }
 
 // ---------- SMTP types ----------

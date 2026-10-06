@@ -9,6 +9,7 @@ vi.mock("./tauriCommands", () => ({
   imapSearchFolder: vi.fn(),
   imapDeltaCheck: vi.fn(),
 }));
+vi.mock("../logFile", () => ({ logToFile: vi.fn() }));
 vi.mock("./imapConfigBuilder", () => ({
   buildImapConfig: vi.fn(() => ({
     host: "imap.example.com",
@@ -76,6 +77,7 @@ import {
   createMockImapFolderStatus,
   createMockImapFetchResult,
 } from "@/test/mocks";
+import { logToFile } from "../logFile";
 import { imapListFolders, imapSearchFolder, imapFetchMessages, imapDeltaCheck } from "./tauriCommands";
 import { getAccount } from "../db/accounts";
 import { withTransaction } from "../db/connection";
@@ -1476,6 +1478,52 @@ describe("empty folders and partial folder failures", () => {
       mockImapFetchMessages.mockRejectedValue(new Error("fetch failed"));
 
       await expect(imapDeltaSync("acc-1")).rejects.toThrow("All folders failed to sync");
+    });
+
+    it("logs a partial failure to the log file", async () => {
+      mockImapListFolders.mockResolvedValue([inbox(), archive()]);
+      mockGetAllFolderSyncStates.mockResolvedValue([stateFor("INBOX", 4), stateFor("Archive", 4)] as never);
+      mockImapDeltaCheck.mockResolvedValue([
+        { folder: "INBOX", uidvalidity: 1, new_uids: [], uidvalidity_changed: false },
+        { folder: "Archive", uidvalidity: 1, new_uids: [5], uidvalidity_changed: false },
+      ] as never);
+      mockImapFetchMessages.mockRejectedValue(new Error("fetch failed"));
+
+      await imapDeltaSync("acc-1");
+
+      expect(logToFile).toHaveBeenCalledWith("warn", expect.stringContaining("Archive: fetch failed"));
+    });
+
+    it("counts a folder the batch check could not SELECT as failed", async () => {
+      mockImapListFolders.mockResolvedValue([archive()]);
+      mockGetAllFolderSyncStates.mockResolvedValue([stateFor("Archive", 4)] as never);
+      mockImapDeltaCheck.mockResolvedValue([
+        { folder: "Archive", uidvalidity: 0, new_uids: [], uidvalidity_changed: false, error: "SELECT failed: no such mailbox" },
+      ] as never);
+
+      await expect(imapDeltaSync("acc-1")).rejects.toThrow("All folders failed to sync: Archive: SELECT failed");
+    });
+
+    it("counts a folder whose UID SEARCH failed as failed, not as empty", async () => {
+      mockImapListFolders.mockResolvedValue([inbox(), archive()]);
+      mockGetAllFolderSyncStates.mockResolvedValue([stateFor("INBOX", 4), stateFor("Archive", 4)] as never);
+      mockImapDeltaCheck.mockResolvedValue([
+        { folder: "INBOX", uidvalidity: 1, new_uids: [], uidvalidity_changed: false, error: "UID SEARCH failed: boom" },
+        { folder: "Archive", uidvalidity: 1, new_uids: [], uidvalidity_changed: false, error: "UID SEARCH failed: boom" },
+      ] as never);
+
+      await expect(imapDeltaSync("acc-1")).rejects.toThrow("All folders failed to sync");
+    });
+
+    it("counts a folder missing from the batch result as failed and logs it", async () => {
+      mockImapListFolders.mockResolvedValue([inbox(), archive()]);
+      mockGetAllFolderSyncStates.mockResolvedValue([stateFor("INBOX", 4), stateFor("Archive", 4)] as never);
+      mockImapDeltaCheck.mockResolvedValue([
+        { folder: "INBOX", uidvalidity: 1, new_uids: [], uidvalidity_changed: false },
+      ] as never);
+
+      await expect(imapDeltaSync("acc-1")).resolves.toEqual({ messages: [] });
+      expect(logToFile).toHaveBeenCalledWith("warn", expect.stringContaining("Archive"));
     });
   });
 });

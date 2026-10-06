@@ -7,6 +7,7 @@ import {
   imapSearchFolder,
   imapDeltaCheck,
 } from "./tauriCommands";
+import { logToFile } from "../logFile";
 import { buildImapConfig } from "./imapConfigBuilder";
 import {
   mapFolderToLabel,
@@ -60,6 +61,10 @@ const THREAD_BATCH_SIZE = 100;
 // ---------------------------------------------------------------------------
 
 /** After this many consecutive connection failures, add a cooldown delay. */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err ?? "Unknown error");
+}
+
 const CIRCUIT_BREAKER_THRESHOLD = 3;
 /** Delay (ms) to wait after hitting the circuit breaker threshold. */
 const CIRCUIT_BREAKER_DELAY_MS = 15_000;
@@ -847,7 +852,7 @@ export async function imapInitialSync(
         last_sync_at: Math.floor(Date.now() / 1000),
       });
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
+      const errMsg = errorMessage(err);
       console.error(`[imapSync] Failed to sync folder ${folder.path}:`, err);
       folderErrors.push(`${folder.path}: ${errMsg}`);
       if (isConnectionError(err)) {
@@ -1144,7 +1149,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
       });
       succeededFolders++;
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
+      const errMsg = errorMessage(err);
       console.error(`Delta sync failed for new folder ${folder.path}:`, err);
       deltaFolderErrors.push(`${folder.path}: ${errMsg}`);
       if (isConnectionError(err)) {
@@ -1166,13 +1171,14 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     });
 
     let deltaResultMap: Map<string, DeltaCheckResult>;
+    const fallbackErrors = new Map<string, string>();
     try {
       const deltaResults = await imapDeltaCheck(config, deltaRequests);
       deltaResultMap = new Map(deltaResults.map((r) => [r.folder, r]));
       console.log(`[imapSync] Batch delta check: ${deltaResults.length}/${existingFolders.length} folders checked`);
     } catch (err) {
       // Batch check failed — fall back to per-folder checks
-      console.warn(`[imapSync] Batch delta check failed, falling back to per-folder:`, err);
+      logToFile("warn", `[imapSync] Batch delta check failed, falling back to per-folder: ${errorMessage(err)}`);
       deltaResultMap = new Map();
       for (const folder of existingFolders) {
         const savedState = syncStateMap.get(folder.raw_path)!;
@@ -1200,6 +1206,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           }
         } catch (folderErr) {
           console.error(`[imapSync] Per-folder check failed for ${folder.path}:`, folderErr);
+          fallbackErrors.set(folder.raw_path, errorMessage(folderErr));
         }
       }
     }
@@ -1209,7 +1216,15 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
       const savedState = syncStateMap.get(folder.raw_path)!;
       const deltaResult = deltaResultMap.get(folder.raw_path);
 
-      if (!deltaResult) continue;
+      // A folder the check could not SELECT or SEARCH is a failed folder, not
+      // an empty one: counting it keeps "all folders failed" honest and gets
+      // it into the log.
+      if (!deltaResult || deltaResult.error) {
+        const reason =
+          deltaResult?.error ?? fallbackErrors.get(folder.raw_path) ?? "no result from the delta check";
+        deltaFolderErrors.push(`${folder.path}: ${reason}`);
+        continue;
+      }
 
       try {
         if (deltaResult.uidvalidity_changed) {
@@ -1308,7 +1323,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
         });
         succeededFolders++;
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
+        const errMsg = errorMessage(err);
         console.error(`Delta sync failed for folder ${folder.path}:`, err);
         deltaFolderErrors.push(`${folder.path}: ${errMsg}`);
       }
@@ -1321,7 +1336,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     if (succeededFolders === 0 && allThreadable.length === 0) {
       throw new Error(`All folders failed to sync: ${deltaFolderErrors[0]}`);
     }
-    console.warn(
+    logToFile(
+      "warn",
       `[imapSync] Delta sync partially failed, ${deltaFolderErrors.length} folder(s) will be retried: ${deltaFolderErrors.join("; ")}`,
     );
   }

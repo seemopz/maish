@@ -1,6 +1,6 @@
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { discoverCardDavSettings, testCardDavConnection } from "./autoDiscovery";
-import { getAccountByEmail } from "@/services/db/accounts";
+import { findAccountByEmail } from "@/services/db/accounts";
 import { createMockImapAccount } from "@/test/mocks";
 
 vi.mock("tsdav", () => ({
@@ -13,11 +13,11 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 }));
 
 vi.mock("@/services/db/accounts", () => ({
-  getAccountByEmail: vi.fn().mockResolvedValue(null),
+  findAccountByEmail: vi.fn().mockResolvedValue(null),
 }));
 
 const mockDavFetch = vi.mocked(tauriFetch);
-const mockGetAccountByEmail = vi.mocked(getAccountByEmail);
+const mockFindAccountByEmail = vi.mocked(findAccountByEmail);
 
 const redirectTo = (location: string) =>
   ({ status: 301, ok: false, headers: new Headers({ Location: location }) }) as Response;
@@ -27,8 +27,8 @@ const failure = () => ({ status: 404, ok: false, headers: new Headers() }) as Re
 describe("discoverCardDavSettings", () => {
   beforeEach(() => {
     mockDavFetch.mockReset();
-    mockGetAccountByEmail.mockReset();
-    mockGetAccountByEmail.mockResolvedValue(null);
+    mockFindAccountByEmail.mockReset();
+    mockFindAccountByEmail.mockResolvedValue(null);
   });
 
   it("returns the iCloud preset and says an app password is needed", async () => {
@@ -79,7 +79,7 @@ describe("discoverCardDavSettings", () => {
   });
 
   it("falls back to the mail server's host when the mail domain serves nothing", async () => {
-    mockGetAccountByEmail.mockResolvedValue(
+    mockFindAccountByEmail.mockResolvedValue(
       createMockImapAccount({ email: "user@example.org", imap_host: "mail.provider.net" }),
     );
     mockDavFetch
@@ -97,7 +97,7 @@ describe("discoverCardDavSettings", () => {
   });
 
   it("also tries the host the calendar already talks to", async () => {
-    mockGetAccountByEmail.mockResolvedValue(
+    mockFindAccountByEmail.mockResolvedValue(
       createMockImapAccount({
         email: "user@example.org",
         imap_host: null,

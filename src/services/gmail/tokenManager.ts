@@ -1,6 +1,6 @@
 import { GmailClient } from "./client";
 import { startOAuthFlow } from "./auth";
-import { getAllAccounts, getAccount, updateAccountAllTokens } from "../db/accounts";
+import { getAllAccounts, findAccount, updateAccountAllTokens } from "../db/accounts";
 import { getSetting, getSecureSetting } from "../db/settings";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import { normalizeEmail } from "@/utils/emailUtils";
@@ -92,7 +92,8 @@ export async function reauthorizeAccount(
   accountId: string,
   expectedEmail: string,
 ): Promise<void> {
-  const account = await getAccount(accountId);
+  // Existence check only: replacing an unreadable token is the point of this call.
+  const account = await findAccount(accountId);
   if (!account) throw new Error(`Account ${accountId} not found`);
 
   const clientId = await getClientId();

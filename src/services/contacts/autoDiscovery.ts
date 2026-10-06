@@ -8,7 +8,7 @@
  * need not offer the other.
  */
 import { davFetch } from "@/services/calendar/davFetch";
-import { getAccountByEmail } from "@/services/db/accounts";
+import { findAccountByEmail } from "@/services/db/accounts";
 
 interface CardDavPreset {
   name: string;
@@ -117,7 +117,7 @@ export async function discoverCardDavSettings(email: string): Promise<CardDavDis
 async function candidateHosts(email: string, domain: string): Promise<string[]> {
   const hosts = [domain];
 
-  const account = await getAccountByEmail(email).catch(() => null);
+  const account = await findAccountByEmail(email).catch(() => null);
   const mailHost = account?.imap_host?.toLowerCase();
   if (mailHost && !hosts.includes(mailHost)) hosts.push(mailHost);
 

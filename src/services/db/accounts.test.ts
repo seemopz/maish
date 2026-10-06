@@ -2,6 +2,9 @@ import {
   getAllAccounts,
   getAccount,
   getAccountByEmail,
+  findAccount,
+  findAccountByEmail,
+  saveCardDavAccount,
   insertImapAccount,
   insertAccount,
   saveCalDavAccount,
@@ -112,6 +115,36 @@ describe("accounts", () => {
       const result = await getAccountByEmail("unknown@example.com");
 
       expect(result).toBeNull();
+    });
+  });
+
+  describe("findAccount / findAccountByEmail", () => {
+    it("return the account with credentialError set instead of throwing", async () => {
+      mockSelectFirstBy.mockResolvedValue(createMockImapAccount());
+      vi.mocked(decryptValue).mockRejectedValueOnce(new Error("key missing"));
+
+      const result = await findAccount("acc-imap");
+
+      expect(result!.id).toBe("acc-imap");
+      expect(result!.imap_password).toBeNull();
+      expect(result!.credentialError).toMatch(/Could not decrypt the IMAP password/);
+    });
+
+    it("findAccountByEmail does not throw on an undecryptable credential either", async () => {
+      mockSelectFirstBy.mockResolvedValue(createMockImapAccount());
+      vi.mocked(decryptValue).mockRejectedValueOnce(new Error("key missing"));
+
+      const result = await findAccountByEmail("user@example.com");
+
+      expect(result!.email).toBe("user@example.com");
+      expect(result!.credentialError).toBeDefined();
+    });
+
+    it("return null for an unknown account", async () => {
+      mockSelectFirstBy.mockResolvedValue(null);
+
+      expect(await findAccount("nope")).toBeNull();
+      expect(await findAccountByEmail("nope@example.com")).toBeNull();
     });
   });
 
@@ -360,6 +393,41 @@ describe("accounts", () => {
 
       const [, params] = mockExecute.mock.calls[0] as [string, unknown[]];
       expect(params).toContain("caldav");
+    });
+
+    it("still attaches when the existing account has an undecryptable credential", async () => {
+      // Only the existence of the row matters here; the unreadable IMAP password
+      // is not touched, and the new CalDAV password is encrypted afresh.
+      mockSelectFirstBy.mockResolvedValue(
+        createMockImapAccount({ id: "existing-acc", email: "user@example.com" }),
+      );
+      vi.mocked(decryptValue).mockRejectedValueOnce(new Error("key missing"));
+      mockExecute.mockResolvedValue(undefined);
+
+      const result = await saveCalDavAccount(input);
+
+      expect(result).toEqual({ accountId: "existing-acc", attachedToExisting: true });
+    });
+  });
+
+  describe("saveCardDavAccount", () => {
+    it("still attaches when the existing account has an undecryptable credential", async () => {
+      mockSelectFirstBy.mockResolvedValue(
+        createMockImapAccount({ id: "existing-acc", email: "user@example.com" }),
+      );
+      vi.mocked(decryptValue).mockRejectedValueOnce(new Error("key missing"));
+      mockExecute.mockResolvedValue(undefined);
+
+      const result = await saveCardDavAccount({
+        id: "new-acc",
+        email: "user@example.com",
+        displayName: null,
+        carddavUrl: "https://dav.example.com/dav/card",
+        carddavUsername: "user@example.com",
+        carddavPassword: "secret",
+      });
+
+      expect(result).toEqual({ accountId: "existing-acc", attachedToExisting: true });
     });
   });
 });

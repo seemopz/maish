@@ -91,22 +91,39 @@ export async function getAllAccounts(): Promise<DbAccount[]> {
   return Promise.all(accounts.map(decryptAccountTokens));
 }
 
-export async function getAccount(id: string): Promise<DbAccount | null> {
+/**
+ * Lookup that never throws on an unreadable credential: the account comes back
+ * with `credentialError` set and the affected fields null. For existence checks
+ * and the settings UI, where the user must still reach the account to fix it.
+ */
+export async function findAccount(id: string): Promise<DbAccount | null> {
   const account = await selectFirstBy<DbAccount>(
     "SELECT * FROM accounts WHERE id = $1",
     [id],
   );
-  return account ? requireCredentials(await decryptAccountTokens(account)) : null;
+  return account ? decryptAccountTokens(account) : null;
 }
 
-export async function getAccountByEmail(
+export async function findAccountByEmail(
   email: string,
 ): Promise<DbAccount | null> {
   const account = await selectFirstBy<DbAccount>(
     "SELECT * FROM accounts WHERE email = $1",
     [email],
   );
-  return account ? requireCredentials(await decryptAccountTokens(account)) : null;
+  return account ? decryptAccountTokens(account) : null;
+}
+
+export async function getAccount(id: string): Promise<DbAccount | null> {
+  const account = await findAccount(id);
+  return account ? requireCredentials(account) : null;
+}
+
+export async function getAccountByEmail(
+  email: string,
+): Promise<DbAccount | null> {
+  const account = await findAccountByEmail(email);
+  return account ? requireCredentials(account) : null;
 }
 
 export async function insertAccount(account: {
@@ -272,7 +289,7 @@ export async function saveCalDavAccount(account: {
   caldavUsername: string;
   caldavPassword: string;
 }): Promise<{ accountId: string; attachedToExisting: boolean }> {
-  const existing = await getAccountByEmail(account.email);
+  const existing = await findAccountByEmail(account.email);
 
   if (existing) {
     await updateAccountCalDav(existing.id, {
@@ -363,7 +380,7 @@ export async function saveCardDavAccount(account: {
   carddavUsername: string;
   carddavPassword: string;
 }): Promise<{ accountId: string; attachedToExisting: boolean }> {
-  const existing = await getAccountByEmail(account.email);
+  const existing = await findAccountByEmail(account.email);
 
   if (existing) {
     await updateAccountCardDav(existing.id, {

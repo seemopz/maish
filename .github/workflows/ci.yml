@@ -81,3 +81,26 @@ jobs:
 
       - name: Test
         run: cargo test
+
+  # The keyring crate pulls in a different native store per OS
+  # (windows-native-keyring-store on Windows), and only a Windows build
+  # compiles that one. Type-checking is enough to catch a broken credential_key.rs.
+  rust-windows:
+    name: Rust (cargo check, Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Check
+        run: cargo check --all-targets

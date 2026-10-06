@@ -100,4 +100,49 @@ pub struct DeltaCheckResult {
     pub uidvalidity: u32,
     pub new_uids: Vec<u32>,
     pub uidvalidity_changed: bool,
+    /// Set when SELECT or UID SEARCH failed for this folder: `new_uids` is then
+    /// empty because the folder was not checked, not because it has nothing new.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl DeltaCheckResult {
+    /// Result for a folder that could not be checked.
+    pub fn failed(req: &DeltaCheckRequest, error: String) -> Self {
+        Self {
+            folder: req.folder.clone(),
+            uidvalidity: req.uidvalidity,
+            new_uids: vec![],
+            uidvalidity_changed: false,
+            error: Some(error),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_delta_check_carries_the_error_and_no_uids() {
+        let req = DeltaCheckRequest {
+            folder: "Archive".into(),
+            last_uid: 4,
+            uidvalidity: 7,
+        };
+        let res = DeltaCheckResult::failed(&req, "SELECT failed: nope".into());
+        assert_eq!(res.folder, "Archive");
+        assert!(res.new_uids.is_empty());
+        assert!(!res.uidvalidity_changed);
+        assert_eq!(res.error.as_deref(), Some("SELECT failed: nope"));
+    }
+
+    #[test]
+    fn delta_check_result_without_error_field_deserialises() {
+        let res: DeltaCheckResult = serde_json::from_str(
+            r#"{"folder":"INBOX","uidvalidity":1,"new_uids":[],"uidvalidity_changed":false}"#,
+        )
+        .unwrap();
+        assert!(res.error.is_none());
+    }
 }

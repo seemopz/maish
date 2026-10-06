@@ -49,7 +49,7 @@ Maish is designed to be used entirely from the keyboard. All shortcuts are custo
 |-----|--------|
 | `↓` (Arrow Down) | Next message in thread |
 | `↑` (Arrow Up) | Previous message in thread |
-| `Ctrl/Cmd` + `+` / `-` | Zoom the message text in / out (fixed, not customizable) |
+| `Ctrl/Cmd` + `+` / `-` | Zoom the message text in / out (reserved: cannot be rebound, also works with the focus inside the message body) |
 | `Ctrl/Cmd` + `0` | Reset the message zoom to 100 % |
 
 ## App

@@ -15,6 +15,7 @@ import { parseUnsubscribeUrl } from "@/components/email/MessageItem";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { triggerSync } from "@/services/gmail/syncManager";
 import { undoPending, undoBatch } from "@/services/undoableActions";
+import { mailZoomKey } from "@/utils/mailZoom";
 
 /**
  * Parse a key binding string and check if it matches a keyboard event.
@@ -106,6 +107,8 @@ export function useKeyboardShortcuts() {
 
       // Ctrl/Cmd shortcuts work everywhere
       if (e.ctrlKey || e.metaKey) {
+        // Reserved for the mail zoom (`useMailZoom`); a custom binding never fires on them.
+        if (mailZoomKey(e)) return;
         for (const [actionId, binding] of ctrlCombos) {
           if (matchesKey(binding, e)) {
             e.preventDefault();

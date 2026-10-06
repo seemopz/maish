@@ -112,6 +112,41 @@ describe("emailFrame bootstrap", () => {
     expect(heights.length).toBeGreaterThan(0);
     expect(heights[0]!.height).toBe(321);
   });
+  describe("key reports", () => {
+    function key(init: KeyboardEventInit) {
+      const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+      document.body.dispatchEvent(event);
+      return event;
+    }
+
+    it("hands the zoom keys to the app and keeps the webview from zooming the page", () => {
+      runFrameScript();
+      posted.length = 0;
+
+      const event = key({ key: "+", ctrlKey: true });
+      key({ key: "0", metaKey: true });
+
+      expect(posted).toEqual([
+        { type: "maish:key", key: "+", ctrlKey: true, metaKey: false },
+        { type: "maish:key", key: "0", ctrlKey: false, metaKey: true },
+      ]);
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it("keeps every other key to itself", () => {
+      runFrameScript();
+      posted.length = 0;
+
+      key({ key: "+" });
+      key({ key: "j" });
+      key({ key: "c", ctrlKey: true });
+      const alt = key({ key: "-", ctrlKey: true, altKey: true });
+
+      expect(posted).toHaveLength(0);
+      expect(alt.defaultPrevented).toBe(false);
+    });
+  });
+
   describe("wheel reports", () => {
     function wheel(target: Element, init: WheelEventInit, timeStamp?: number) {
       const event = new WheelEvent("wheel", { bubbles: true, cancelable: true, ...init });

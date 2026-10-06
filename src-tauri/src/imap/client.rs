@@ -939,15 +939,14 @@ pub async fn delta_check_folders(
                 Ok(Err(e)) => {
                     session.taint_unless_refusal(&e);
                     log::warn!("delta_check: SELECT {} failed: {e}", req.folder);
+                    results.push(DeltaCheckResult::failed(req, format!("SELECT failed: {e}")));
                     continue;
                 }
                 Err(_) => {
                     session.taint();
-                    log::warn!(
-                        "delta_check: SELECT {} timed out after {}s",
-                        req.folder,
-                        IMAP_CMD_TIMEOUT.as_secs()
-                    );
+                    let msg = format!("SELECT timed out after {}s", IMAP_CMD_TIMEOUT.as_secs());
+                    log::warn!("delta_check: SELECT {} {msg}", req.folder);
+                    results.push(DeltaCheckResult::failed(req, msg));
                     continue;
                 }
             };
@@ -961,6 +960,7 @@ pub async fn delta_check_folders(
                 uidvalidity: current_uidvalidity,
                 new_uids: vec![],
                 uidvalidity_changed: true,
+                error: None,
             });
             continue;
         }
@@ -978,16 +978,21 @@ pub async fn delta_check_folders(
             Ok(Err(e)) => {
                 session.taint_unless_refusal(&e);
                 log::warn!("delta_check: UID SEARCH {} failed: {e}", req.folder);
-                vec![]
+                results.push(DeltaCheckResult::failed(
+                    req,
+                    format!("UID SEARCH failed: {e}"),
+                ));
+                continue;
             }
             Err(_) => {
                 session.taint();
-                log::warn!(
-                    "delta_check: UID SEARCH {} timed out after {}s",
-                    req.folder,
+                let msg = format!(
+                    "UID SEARCH timed out after {}s",
                     IMAP_SEARCH_TIMEOUT.as_secs()
                 );
-                vec![]
+                log::warn!("delta_check: {} {msg}", req.folder);
+                results.push(DeltaCheckResult::failed(req, msg));
+                continue;
             }
         };
 
@@ -996,6 +1001,7 @@ pub async fn delta_check_folders(
             uidvalidity: current_uidvalidity,
             new_uids,
             uidvalidity_changed: false,
+            error: None,
         });
     }
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { SWIPE_ACTIONS, SWIPE_ACTION_LABELS, MAX_SWIPE_ACTIONS, setSwipeSlot, type SwipeButtonAction } from "@/utils/swipeActions";
 import { useParams } from "@tanstack/react-router";
 import { useUIStore } from "@/stores/uiStore";
+import { mailZoomKey } from "@/utils/mailZoom";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/services/db/settings";
@@ -1900,6 +1901,8 @@ function ShortcutsTab() {
 
     const key = e.key;
     if (key === "Control" || key === "Meta" || key === "Shift" || key === "Alt") return;
+    // Reserved for the mail zoom: keep recording, the hint above the list says why.
+    if (mailZoomKey(e)) return;
 
     if (parts.length > 0) {
       parts.push(key.length === 1 ? key.toUpperCase() : key);
@@ -1947,6 +1950,7 @@ function ShortcutsTab() {
       <div className="flex items-center justify-between gap-4">
         <p className="text-[13px] text-text-secondary">
           Click a shortcut to rebind it. Press any key or key combination to set.
+          Ctrl/Cmd with +, - and 0 zoom the message text and cannot be rebound.
         </p>
         {hasCustom && (
           <button

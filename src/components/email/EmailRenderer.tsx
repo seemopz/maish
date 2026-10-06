@@ -6,6 +6,7 @@ import { addToAllowlist } from "@/services/db/imageAllowlist";
 import { sanitizeHtml } from "@/utils/sanitize";
 import { linkifyPlainText } from "@/utils/linkify";
 import { useUIStore } from "@/stores/uiStore";
+import { mailZoomKey } from "@/utils/mailZoom";
 import { findLinkAnalysis } from "@/utils/phishingDetector";
 import { LinkConfirmDialog } from "./LinkConfirmDialog";
 import type { LinkAnalysis } from "@/utils/phishingDetector";
@@ -212,6 +213,17 @@ export function EmailRenderer({
           bubbles: true,
           cancelable: true,
         }));
+        return;
+      }
+
+      // Keys typed inside the frame: only the zoom keys are replayed, on the
+      // iframe, so they bubble to the window like a key typed outside the frame.
+      if (data.type === "maish:key") {
+        const { key, ctrlKey, metaKey } = data as Record<string, unknown>;
+        if (typeof key !== "string") return;
+        const init = { key, ctrlKey: ctrlKey === true, metaKey: metaKey === true, altKey: false };
+        if (!mailZoomKey(init)) return;
+        iframe.dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }));
         return;
       }
 

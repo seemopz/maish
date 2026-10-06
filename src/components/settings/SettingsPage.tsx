@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { SWIPE_ACTIONS, SWIPE_ACTION_LABELS, MAX_SWIPE_ACTIONS, isSwipeAction, type SwipeButtonAction } from "@/utils/swipeActions";
+import { SWIPE_ACTIONS, SWIPE_ACTION_LABELS, MAX_SWIPE_ACTIONS, setSwipeSlot, type SwipeButtonAction } from "@/utils/swipeActions";
 import { useParams } from "@tanstack/react-router";
 import { useUIStore } from "@/stores/uiStore";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
@@ -2214,11 +2214,7 @@ function SwipeActionsRow({
   onChange: (actions: SwipeButtonAction[]) => void;
 }) {
   const slots = Array.from({ length: MAX_SWIPE_ACTIONS }, (_, i) => actions[i] ?? "");
-  const setSlot = (i: number, value: string) => {
-    const next = [...slots];
-    next[i] = isSwipeAction(value) && value !== "none" ? value : "";
-    onChange(next.filter((a): a is SwipeButtonAction => a !== ""));
-  };
+  const setSlot = (i: number, value: string) => onChange(setSwipeSlot(actions, i, value));
   return (
     <SettingRow label={`${label} (two-finger trackpad, touch)`}>
       <div className="flex gap-2">

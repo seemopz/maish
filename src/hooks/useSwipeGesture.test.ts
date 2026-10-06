@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useSwipeGesture, commitThreshold, SWIPE_IDLE_MS } from "./useSwipeGesture";
+import { useSwipeGesture, commitThreshold, isSwipeTail, SWIPE_IDLE_MS } from "./useSwipeGesture";
 
 function makeEl(width = 400): HTMLDivElement {
   const el = document.createElement("div");
@@ -459,6 +459,56 @@ describe("useSwipeGesture", () => {
       expect(commitThreshold(400, 192)).toBe(240); // three buttons: pushed out beyond them
       expect(commitThreshold(200, 192)).toBe(180); // never past 90 % of a narrow card
       expect(commitThreshold(1000, 72)).toBe(220);
+    });
+
+    it("closes an open card on a swipe back past the rest position when the other side has no buttons", () => {
+      const { el, hook } = two({ revealed: "left", allowRight: false, revealRightPx: 0 });
+      for (const dx of [-60, -60, -50]) wheel(el, dx); // -144 + 170, clamped to 0
+      quiet();
+      expect(onReveal).toHaveBeenCalledWith(null);
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(hook.result.current.active).toBe(false);
+    });
+
+    it("closes the same way with one finger", () => {
+      const { el } = two({ revealed: "left", allowRight: false, revealRightPx: 0 });
+      const touch = (type: string, x: number) => {
+        const e = new MouseEvent(type, { clientX: x, clientY: 0, cancelable: true, bubbles: true });
+        Object.defineProperties(e, {
+          pointerId: { value: 1 }, pointerType: { value: "touch" }, isPrimary: { value: true },
+        });
+        act(() => void el.dispatchEvent(e));
+      };
+      touch("pointerdown", 100);
+      touch("pointermove", 200);
+      touch("pointermove", 300); // 200 px right, clamped to 0
+      touch("pointerup", 300);
+      expect(onReveal).toHaveBeenCalledWith(null);
+    });
+
+    it("needs a longer swipe to run the default from an open card", () => {
+      expect(commitThreshold(320, 128)).toBe(176);
+      expect(commitThreshold(320, 128, true)).toBe(224);
+      const { el } = two({ revealed: "left" });
+      for (const dx of [40, 40, 40]) wheel(el, dx); // -144 - 120 = -264 of 400: past 240 from an open card
+      quiet();
+      expect(onCommit).toHaveBeenCalledWith("left");
+      onCommit.mockClear();
+      const again = two({ revealed: "left" });
+      for (const dx of [20, 20, 20]) wheel(again.el, dx); // -144 - 60 = -204: short of 240
+      quiet();
+      expect(onCommit).not.toHaveBeenCalled();
+      expect(onReveal).toHaveBeenCalledWith("left");
+    });
+
+    it("marks the momentum tail of a horizontal swipe, and only that", () => {
+      const { el } = two();
+      for (const dx of [12, 18, 16, 12, 8, 5, 3, 2, 1, 1]) wheel(el, dx);
+      expect(isSwipeTail()).toBe(true);
+      quiet();
+      expect(isSwipeTail()).toBe(false);
+      wheel(el, 2, 40); // a vertical scroll is no horizontal tail
+      expect(isSwipeTail()).toBe(false);
     });
 
     it("opens with one finger and runs the default with a long drag", () => {

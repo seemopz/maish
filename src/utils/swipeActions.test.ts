@@ -7,6 +7,7 @@ import {
   isSwipeAction,
   normalizeSwipeActions,
   parseSwipeActions,
+  setSwipeSlot,
 } from "./swipeActions";
 
 const thread = { isRead: true, isStarred: false, labelIds: ["INBOX"] } as Thread;
@@ -61,6 +62,23 @@ describe("swipeActions", () => {
       expect(parseSwipeActions(null, null)).toBeNull();
       expect(parseSwipeActions(null, "bogus")).toBeNull();
       expect(parseSwipeActions("{oops", "trash")).toBeNull();
+    });
+  });
+
+  describe("setSwipeSlot", () => {
+    it("switches the side off when the first slot is set to Off", () => {
+      expect(setSwipeSlot(["trash", "archive"], 0, "")).toEqual([]);
+    });
+    it("drops the later slots when a middle one is emptied", () => {
+      expect(setSwipeSlot(["trash", "archive", "star"], 1, "")).toEqual(["trash"]);
+    });
+    it("replaces and appends a slot", () => {
+      expect(setSwipeSlot(["trash", "archive"], 1, "star")).toEqual(["trash", "star"]);
+      expect(setSwipeSlot(["trash"], 1, "archive")).toEqual(["trash", "archive"]);
+      expect(setSwipeSlot([], 0, "archive")).toEqual(["archive"]);
+    });
+    it("keeps each action once", () => {
+      expect(setSwipeSlot(["trash", "archive"], 1, "trash")).toEqual(["trash"]);
     });
   });
 });

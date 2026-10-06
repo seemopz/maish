@@ -6,7 +6,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import { formatRelativeDate } from "@/utils/date";
 import { Paperclip, Star, Check, Pin, BellRing, VolumeX, Archive, Trash2, MailOpen, Clock, Ban } from "lucide-react";
-import { useSwipeGesture, type SwipeDirection } from "@/hooks/useSwipeGesture";
+import { useSwipeGesture, isSwipeTail, type SwipeDirection } from "@/hooks/useSwipeGesture";
 import { resolveSwipeActions, describeSwipeAction, type SwipeButtonAction } from "@/utils/swipeActions";
 import { runSwipeAction } from "@/services/swipeActions";
 import { logToFile } from "@/services/logFile";
@@ -110,11 +110,15 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("scroll", close, true);
+    // The tail of the swipe that opened the card may still nudge the list.
+    const onScroll = () => {
+      if (!isSwipeTail()) close();
+    };
+    document.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("scroll", close, true);
+      document.removeEventListener("scroll", onScroll, true);
     };
   }, [openSide, close]);
 

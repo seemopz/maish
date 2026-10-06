@@ -686,7 +686,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           { text: "An open card closes when you swipe back, click it or anywhere else, scroll the list, press Escape or open another card." },
           { text: "Choose up to three buttons for each side (delete, archive, read/unread, star, snooze, spam) in Settings > General. The first one is what a full swipe runs; leave it on Off to switch that side off." },
           { text: "Delete, archive, spam and move can be undone for 5 seconds with the toast or the z key." },
-          { text: "Swiping works on one conversation at a time and is off while several are selected, in Drafts, and for Delete inside Trash." },
+          { text: "Swiping works on one conversation at a time and is off while several are selected and in Drafts. Inside Trash the Delete button is left out, so the next button becomes the default." },
           { text: "Vertical scrolling is never taken over: a gesture that starts vertical stays a scroll." },
           { text: "On a touchscreen, drag a conversation to a folder by pressing and holding it for a moment first; the mouse still drags right away." },
         ],

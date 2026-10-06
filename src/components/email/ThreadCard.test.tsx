@@ -248,6 +248,21 @@ describe("ThreadCard", () => {
       expect(useUIStore.getState().openSwipe).toBeNull();
     });
 
+    it("does not close on the scroll the momentum tail of the opening swipe causes", () => {
+      const { container } = renderCard();
+      const wrapper = container.firstElementChild as HTMLElement;
+      Object.defineProperty(wrapper, "offsetWidth", { value: 400, configurable: true });
+      for (const dx of [12, 18, 16, 12, 8, 5, 3, 2, 1, 1]) {
+        act(() => void wrapper.dispatchEvent(new WheelEvent("wheel", { deltaX: dx, cancelable: true, bubbles: true })));
+      }
+      expect(useUIStore.getState().openSwipe).not.toBeNull();
+      act(() => void document.body.dispatchEvent(new Event("scroll"))); // still in the tail
+      expect(useUIStore.getState().openSwipe).not.toBeNull();
+      release();
+      act(() => void document.body.dispatchEvent(new Event("scroll"))); // the user scrolls on
+      expect(useUIStore.getState().openSwipe).toBeNull();
+    });
+
     it("keeps one card open: opening another closes this one", () => {
       const { container } = renderCard();
       swipe(container, 90);

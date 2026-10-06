@@ -86,3 +86,15 @@ export function describeSwipeAction(action: SwipeAction, thread: Thread): string
       return SWIPE_ACTION_LABELS[action];
   }
 }
+
+/**
+ * The list after the select of slot `i` (0 = the full-swipe default) was set to
+ * `value`. Emptying a slot drops it and the ones after it, so Off in the first slot
+ * switches the side off.
+ */
+export function setSwipeSlot(actions: readonly SwipeButtonAction[], i: number, value: string): SwipeButtonAction[] {
+  if (!isSwipeAction(value) || value === "none") return actions.slice(0, i);
+  const next = [...actions];
+  next[i] = value;
+  return normalizeSwipeActions(next.slice(0, Math.max(i + 1, actions.length)));
+}

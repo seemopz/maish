@@ -6,6 +6,7 @@ import type { DbAccount } from "@/services/db/accounts";
 
 vi.mock("@/services/db/accounts", () => ({
   getAccount: vi.fn(),
+  findAccount: vi.fn(),
 }));
 
 // Mock the provider constructors so they don't do real work,
@@ -32,7 +33,7 @@ vi.mock("./caldavProvider", () => {
   return { CalDAVProvider };
 });
 
-import { getAccount } from "@/services/db/accounts";
+import { getAccount, findAccount } from "@/services/db/accounts";
 import {
   getCalendarProvider,
   hasCalendarSupport,
@@ -41,6 +42,7 @@ import {
 } from "./providerFactory";
 
 const mockGetAccount = vi.mocked(getAccount);
+const mockFindAccount = vi.mocked(findAccount);
 
 describe("providerFactory", () => {
   beforeEach(() => {
@@ -161,7 +163,7 @@ describe("providerFactory", () => {
   describe("hasCalendarSupport", () => {
     it("returns true for gmail_api accounts", async () => {
       const account = createMockGmailAccount();
-      mockGetAccount.mockResolvedValue(account);
+      mockFindAccount.mockResolvedValue(account);
 
       expect(await hasCalendarSupport(account.id)).toBe(true);
     });
@@ -170,7 +172,7 @@ describe("providerFactory", () => {
       const account = createMockImapAccount({
         provider: "caldav" as DbAccount["provider"],
       });
-      mockGetAccount.mockResolvedValue(account);
+      mockFindAccount.mockResolvedValue(account);
 
       expect(await hasCalendarSupport(account.id)).toBe(true);
     });
@@ -180,22 +182,34 @@ describe("providerFactory", () => {
         calendar_provider: "caldav",
         caldav_url: "https://caldav.example.com/dav",
       });
-      mockGetAccount.mockResolvedValue(account);
+      mockFindAccount.mockResolvedValue(account);
 
       expect(await hasCalendarSupport(account.id)).toBe(true);
     });
 
     it("returns false for plain IMAP accounts without calendar", async () => {
       const account = createMockImapAccount();
-      mockGetAccount.mockResolvedValue(account);
+      mockFindAccount.mockResolvedValue(account);
 
       expect(await hasCalendarSupport(account.id)).toBe(false);
     });
 
     it("returns false when account is not found", async () => {
-      mockGetAccount.mockResolvedValue(null);
+      mockFindAccount.mockResolvedValue(null);
 
       expect(await hasCalendarSupport("nonexistent")).toBe(false);
+    });
+
+    it("does not need a readable credential", async () => {
+      mockGetAccount.mockRejectedValue(new Error("credential cannot be decrypted"));
+      mockFindAccount.mockResolvedValue(
+        createMockImapAccount({
+          calendar_provider: "caldav",
+          caldav_url: "https://caldav.example.com/dav",
+        }),
+      );
+
+      expect(await hasCalendarSupport("acc-1")).toBe(true);
     });
   });
 });

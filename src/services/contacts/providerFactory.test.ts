@@ -5,14 +5,15 @@ import {
   removeContactsProvider,
 } from "./providerFactory";
 import { CardDAVProvider } from "./carddavProvider";
-import { getAccount } from "@/services/db/accounts";
+import { findAccount, getAccount } from "@/services/db/accounts";
 import { createMockGmailAccount, createMockImapAccount } from "@/test/mocks";
 
 vi.mock("tsdav", () => ({ DAVClient: vi.fn() }));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
-vi.mock("@/services/db/accounts", () => ({ getAccount: vi.fn() }));
+vi.mock("@/services/db/accounts", () => ({ getAccount: vi.fn(), findAccount: vi.fn() }));
 
 const mockGetAccount = vi.mocked(getAccount);
+const mockFindAccount = vi.mocked(findAccount);
 
 const withCardDav = () =>
   createMockImapAccount({
@@ -77,25 +78,31 @@ describe("getContactsProvider", () => {
 });
 
 describe("hasContactsSupport", () => {
-  beforeEach(() => mockGetAccount.mockReset());
+  beforeEach(() => mockFindAccount.mockReset());
 
   it("is true for a configured mail account", async () => {
-    mockGetAccount.mockResolvedValue(withCardDav());
+    mockFindAccount.mockResolvedValue(withCardDav());
     expect(await hasContactsSupport("acc-1")).toBe(true);
   });
 
   it("is true for a standalone CardDAV account", async () => {
-    mockGetAccount.mockResolvedValue(createMockImapAccount({ provider: "carddav" }));
+    mockFindAccount.mockResolvedValue(createMockImapAccount({ provider: "carddav" }));
     expect(await hasContactsSupport("acc-2")).toBe(true);
   });
 
   it("is false for a Gmail account", async () => {
-    mockGetAccount.mockResolvedValue(createMockGmailAccount());
+    mockFindAccount.mockResolvedValue(createMockGmailAccount());
     expect(await hasContactsSupport("acc-3")).toBe(false);
   });
 
   it("is false for an account that does not exist", async () => {
-    mockGetAccount.mockResolvedValue(null);
+    mockFindAccount.mockResolvedValue(null);
     expect(await hasContactsSupport("nope")).toBe(false);
+  });
+
+  it("does not need a readable credential", async () => {
+    mockGetAccount.mockRejectedValue(new Error("credential cannot be decrypted"));
+    mockFindAccount.mockResolvedValue(withCardDav());
+    expect(await hasContactsSupport("acc-1")).toBe(true);
   });
 });

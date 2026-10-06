@@ -1,7 +1,7 @@
 import type { CalendarProvider } from "./types";
 import { GoogleCalendarProvider } from "./googleCalendarProvider";
 import { CalDAVProvider } from "./caldavProvider";
-import { getAccount } from "@/services/db/accounts";
+import { findAccount, getAccount } from "@/services/db/accounts";
 
 const providerCache = new Map<string, CalendarProvider>();
 
@@ -41,7 +41,7 @@ export async function getCalendarProvider(accountId: string): Promise<CalendarPr
  * Check if an account has calendar support configured.
  */
 export async function hasCalendarSupport(accountId: string): Promise<boolean> {
-  const account = await getAccount(accountId);
+  const account = await findAccount(accountId);
   if (!account) return false;
 
   if (account.provider === "caldav") return true;

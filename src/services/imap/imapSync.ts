@@ -56,15 +56,15 @@ const CHUNK_SIZE = 200;
 /** Number of thread groups to process per transaction in Phase 4. */
 const THREAD_BATCH_SIZE = 100;
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err ?? "Unknown error");
+}
+
 // ---------------------------------------------------------------------------
 // Circuit breaker for connection storms
 // ---------------------------------------------------------------------------
 
 /** After this many consecutive connection failures, add a cooldown delay. */
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err ?? "Unknown error");
-}
-
 const CIRCUIT_BREAKER_THRESHOLD = 3;
 /** Delay (ms) to wait after hitting the circuit breaker threshold. */
 const CIRCUIT_BREAKER_DELAY_MS = 15_000;

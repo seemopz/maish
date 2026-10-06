@@ -125,7 +125,11 @@ mod tests {
 
     #[test]
     fn failed_delta_check_carries_the_error_and_no_uids() {
-        let req = DeltaCheckRequest { folder: "Archive".into(), last_uid: 4, uidvalidity: 7 };
+        let req = DeltaCheckRequest {
+            folder: "Archive".into(),
+            last_uid: 4,
+            uidvalidity: 7,
+        };
         let res = DeltaCheckResult::failed(&req, "SELECT failed: nope".into());
         assert_eq!(res.folder, "Archive");
         assert!(res.new_uids.is_empty());

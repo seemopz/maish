@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import type { Thread } from "@/stores/threadStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -6,8 +6,8 @@ import { useUIStore } from "@/stores/uiStore";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import { formatRelativeDate } from "@/utils/date";
 import { Paperclip, Star, Check, Pin, BellRing, VolumeX, Archive, Trash2, MailOpen, Clock, Ban } from "lucide-react";
-import { useSwipeGesture, type SwipeDirection } from "@/hooks/useSwipeGesture";
-import { resolveSwipeAction, describeSwipeAction, type SwipeAction } from "@/utils/swipeActions";
+import { useSwipeGesture, isSwipeTail, type SwipeDirection } from "@/hooks/useSwipeGesture";
+import { resolveSwipeActions, describeSwipeAction, type SwipeButtonAction } from "@/utils/swipeActions";
 import { runSwipeAction } from "@/services/swipeActions";
 import { logToFile } from "@/services/logFile";
 import { snoozeThread } from "@/services/snooze/snoozeManager";
@@ -17,7 +17,7 @@ import type { DragData } from "@/components/dnd/DndProvider";
 
 const BADGE_CATEGORIES = new Set(["Updates", "Promotions", "Social", "Newsletters"]);
 
-const SWIPE_VISUALS: Record<Exclude<SwipeAction, "none">, { bg: string; icon: ReactNode }> = {
+const SWIPE_VISUALS: Record<SwipeButtonAction, { bg: string; icon: ReactNode }> = {
   trash: { bg: "bg-danger", icon: <Trash2 size={16} /> },
   spam: { bg: "bg-danger", icon: <Ban size={16} /> },
   archive: { bg: "bg-success", icon: <Archive size={16} /> },
@@ -25,6 +25,9 @@ const SWIPE_VISUALS: Record<Exclude<SwipeAction, "none">, { bg: string; icon: Re
   star: { bg: "bg-warning", icon: <Star size={16} /> },
   toggleRead: { bg: "bg-accent", icon: <MailOpen size={16} /> },
 };
+
+/** Width of one swipe button, px. */
+const SWIPE_BUTTON_PX = 64;
 
 interface ThreadCardProps {
   thread: Thread;
@@ -45,8 +48,12 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
   const emailDensity = useUIStore((s) => s.emailDensity);
   const isSpam = thread.labelIds.includes("SPAM");
   const removeThread = useThreadStore((s) => s.removeThread);
-  const swipeLeft = resolveSwipeAction(useUIStore((s) => s.swipeLeftAction), activeLabel);
-  const swipeRight = resolveSwipeAction(useUIStore((s) => s.swipeRightAction), activeLabel);
+  const swipeLeftActions = useUIStore((s) => s.swipeLeftActions);
+  const swipeRightActions = useUIStore((s) => s.swipeRightActions);
+  const leftButtons = useMemo(() => resolveSwipeActions(swipeLeftActions, activeLabel), [swipeLeftActions, activeLabel]);
+  const rightButtons = useMemo(() => resolveSwipeActions(swipeRightActions, activeLabel), [swipeRightActions, activeLabel]);
+  const openSide = useUIStore((s) => (s.openSwipe?.threadId === thread.id ? s.openSwipe.side : null));
+  const setOpenSwipe = useUIStore((s) => s.setOpenSwipe);
   const swipeRef = useRef<HTMLDivElement>(null);
   const [showSnooze, setShowSnooze] = useState(false);
 
@@ -63,23 +70,57 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
     data: dragData,
   });
 
+  const runButton = (action: SwipeButtonAction) => {
+    setOpenSwipe(null);
+    if (action === "snooze") setShowSnooze(true);
+    else {
+      runSwipeAction(action, thread).catch((err) =>
+        logToFile("error", `Swipe action ${action} failed: ${String(err)}`),
+      );
+    }
+  };
+
   // Two-finger trackpad swipe or one-finger touch swipe; a single thread only, never over a multi-selection or a drag.
-  const { offset, armed } = useSwipeGesture(swipeRef, {
+  // A light swipe opens the side's buttons, a full swipe runs the first one.
+  const { offset, armed, active } = useSwipeGesture(swipeRef, {
     enabled: !hasMultiSelect && !isDragging,
-    allowLeft: swipeLeft !== "none",
-    allowRight: swipeRight !== "none",
+    allowLeft: leftButtons.length > 0,
+    allowRight: rightButtons.length > 0,
+    revealLeftPx: leftButtons.length * SWIPE_BUTTON_PX,
+    revealRightPx: rightButtons.length * SWIPE_BUTTON_PX,
+    revealed: openSide,
+    onReveal: (side) => setOpenSwipe(side ? { threadId: thread.id, side } : null),
     onCommit: (direction: SwipeDirection) => {
-      const action = direction === "left" ? swipeLeft : swipeRight;
-      if (action === "snooze") setShowSnooze(true);
-      else {
-        runSwipeAction(action, thread).catch((err) =>
-          logToFile("error", `Swipe action ${action} failed: ${String(err)}`),
-        );
-      }
+      const action = (direction === "left" ? leftButtons : rightButtons)[0];
+      if (action) runButton(action);
     },
   });
-  const swipeAction = offset < 0 ? swipeLeft : swipeRight;
-  const swipeVisual = offset !== 0 && swipeAction !== "none" ? SWIPE_VISUALS[swipeAction] : null;
+  const buttons = offset < 0 ? leftButtons : rightButtons;
+  const first = buttons[0];
+
+  // An open card closes on a click elsewhere, on scrolling the list and on Escape.
+  const close = useCallback(() => setOpenSwipe(null), [setOpenSwipe]);
+  useEffect(() => {
+    if (!openSide) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!swipeRef.current?.contains(e.target as Node)) close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    // The tail of the swipe that opened the card may still nudge the list.
+    const onScroll = () => {
+      if (!isSwipeTail()) close();
+    };
+    document.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("scroll", onScroll, true);
+    };
+  }, [openSide, close]);
 
   const handleSnooze = async (until: number) => {
     setShowSnooze(false);
@@ -92,7 +133,10 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
   };
 
   const handleClick = (e: React.MouseEvent) => {
-    if (e.shiftKey) {
+    if (openSide) {
+      // Like Apple Mail: a tap on the open card closes it instead of opening the thread.
+      close();
+    } else if (e.shiftKey) {
       e.preventDefault();
       selectThreadRange(thread.id);
     } else if (e.ctrlKey || e.metaKey) {
@@ -116,29 +160,46 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
 
   return (
     <div ref={swipeRef} style={{ touchAction: "pan-y" }} className="relative overflow-hidden">
-      {swipeVisual && (
+      {offset !== 0 && first && (
         <div
-          aria-hidden="true"
           data-testid="swipe-field"
-          className={`absolute inset-0 flex items-center px-5 ${swipeVisual.bg} ${
-            offset > 0 ? "justify-start" : "justify-end"
+          style={{ width: Math.abs(offset) }}
+          className={`absolute inset-y-0 flex overflow-hidden ${SWIPE_VISUALS[first].bg} ${
+            offset > 0 ? "left-0 flex-row" : "right-0 flex-row-reverse"
           }`}
         >
-          <div
-            className={`flex items-center gap-2 text-xs font-medium text-on-accent transition-opacity ${
-              armed ? "opacity-100" : "opacity-60"
-            }`}
-          >
-            {swipeVisual.icon}
-            {describeSwipeAction(swipeAction, thread)}
-          </div>
+          {buttons.map((action, i) => {
+            const visual = SWIPE_VISUALS[action];
+            // On a full swipe the first button takes the whole field and the others fold away.
+            const folded = armed && i > 0;
+            return (
+              <button
+                key={action}
+                type="button"
+                tabIndex={-1}
+                onClick={() => runButton(action)}
+                style={{
+                  width: armed && i === 0 ? undefined : folded ? 0 : SWIPE_BUTTON_PX,
+                  flex: armed && i === 0 ? "1 1 auto" : "0 0 auto",
+                }}
+                className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium text-on-accent overflow-hidden ${visual.bg}`}
+              >
+                {visual.icon}
+                <span className="whitespace-nowrap">{describeSwipeAction(action, thread)}</span>
+              </button>
+            );
+          })}
         </div>
       )}
       <button
         ref={setNodeRef}
         style={
           offset !== 0
-            ? { transform: `translateX(${offset}px)`, backgroundColor: "var(--color-bg-primary)" }
+            ? {
+                transform: `translateX(${offset}px)`,
+                backgroundColor: "var(--color-bg-primary)",
+                transition: active ? undefined : "transform 150ms ease-out",
+              }
             : undefined
         }
         {...attributes}

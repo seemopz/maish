@@ -77,7 +77,7 @@ import { formatSyncError } from "./utils/networkErrors";
 import { nextSyncDisplay, syncProgressMessage } from "./utils/syncStatus";
 import { router } from "./router";
 import { getSelectedThreadId } from "./router/navigate";
-import { isSwipeAction } from "./utils/swipeActions";
+import { parseSwipeActions } from "./utils/swipeActions";
 import { parseMailZoom } from "./utils/mailZoom";
 
 /**
@@ -239,10 +239,17 @@ export default function App() {
         }
 
         // Restore swipe actions
-        const savedSwipeLeft = await getSetting("swipe_left_action");
-        if (isSwipeAction(savedSwipeLeft)) ui.setSwipeLeftAction(savedSwipeLeft);
-        const savedSwipeRight = await getSetting("swipe_right_action");
-        if (isSwipeAction(savedSwipeRight)) ui.setSwipeRightAction(savedSwipeRight);
+        // The single action per side of older versions becomes the first button.
+        const savedSwipeLeft = parseSwipeActions(
+          await getSetting("swipe_left_actions"),
+          await getSetting("swipe_left_action"),
+        );
+        if (savedSwipeLeft) ui.setSwipeLeftActions(savedSwipeLeft);
+        const savedSwipeRight = parseSwipeActions(
+          await getSetting("swipe_right_actions"),
+          await getSetting("swipe_right_action"),
+        );
+        if (savedSwipeRight) ui.setSwipeRightActions(savedSwipeRight);
 
         // Restore the mail zoom
         const savedMailZoom = parseMailZoom(await getSetting("mail_zoom"));

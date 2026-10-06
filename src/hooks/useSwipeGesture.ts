@@ -6,6 +6,16 @@ export type SwipeDirection = "left" | "right";
 export const SWIPE_THRESHOLD = 0.25;
 /** ...but never more than this many px, so a wide pane does not need a long swipe. */
 export const SWIPE_MAX_PX = 120;
+/** Two-stage swipe: a swipe past this many px, released short of the full swipe, opens the buttons. */
+export const SWIPE_REVEAL_MIN_PX = 56;
+/** Two-stage swipe: the full swipe, which runs the default action, is this share of the width... */
+const FULL_SWIPE_FRACTION = 0.5;
+/** ...at most this many px... */
+const FULL_SWIPE_MAX_PX = 220;
+/** ...and always this far past the open buttons, so a light swipe cannot reach it by accident... */
+const FULL_SWIPE_BEYOND_REVEAL_PX = 48;
+/** ...twice as far when the swipe starts on an open card, which already sits at the buttons. */
+const FULL_SWIPE_BEYOND_REVEAL_OPEN_PX = 96;
 /** A trackpad sends no "fingers lifted" event; this much silence ends the gesture. */
 export const SWIPE_IDLE_MS = 150;
 /** Horizontal travel (px) before a swipe owns the wheel; until then vertical motion can cancel it. */
@@ -29,6 +39,18 @@ interface SwipeOptions {
   allowLeft: boolean;
   allowRight: boolean;
   onCommit: (direction: SwipeDirection) => void;
+  /**
+   * Two-stage swipe. Width in px of the buttons a light swipe opens on each side
+   * (0 = that side has none and works as a plain one-stage swipe). With a width
+   * set, a swipe released between `SWIPE_REVEAL_MIN_PX` and the full swipe calls
+   * `onReveal` instead of `onCommit`, and only the full swipe commits.
+   */
+  revealLeftPx?: number;
+  revealRightPx?: number;
+  /** The side whose buttons are open. The card rests there and a swipe starts from there. */
+  revealed?: SwipeDirection | null;
+  /** Called on release with the side to open, or `null` to close. */
+  onReveal?: (direction: SwipeDirection | null) => void;
 }
 
 export interface SwipeState {
@@ -36,11 +58,21 @@ export interface SwipeState {
   offset: number;
   /** True once releasing now would trigger. */
   armed: boolean;
+  /** True while fingers are moving the card; false at rest, including when the buttons are open. */
+  active: boolean;
 }
 
-const IDLE_STATE: SwipeState = { offset: 0, armed: false };
+const IDLE_STATE: SwipeState = { offset: 0, armed: false, active: false };
 
-const thresholdFor = (width: number) => Math.min(SWIPE_THRESHOLD * width, SWIPE_MAX_PX);
+/** Distance at which a release commits. With open buttons it lies beyond them. */
+export function commitThreshold(width: number, revealPx = 0, startedOpen = false): number {
+  if (revealPx <= 0) return Math.min(SWIPE_THRESHOLD * width, SWIPE_MAX_PX);
+  const full = Math.max(
+    Math.min(FULL_SWIPE_FRACTION * width, FULL_SWIPE_MAX_PX),
+    revealPx + (startedOpen ? FULL_SWIPE_BEYOND_REVEAL_OPEN_PX : FULL_SWIPE_BEYOND_REVEAL_PX),
+  );
+  return Math.min(full, 0.9 * width);
+}
 
 /**
  * Wheel events are ignored, on every element, until they have been quiet for
@@ -49,15 +81,26 @@ const thresholdFor = (width: number) => Math.min(SWIPE_THRESHOLD * width, SWIPE_
  * under the pointer, and its fresh hook would read the momentum tail as a new swipe.
  */
 let tailIgnored = false;
+/** The tail belongs to a horizontal swipe (it ended on momentum), not to a vertical scroll. */
+let tailHorizontal = false;
 let tailTimer: ReturnType<typeof setTimeout> | undefined;
 
-function ignoreTail() {
+function ignoreTail(horizontal = false) {
   tailIgnored = true;
+  if (horizontal) tailHorizontal = true;
   clearTimeout(tailTimer);
   tailTimer = setTimeout(() => {
     tailIgnored = false;
+    tailHorizontal = false;
   }, SWIPE_IDLE_MS);
 }
+
+/**
+ * True while the momentum of a horizontal swipe plays out. Its `deltaY` can still
+ * scroll the list, which must not count as the user scrolling away from a card the
+ * swipe has just opened.
+ */
+export const isSwipeTail = () => tailHorizontal;
 
 /**
  * Horizontal swipe on an element, from two sources: a two-finger trackpad swipe
@@ -67,16 +110,26 @@ function ignoreTail() {
  * browser's scrolling. A trackpad swipe ends when the events stop, or as soon as
  * the deltas decay like momentum; the tail of the momentum is then ignored, on
  * every element until it has been quiet, so it cannot start a second swipe. A finger swipe ends on lift-off, and the click
- * that would follow is swallowed. Mouse pointers never swipe (they drag).
+ * that would follow is swallowed. With `revealLeftPx`/`revealRightPx` the swipe has
+ * two stages: a light one opens buttons (`onReveal`), only a full one commits. Mouse pointers never swipe (they drag).
  */
 export function useSwipeGesture(
   ref: RefObject<HTMLElement | null>,
-  { enabled, allowLeft, allowRight, onCommit }: SwipeOptions,
+  {
+    enabled,
+    allowLeft,
+    allowRight,
+    onCommit,
+    revealLeftPx = 0,
+    revealRightPx = 0,
+    revealed = null,
+    onReveal,
+  }: SwipeOptions,
 ): SwipeState {
   const [state, setState] = useState<SwipeState>(IDLE_STATE);
-  const options = useRef({ allowLeft, allowRight, onCommit });
+  const options = useRef({ allowLeft, allowRight, onCommit, revealLeftPx, revealRightPx, revealed, onReveal });
   useEffect(() => {
-    options.current = { allowLeft, allowRight, onCommit };
+    options.current = { allowLeft, allowRight, onCommit, revealLeftPx, revealRightPx, revealed, onReveal };
   });
 
   useEffect(() => {
@@ -87,14 +140,45 @@ export function useSwipeGesture(
     let offset = 0;
     let width = 0;
     let locked = false;
+    /** The gesture began on a card whose buttons were open. */
+    let startedOpen = false;
     let peak = 0;
     let lastAbs = 0;
     let shrinking = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
+    const revealPxFor = (signed: number) =>
+      signed < 0 ? options.current.revealLeftPx : options.current.revealRightPx;
+    /** Where the card rests: out by the width of the open buttons, or at 0. */
+    const restOffset = () => {
+      const { revealed, revealLeftPx, revealRightPx } = options.current;
+      return revealed === "left" ? -revealLeftPx : revealed === "right" ? revealRightPx : 0;
+    };
+    const show = () =>
+      setState({
+        offset,
+        armed: Math.abs(offset) >= commitThreshold(width, revealPxFor(offset), startedOpen),
+        active: true,
+      });
+    /** Ends a gesture at `offset`: runs the action, opens or closes the buttons, or snaps back. */
+    const finish = () => {
+      const direction: SwipeDirection = offset < 0 ? "left" : "right";
+      const revealPx = revealPxFor(offset);
+      const abs = Math.abs(offset);
+      const hit = abs >= commitThreshold(width, revealPx, startedOpen);
+      const open = !hit && revealPx > 0 && abs >= SWIPE_REVEAL_MIN_PX;
+      const wasOpen = startedOpen;
+      reset();
+      if (hit) options.current.onCommit(direction);
+      // A swipe back past the rest position is clamped to 0 when the other side has
+      // no buttons; it still has to close the card it started on.
+      else if (revealPx > 0 || wasOpen) options.current.onReveal?.(open ? direction : null);
+    };
+
     const reset = () => {
       offset = 0;
       locked = false;
+      startedOpen = false;
       peak = 0;
       lastAbs = 0;
       shrinking = 0;
@@ -103,10 +187,7 @@ export function useSwipeGesture(
 
     const release = () => {
       if (mode !== "swiping") return;
-      const direction: SwipeDirection = offset < 0 ? "left" : "right";
-      const hit = Math.abs(offset) >= thresholdFor(width);
-      reset();
-      if (hit) options.current.onCommit(direction);
+      finish();
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -134,6 +215,9 @@ export function useSwipeGesture(
         }
         mode = "swiping";
         width = el.offsetWidth;
+        offset = restOffset();
+        locked = offset !== 0;
+        startedOpen = locked;
       } else if (!locked && Math.abs(dy) > Math.abs(dx)) {
         reset();
         mode = "idle";
@@ -155,7 +239,7 @@ export function useSwipeGesture(
       if (shrinking >= MOMENTUM_RUN && abs <= peak * MOMENTUM_FRACTION) {
         release();
         mode = "idle";
-        ignoreTail();
+        ignoreTail(true);
         return;
       }
 
@@ -164,7 +248,7 @@ export function useSwipeGesture(
       if (next > 0 && !options.current.allowRight) next = 0;
       offset = Math.max(-width, Math.min(width, next));
       if (Math.abs(offset) >= LOCK_PX) locked = true;
-      setState({ offset, armed: Math.abs(offset) >= thresholdFor(width) });
+      show();
     };
 
     // One finger. A pointer that is not `touch` is ignored.
@@ -202,12 +286,13 @@ export function useSwipeGesture(
           return;
         }
         touchMode = "swiping";
+        startedOpen = restOffset() !== 0;
       }
-      let next = dx;
+      let next = restOffset() + dx;
       if (next < 0 && !options.current.allowLeft) next = 0;
       if (next > 0 && !options.current.allowRight) next = 0;
       offset = Math.max(-width, Math.min(width, next));
-      setState({ offset, armed: Math.abs(offset) >= thresholdFor(width) });
+      show();
     };
 
     const onPointerUp = (e: PointerEvent) => {
@@ -215,11 +300,8 @@ export function useSwipeGesture(
       const swiped = touchMode === "swiping";
       touchMode = "idle";
       if (!swiped) return;
-      const direction: SwipeDirection = offset < 0 ? "left" : "right";
-      const hit = Math.abs(offset) >= thresholdFor(width);
-      reset();
       swallowClick();
-      if (hit) options.current.onCommit(direction);
+      finish();
     };
 
     // The browser took the gesture over (vertical scroll) or the system aborted it.
@@ -245,5 +327,7 @@ export function useSwipeGesture(
     };
   }, [ref, enabled]);
 
-  return state;
+  if (state.active) return state;
+  const rest = revealed === "left" ? -revealLeftPx : revealed === "right" ? revealRightPx : 0;
+  return rest === 0 ? state : { offset: rest, armed: false, active: false };
 }

@@ -111,17 +111,30 @@ describe("uiStore", () => {
     expect(useUIStore.getState().emailDensity).toBe("spacious");
   });
 
-  it("swipe actions default to delete on the left and read/unread on the right, and persist", () => {
-    expect(useUIStore.getState().swipeLeftAction).toBe("trash");
-    expect(useUIStore.getState().swipeRightAction).toBe("toggleRead");
+  it("swipe buttons default to delete/archive on the left and read/snooze on the right, and persist", () => {
+    expect(useUIStore.getState().swipeLeftActions).toEqual(["trash", "archive"]);
+    expect(useUIStore.getState().swipeRightActions).toEqual(["toggleRead", "snooze"]);
 
-    useUIStore.getState().setSwipeLeftAction("archive");
-    expect(setSetting).toHaveBeenCalledWith("swipe_left_action", "archive");
-    expect(useUIStore.getState().swipeLeftAction).toBe("archive");
+    useUIStore.getState().setSwipeLeftActions(["archive", "star"]);
+    expect(setSetting).toHaveBeenCalledWith("swipe_left_actions", '["archive","star"]');
+    expect(useUIStore.getState().swipeLeftActions).toEqual(["archive", "star"]);
 
-    useUIStore.getState().setSwipeRightAction("none");
-    expect(setSetting).toHaveBeenCalledWith("swipe_right_action", "none");
-    expect(useUIStore.getState().swipeRightAction).toBe("none");
+    useUIStore.getState().setSwipeRightActions([]);
+    expect(setSetting).toHaveBeenCalledWith("swipe_right_actions", "[]");
+    expect(useUIStore.getState().swipeRightActions).toEqual([]);
+  });
+
+  it("keeps at most three distinct real swipe buttons", () => {
+    useUIStore.getState().setSwipeLeftActions(["trash", "trash", "none", "archive", "star", "spam"] as never);
+    expect(useUIStore.getState().swipeLeftActions).toEqual(["trash", "archive", "star"]);
+  });
+
+  it("keeps one swipe open at a time", () => {
+    useUIStore.getState().setOpenSwipe({ threadId: "a", side: "left" });
+    useUIStore.getState().setOpenSwipe({ threadId: "b", side: "right" });
+    expect(useUIStore.getState().openSwipe).toEqual({ threadId: "b", side: "right" });
+    useUIStore.getState().setOpenSwipe(null);
+    expect(useUIStore.getState().openSwipe).toBeNull();
   });
 
   it("setDefaultReplyMode should persist to DB and update state", () => {

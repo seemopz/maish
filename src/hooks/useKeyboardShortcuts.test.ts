@@ -26,18 +26,18 @@ vi.mock("@/stores/composerStore", () => ({
 vi.mock("@/stores/accountStore", () => ({
   useAccountStore: { getState: () => ({ activeAccountId: null }) },
 }));
+const shortcuts = vi.hoisted(() => ({
+  keyMap: {} as Record<string, string>,
+}));
+const defaultKeyMap = () => ({
+  "app.askInbox": "i",
+  "app.commandPalette": "/",
+  "app.toggleSidebar": "Ctrl+Shift+E",
+  "app.help": "?",
+  "action.undo": "z",
+});
 vi.mock("@/stores/shortcutStore", () => ({
-  useShortcutStore: {
-    getState: () => ({
-      keyMap: {
-        "app.askInbox": "i",
-        "app.commandPalette": "/",
-        "app.toggleSidebar": "Ctrl+Shift+E",
-        "app.help": "?",
-        "action.undo": "z",
-      },
-    }),
-  },
+  useShortcutStore: { getState: () => ({ keyMap: shortcuts.keyMap }) },
 }));
 vi.mock("@/stores/contextMenuStore", () => ({
   useContextMenuStore: { getState: () => ({ menuType: null, closeMenu: vi.fn() }) },
@@ -78,6 +78,25 @@ import { undoPending } from "@/services/undoableActions";
 describe("useKeyboardShortcuts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    shortcuts.keyMap = defaultKeyMap();
+  });
+
+  it("never fires a custom binding on the reserved zoom keys", () => {
+    shortcuts.keyMap = { ...defaultKeyMap(), "action.undo": "Ctrl+0" };
+    renderHook(() => useKeyboardShortcuts());
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "0", ctrlKey: true, bubbles: true }));
+
+    expect(undoPending).not.toHaveBeenCalled();
+  });
+
+  it("still fires custom Ctrl combinations that are not reserved", () => {
+    shortcuts.keyMap = { ...defaultKeyMap(), "action.undo": "Ctrl+9" };
+    renderHook(() => useKeyboardShortcuts());
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "9", ctrlKey: true, bubbles: true }));
+
+    expect(undoPending).toHaveBeenCalledTimes(1);
   });
 
   it("dispatches maish-toggle-ask-inbox when 'i' is pressed", () => {

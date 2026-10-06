@@ -1,4 +1,4 @@
-import { clampMailZoom, roundMailZoom, parseMailZoom, MAIL_ZOOM_MAX, MAIL_ZOOM_MIN } from "./mailZoom";
+import { clampMailZoom, roundMailZoom, parseMailZoom, mailZoomKey, MAIL_ZOOM_MAX, MAIL_ZOOM_MIN } from "./mailZoom";
 
 describe("mailZoom", () => {
   it("keeps the factor inside the range without rounding it", () => {
@@ -22,5 +22,24 @@ describe("mailZoom", () => {
     expect(parseMailZoom("99")).toBe(MAIL_ZOOM_MAX);
     expect(parseMailZoom("abc")).toBeNull();
     expect(parseMailZoom(null)).toBeNull();
+  });
+
+  describe("mailZoomKey", () => {
+    const press = (key: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>
+      mailZoomKey({ key, ctrlKey: false, metaKey: false, altKey: false, ...mods });
+
+    it("maps Ctrl or Cmd with +, =, -, _ and 0", () => {
+      expect(press("+", { ctrlKey: true })).toBe("in");
+      expect(press("=", { metaKey: true })).toBe("in");
+      expect(press("-", { ctrlKey: true })).toBe("out");
+      expect(press("_", { metaKey: true })).toBe("out");
+      expect(press("0", { ctrlKey: true })).toBe("reset");
+    });
+
+    it("ignores the keys without Ctrl/Cmd, with Alt, and other keys", () => {
+      expect(press("+")).toBeNull();
+      expect(press("+", { ctrlKey: true, altKey: true })).toBeNull();
+      expect(press("9", { ctrlKey: true })).toBeNull();
+    });
   });
 });

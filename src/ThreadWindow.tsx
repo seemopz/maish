@@ -8,12 +8,13 @@ import { useUIStore } from "./stores/uiStore";
 import { runMigrations } from "./services/db/migrations";
 import { getAllAccounts } from "./services/db/accounts";
 import { getSetting } from "./services/db/settings";
+import { parseMailZoom } from "./utils/mailZoom";
 import { initializeClients } from "./services/gmail/tokenManager";
 import { getThreadById, getThreadLabelIds } from "./services/db/threads";
 import type { Thread } from "./stores/threadStore";
 
 export default function ThreadWindow() {
-  const { setTheme, setFontScale } = useUIStore();
+  const { setTheme, setFontScale, setMailZoom } = useUIStore();
   const { setAccounts } = useAccountStore();
   const [thread, setThread] = useState<Thread | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,6 +46,10 @@ export default function ThreadWindow() {
         if (savedFontScale === "small" || savedFontScale === "default" || savedFontScale === "large" || savedFontScale === "xlarge") {
           setFontScale(savedFontScale);
         }
+
+        // Restore the mail zoom
+        const savedMailZoom = parseMailZoom(await getSetting("mail_zoom"));
+        if (savedMailZoom !== null) setMailZoom(savedMailZoom);
 
         // Load accounts into store
         const dbAccounts = await getAllAccounts();

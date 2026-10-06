@@ -232,6 +232,25 @@ describe("EmailRenderer", () => {
       expect(seen[0]).toMatchObject({ ctrlKey: true, deltaY: -4 });
     });
 
+    it("replays a zoom key report as a keydown on the iframe, and nothing else", () => {
+      const { iframe } = renderWithFrame("<p>hi</p>");
+      const seen: KeyboardEvent[] = [];
+      const onKey = (e: KeyboardEvent) => seen.push(e);
+      window.addEventListener("keydown", onKey);
+
+      postFromFrame(iframe, { type: "maish:key", key: "+", ctrlKey: true });
+      postFromFrame(iframe, { type: "maish:key", key: "0", metaKey: true });
+      postFromFrame(iframe, { type: "maish:key", key: "j", ctrlKey: true });
+      postFromFrame(iframe, { type: "maish:key", key: "+" });
+      postFromFrame(iframe, { type: "maish:key", key: 5, ctrlKey: true });
+      postFromFrame(iframe, { type: "maish:key", key: "+", ctrlKey: true }, window);
+      window.removeEventListener("keydown", onKey);
+
+      expect(seen.map((e) => e.key)).toEqual(["+", "0"]);
+      expect(seen[0]).toMatchObject({ ctrlKey: true, metaKey: false, target: iframe });
+      expect(seen[1]).toMatchObject({ ctrlKey: false, metaKey: true });
+    });
+
     it("replays a side-button report as a mouseup on the iframe, only for buttons 3 and 4", () => {
       const { iframe } = renderWithFrame("<p>hi</p>");
       const seen: MouseEvent[] = [];

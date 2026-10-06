@@ -305,7 +305,7 @@ export default function App() {
         const dbAccounts = await getAllAccounts();
         const credentialErrors = dbAccounts.flatMap((a) => (a.credentialError ? [a.credentialError] : []));
         if (credentialErrors.length > 0) {
-          ui.setStartupError(credentialErrors.join(" "));
+          for (const message of credentialErrors) ui.addStartupError(message);
         }
         const mapped = dbAccounts.map((a) => ({
           id: a.id,
@@ -322,7 +322,7 @@ export default function App() {
         try {
           await initializeClients();
         } catch (err) {
-          ui.setStartupError(err instanceof Error ? err.message : String(err));
+          ui.addStartupError(err instanceof Error ? err.message : String(err));
         }
 
         // Fetch send-as aliases for each active email account (skip CalDAV-only)
@@ -370,7 +370,7 @@ export default function App() {
         }
       } catch (err) {
         console.error("Failed to initialize:", err);
-        useUIStore.getState().setStartupError(
+        useUIStore.getState().addStartupError(
           `Maish could not finish starting: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
@@ -522,8 +522,10 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden text-text-primary">
-      <OfflineBanner />
-      <StartupErrorBanner />
+      <div className="fixed top-8 left-0 right-0 z-50 flex flex-col">
+        <OfflineBanner />
+        <StartupErrorBanner />
+      </div>
       <TitleBar />
       <div className="flex flex-1 min-w-0 overflow-hidden">
         <DndProvider>

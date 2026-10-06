@@ -17,6 +17,7 @@ describe("uiStore", () => {
       readFilter: "all",
       fontScale: "default",
       inboxViewMode: "unified",
+      startupErrors: [],
     });
   });
 
@@ -27,12 +28,21 @@ describe("uiStore", () => {
     expect(state.readingPanePosition).toBe("right");
   });
 
-  it("should keep a startup error until it is cleared", () => {
-    expect(useUIStore.getState().startupError).toBeNull();
-    useUIStore.getState().setStartupError("Could not decrypt the IMAP password");
-    expect(useUIStore.getState().startupError).toBe("Could not decrypt the IMAP password");
-    useUIStore.getState().setStartupError(null);
-    expect(useUIStore.getState().startupError).toBeNull();
+  it("should collect startup errors instead of replacing earlier ones", () => {
+    expect(useUIStore.getState().startupErrors).toEqual([]);
+    useUIStore.getState().addStartupError("Could not decrypt the IMAP password");
+    useUIStore.getState().addStartupError("Maish could not finish starting: boom");
+    expect(useUIStore.getState().startupErrors).toEqual([
+      "Could not decrypt the IMAP password",
+      "Maish could not finish starting: boom",
+    ]);
+  });
+
+  it("should not repeat a startup error that is already shown", () => {
+    // StrictMode runs the startup effect twice under `tauri dev`.
+    useUIStore.getState().addStartupError("same");
+    useUIStore.getState().addStartupError("same");
+    expect(useUIStore.getState().startupErrors).toEqual(["same"]);
   });
 
   it("should set theme", () => {

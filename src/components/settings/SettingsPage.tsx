@@ -10,6 +10,7 @@ import { PROVIDER_MODELS } from "@/services/ai/types";
 import { deleteAccount } from "@/services/db/accounts";
 import { removeClient, reauthorizeAccount } from "@/services/gmail/tokenManager";
 import { triggerSync, forceFullSync, resyncAccount, removeAccountFromSync, onSyncStatus } from "@/services/gmail/syncManager";
+import { logToFile } from "@/services/logFile";
 import { syncProgressMessage } from "@/utils/syncStatus";
 import { formatSyncError } from "@/utils/networkErrors";
 import {
@@ -89,6 +90,19 @@ const codeClass = "font-mono text-xs bg-bg-tertiary px-1 py-0.5 rounded text-tex
 const footerClass = "text-xs text-text-tertiary bg-bg-secondary rounded-b-md";
 const pillClass =
   "rounded-full border border-border-primary px-1.5 font-mono text-[10px] leading-4 text-text-secondary";
+
+/**
+ * Reads a secret for display. One that cannot be decrypted shows as empty and is
+ * logged, so it does not take the rest of the page's settings down with it.
+ */
+async function readSecureSetting(key: string): Promise<string | null> {
+  try {
+    return await getSecureSetting(key);
+  } catch (err) {
+    logToFile("warn", err instanceof Error ? err.message : String(err));
+    return null;
+  }
+}
 
 export function SettingsPage() {
   const theme = useUIStore((s) => s.theme);
@@ -175,7 +189,7 @@ export function SettingsPage() {
       setUndoSendDelay(delay ?? "5");
       const id = await getSetting("google_client_id");
       setClientId(id ?? "");
-      const secret = await getSecureSetting("google_client_secret");
+      const secret = await readSecureSetting("google_client_secret");
       setClientSecret(secret ?? "");
       const blockImg = await getSetting("block_remote_images");
       setBlockRemoteImages(blockImg !== "false");
@@ -207,13 +221,13 @@ export function SettingsPage() {
       if (openaiModelVal) setOpenaiModel(openaiModelVal);
       const geminiModelVal = await getSetting("gemini_model");
       if (geminiModelVal) setGeminiModel(geminiModelVal);
-      const aiKey = await getSecureSetting("claude_api_key");
+      const aiKey = await readSecureSetting("claude_api_key");
       setClaudeApiKey(aiKey ?? "");
-      const oaiKey = await getSecureSetting("openai_api_key");
+      const oaiKey = await readSecureSetting("openai_api_key");
       setOpenaiApiKey(oaiKey ?? "");
-      const gemKey = await getSecureSetting("gemini_api_key");
+      const gemKey = await readSecureSetting("gemini_api_key");
       setGeminiApiKey(gemKey ?? "");
-      const copKey = await getSecureSetting("copilot_api_key");
+      const copKey = await readSecureSetting("copilot_api_key");
       setCopilotApiKey(copKey ?? "");
       const copilotModelVal = await getSetting("copilot_model");
       if (copilotModelVal) setCopilotModel(copilotModelVal);
@@ -2039,8 +2053,8 @@ function ImapDavSection() {
 
   useEffect(() => {
     if (!activeAccountId) return;
-    import("@/services/db/accounts").then(({ getAccount }) => {
-      getAccount(activeAccountId).then(setAccount);
+    import("@/services/db/accounts").then(({ findAccount }) => {
+      findAccount(activeAccountId).then(setAccount);
     });
   }, [activeAccountId]);
 
@@ -2050,8 +2064,8 @@ function ImapDavSection() {
   if (!isImap || !account) return null;
 
   const reload = () => {
-    import("@/services/db/accounts").then(({ getAccount }) => {
-      getAccount(account.id).then(setAccount);
+    import("@/services/db/accounts").then(({ findAccount }) => {
+      findAccount(account.id).then(setAccount);
     });
   };
 

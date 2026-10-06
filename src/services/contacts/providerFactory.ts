@@ -1,6 +1,6 @@
 import type { ContactsProvider } from "./types";
 import { CardDAVProvider } from "./carddavProvider";
-import { getAccount } from "@/services/db/accounts";
+import { findAccount, getAccount } from "@/services/db/accounts";
 
 const providerCache = new Map<string, ContactsProvider>();
 
@@ -30,7 +30,7 @@ export async function getContactsProvider(accountId: string): Promise<ContactsPr
 
 /** Whether an account has contact syncing configured. */
 export async function hasContactsSupport(accountId: string): Promise<boolean> {
-  const account = await getAccount(accountId);
+  const account = await findAccount(accountId);
   if (!account) return false;
 
   if (account.provider === "carddav") return true;

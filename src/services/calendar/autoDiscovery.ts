@@ -39,7 +39,7 @@ const PRESETS: CalDavPreset[] = [
 ];
 
 import { davFetch } from "./davFetch";
-import { getAccountByEmail } from "@/services/db/accounts";
+import { findAccountByEmail } from "@/services/db/accounts";
 
 export interface CalDavDiscoveryResult {
   providerName: string | null;
@@ -112,7 +112,7 @@ export async function discoverCalDavSettings(email: string): Promise<CalDavDisco
 async function candidateHosts(email: string, domain: string): Promise<string[]> {
   const hosts = [domain];
 
-  const account = await getAccountByEmail(email).catch(() => null);
+  const account = await findAccountByEmail(email).catch(() => null);
   const mailHost = account?.imap_host?.toLowerCase();
   if (mailHost && !hosts.includes(mailHost)) {
     hosts.push(mailHost);

@@ -144,6 +144,30 @@ describe("useSwipeGesture", () => {
     expect(onCommit).toHaveBeenCalledWith("left");
   });
 
+  it("lets a vertical scroll through after a pause and settles the swipe", () => {
+    const { el, hook } = setup();
+    wheel(el, 30);
+    wheel(el, 30);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    const e = wheel(el, 0, 40);
+    expect(e.defaultPrevented).toBe(false);
+    expect(hook.result.current.active).toBe(false);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("keeps a swipe on vertical jitter inside a short pause", () => {
+    const { el, hook } = setup();
+    wheel(el, 30);
+    wheel(el, 30);
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    wheel(el, 5, 8);
+    expect(hook.result.current.active).toBe(true);
+  });
+
   it("releases on decaying momentum and ignores the tail", () => {
     const { el } = setup();
     for (const dx of [60, 80, 70, 50, 30, 20, 12, 8, 5, 3, 2, 1]) wheel(el, dx);

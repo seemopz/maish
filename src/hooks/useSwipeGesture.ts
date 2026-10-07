@@ -151,6 +151,7 @@ export function useSwipeGesture(
     let peak = 0;
     let lastAbs = 0;
     let shrinking = 0;
+    let lastWheelAt = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const revealPxFor = (signed: number) =>
@@ -202,16 +203,25 @@ export function useSwipeGesture(
         ignoreTail();
         return;
       }
+      const scale = e.deltaMode === 1 ? LINE_PX : 1;
+      // Fingers moving left make deltaX positive; the card follows the fingers.
+      const dx = -e.deltaX * scale;
+      const dy = e.deltaY * scale;
+
+      // After a pause, a vertical event is a new gesture (a scroll), not resting
+      // fingers moving on: settle the swipe and let the scroll through.
+      const paused = e.timeStamp - lastWheelAt > TAIL_QUIET_MS;
+      lastWheelAt = e.timeStamp;
+      if (mode === "swiping" && paused && Math.abs(dy) > Math.abs(dx)) {
+        release();
+        mode = "idle";
+      }
+
       clearTimeout(timer);
       timer = setTimeout(() => {
         release();
         mode = "idle";
       }, SWIPE_IDLE_MS);
-
-      const scale = e.deltaMode === 1 ? LINE_PX : 1;
-      // Fingers moving left make deltaX positive; the card follows the fingers.
-      const dx = -e.deltaX * scale;
-      const dy = e.deltaY * scale;
 
       if (mode === "idle") {
         if (dx === 0 && dy === 0) return;

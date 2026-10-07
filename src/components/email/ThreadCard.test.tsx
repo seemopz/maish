@@ -151,6 +151,30 @@ describe("ThreadCard", () => {
       expect(card(container).style.transform).toBe("translateX(-100px)");
     });
 
+    it("stretches the first button as the swipe goes on, pushing the second along", () => {
+      const { container } = renderCard();
+      const wheelBy = (dx: number) =>
+        act(() => void (container.firstElementChild as HTMLElement).dispatchEvent(new WheelEvent("wheel", { deltaX: dx, cancelable: true, bubbles: true })));
+      const box = (name: string) => screen.getByRole("button", { name }).style;
+      swipe(container, 100); // under the two buttons' 128 px: side by side
+      expect(box("Delete").width).toBe("64px");
+      expect(box("Archive").right).toBe("64px");
+      wheelBy(40); // 140 px: 12 px past them
+      expect(box("Delete").width).toBe("76px");
+      expect(box("Archive").right).toBe("76px"); // pushed out by the stretch
+      expect(box("Delete").transition).toBe(""); // follows the card, no lag
+    });
+
+    it("fills the field with the first button at the full swipe and sends the second out, eased", () => {
+      const { container } = renderCard();
+      swipe(container, 230); // past the full swipe (200 px of 400)
+      expect(screen.getByRole("button", { name: "Delete" }).style.width).toBe("100%");
+      expect(screen.getByRole("button", { name: "Archive" }).style.right).toBe("100%");
+      expect(screen.getByRole("button", { name: "Delete" }).style.transition).toContain("width 280ms");
+      act(() => void vi.advanceTimersByTime(300));
+      expect(screen.getByRole("button", { name: "Delete" }).style.transition).toBe("");
+    });
+
     it("a light swipe opens the buttons and runs nothing", () => {
       const { container } = renderCard();
       swipe(container, 90);

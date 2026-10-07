@@ -98,3 +98,24 @@ export function setSwipeSlot(actions: readonly SwipeButtonAction[], i: number, v
   next[i] = value;
   return normalizeSwipeActions(next.slice(0, Math.max(i + 1, actions.length)));
 }
+
+/** Where one button sits in the field under a swiped card, measured from the card's far edge. */
+export interface SwipeButtonBox {
+  /** Distance from the outer edge of the field (px, or "100%" to sit entirely outside it). */
+  edge: number | "100%";
+  /** Width (px, or "100%" to fill the field). */
+  size: number | "100%";
+}
+
+/**
+ * Layout of button `i` of `count` in a field `fieldPx` wide. Up to the width of all
+ * buttons they sit side by side; pulling further stretches the first one, which
+ * pushes the others out along the card's edge; at the full swipe the first fills
+ * the field and the others leave it. `"100%"` (not a px value) lets the field's own
+ * width carry them from there, so only the flip needs a transition.
+ */
+export function swipeButtonBox(i: number, count: number, fieldPx: number, armed: boolean, buttonPx: number): SwipeButtonBox {
+  const first = buttonPx + Math.max(0, fieldPx - count * buttonPx);
+  if (i === 0) return { edge: 0, size: armed ? "100%" : first };
+  return { edge: armed ? "100%" : first + (i - 1) * buttonPx, size: buttonPx };
+}

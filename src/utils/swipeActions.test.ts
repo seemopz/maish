@@ -8,6 +8,7 @@ import {
   normalizeSwipeActions,
   parseSwipeActions,
   setSwipeSlot,
+  swipeButtonBox,
 } from "./swipeActions";
 
 const thread = { isRead: true, isStarred: false, labelIds: ["INBOX"] } as Thread;
@@ -80,5 +81,29 @@ describe("swipeActions", () => {
     it("keeps each action once", () => {
       expect(setSwipeSlot(["trash", "archive"], 1, "trash")).toEqual(["trash"]);
     });
+  });
+});
+
+describe("swipeButtonBox", () => {
+  it("lays the buttons side by side up to their own width", () => {
+    expect(swipeButtonBox(0, 2, 100, false, 64)).toEqual({ edge: 0, size: 64 });
+    expect(swipeButtonBox(1, 2, 100, false, 64)).toEqual({ edge: 64, size: 64 });
+    expect(swipeButtonBox(1, 2, 128, false, 64)).toEqual({ edge: 64, size: 64 });
+  });
+
+  it("stretches the first button past that and pushes the others along", () => {
+    expect(swipeButtonBox(0, 2, 180, false, 64)).toEqual({ edge: 0, size: 116 });
+    expect(swipeButtonBox(1, 2, 180, false, 64)).toEqual({ edge: 116, size: 64 });
+    expect(swipeButtonBox(2, 3, 250, false, 64)).toEqual({ edge: 122 + 64, size: 64 });
+  });
+
+  it("fills the field with the first and sends the rest out at the full swipe", () => {
+    expect(swipeButtonBox(0, 2, 220, true, 64)).toEqual({ edge: 0, size: "100%" });
+    expect(swipeButtonBox(1, 2, 220, true, 64)).toEqual({ edge: "100%", size: 64 });
+  });
+
+  it("keeps a single button at its width until it is stretched", () => {
+    expect(swipeButtonBox(0, 1, 40, false, 64)).toEqual({ edge: 0, size: 64 });
+    expect(swipeButtonBox(0, 1, 100, false, 64)).toEqual({ edge: 0, size: 100 });
   });
 });

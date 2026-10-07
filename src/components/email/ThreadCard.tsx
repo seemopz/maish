@@ -7,7 +7,7 @@ import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import { formatRelativeDate } from "@/utils/date";
 import { Paperclip, Star, Check, Pin, BellRing, VolumeX, Archive, Trash2, MailOpen, Clock, Ban } from "lucide-react";
 import { useSwipeGesture, isSwipeTail, type SwipeDirection } from "@/hooks/useSwipeGesture";
-import { resolveSwipeActions, describeSwipeAction, type SwipeButtonAction } from "@/utils/swipeActions";
+import { resolveSwipeActions, describeSwipeAction, swipeButtonBox, type SwipeButtonAction } from "@/utils/swipeActions";
 import { runSwipeAction } from "@/services/swipeActions";
 import { logToFile } from "@/services/logFile";
 import { snoozeThread } from "@/services/snooze/snoozeManager";
@@ -28,6 +28,9 @@ const SWIPE_VISUALS: Record<SwipeButtonAction, { bg: string; icon: ReactNode }> 
 
 /** Width of one swipe button, px. */
 const SWIPE_BUTTON_PX = 64;
+/** The first button fills the field, and the others leave it, over this long after the full swipe is reached. */
+const SWIPE_STRETCH_MS = 280;
+const SWIPE_STRETCH_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 interface ThreadCardProps {
   thread: Thread;
@@ -101,6 +104,22 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
   const side: SwipeDirection | null = offset < 0 ? "left" : offset > 0 ? "right" : null;
   const buttons = side === "left" ? leftButtons : rightButtons;
   const first = buttons[0];
+  // Crossing the full swipe (either way) animates the stretch; between the crossings the
+  // widths follow the card frame by frame, so a transition would only make them lag.
+  // Counted, so a second crossing inside the ease restarts it. Derived during render so the
+  // first frame of the new layout already carries the transition.
+  const [prevArmed, setPrevArmed] = useState(armed);
+  const [stretching, setStretching] = useState(0);
+  if (armed !== prevArmed) {
+    setPrevArmed(armed);
+    setStretching((n) => n + 1);
+  }
+  useEffect(() => {
+    if (stretching === 0) return;
+    const id = setTimeout(() => setStretching(0), SWIPE_STRETCH_MS);
+    return () => clearTimeout(id);
+  }, [stretching]);
+  const stretchTransition = stretching > 0 ? `${SWIPE_STRETCH_MS}ms ${SWIPE_STRETCH_EASE}` : undefined;
 
   // An open card closes on a click elsewhere, on scrolling the list and on Escape.
   const close = useCallback(() => setOpenSwipe(null), [setOpenSwipe]);
@@ -168,14 +187,15 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
         <div
           data-testid="swipe-field"
           style={{ width: Math.abs(offset) }}
-          className={`absolute inset-y-0 flex overflow-hidden ${SWIPE_VISUALS[first].bg} ${
-            side === "right" ? "left-0 flex-row" : "right-0 flex-row-reverse"
+          className={`absolute inset-y-0 overflow-hidden ${SWIPE_VISUALS[first].bg} ${
+            side === "right" ? "left-0" : "right-0"
           }`}
         >
           {buttons.map((action, i) => {
             const visual = SWIPE_VISUALS[action];
-            // On a full swipe the first button takes the whole field and the others fold away.
-            const folded = armed && i > 0;
+            const box = swipeButtonBox(i, buttons.length, Math.abs(offset), armed, SWIPE_BUTTON_PX);
+            // Buttons hang from the outer edge of the field, which is the far side of the card.
+            const edge = side === "right" ? "left" : "right";
             return (
               <button
                 key={action}
@@ -183,10 +203,11 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
                 tabIndex={-1}
                 onClick={() => runButton(action)}
                 style={{
-                  width: armed && i === 0 ? undefined : folded ? 0 : SWIPE_BUTTON_PX,
-                  flex: armed && i === 0 ? "1 1 auto" : "0 0 auto",
+                  [edge]: box.edge,
+                  width: box.size,
+                  transition: stretchTransition && `width ${stretchTransition}, ${edge} ${stretchTransition}`,
                 }}
-                className={`flex flex-col items-center justify-center gap-1 text-[11px] font-medium text-on-accent overflow-hidden ${visual.bg}`}
+                className={`absolute inset-y-0 flex flex-col items-center justify-center gap-1 text-[11px] font-medium text-on-accent overflow-hidden ${visual.bg}`}
               >
                 {visual.icon}
                 <span className="whitespace-nowrap">{describeSwipeAction(action, thread)}</span>

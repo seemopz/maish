@@ -128,6 +128,46 @@ describe("useSwipeGesture", () => {
     expect(onCommit).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the swipe while the fingers rest on the trackpad", () => {
+    const { el, hook } = setup();
+    wheel(el, 60);
+    wheel(el, 60);
+    // Resting fingers send no events; a pause shorter than the hold is not a release.
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(hook.result.current.active).toBe(true);
+    expect(onCommit).not.toHaveBeenCalled();
+    wheel(el, 40);
+    expect(hook.result.current.offset).toBe(-160);
+    quiet();
+    expect(onCommit).toHaveBeenCalledWith("left");
+  });
+
+  it("lets a vertical scroll through after a pause and settles the swipe", () => {
+    const { el, hook } = setup();
+    wheel(el, 30);
+    wheel(el, 30);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    const e = wheel(el, 0, 40);
+    expect(e.defaultPrevented).toBe(false);
+    expect(hook.result.current.active).toBe(false);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("keeps a swipe on vertical jitter inside a short pause", () => {
+    const { el, hook } = setup();
+    wheel(el, 30);
+    wheel(el, 30);
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    wheel(el, 5, 8);
+    expect(hook.result.current.active).toBe(true);
+  });
+
   it("releases on decaying momentum and ignores the tail", () => {
     const { el } = setup();
     for (const dx of [60, 80, 70, 50, 30, 20, 12, 8, 5, 3, 2, 1]) wheel(el, dx);

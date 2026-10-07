@@ -17,7 +17,9 @@
   var ZOOM = "maish:zoom";
   var KEY = "maish:key";
   // A trackpad sends no "fingers lifted" event; this much silence ends a gesture.
-  var GESTURE_IDLE_MS = 150;
+  // Must match SWIPE_IDLE_MS in src/hooks/useSwipeGesture.ts, or the pane settles
+  // a swipe the frame has already handed to the content.
+  var GESTURE_IDLE_MS = 400;
 
   function send(message) {
     parent.postMessage(message, "*");

@@ -28,6 +28,9 @@ const SWIPE_VISUALS: Record<SwipeButtonAction, { bg: string; icon: ReactNode }> 
 
 /** Width of one swipe button, px. */
 const SWIPE_BUTTON_PX = 64;
+/** The card eases to rest after a release; no overshoot, like a critically damped spring. */
+const SWIPE_SETTLE_MS = 300;
+const SWIPE_SETTLE_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 interface ThreadCardProps {
   thread: Thread;
@@ -95,8 +98,25 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
       if (action) runButton(action);
     },
   });
-  const buttons = offset < 0 ? leftButtons : rightButtons;
+  // After a release the card and its field ease back to 0 instead of vanishing: keep
+  // both mounted for the settle, and remember which side they were on.
+  const [settling, setSettling] = useState(false);
+  const wasActive = useRef(false);
+  const lastSide = useRef<SwipeDirection | null>(null);
+  useEffect(() => {
+    const released = wasActive.current && !active;
+    wasActive.current = active;
+    if (!released) return;
+    setSettling(true);
+    const id = setTimeout(() => setSettling(false), SWIPE_SETTLE_MS);
+    return () => clearTimeout(id);
+  }, [active]);
+  if (offset !== 0) lastSide.current = offset < 0 ? "left" : "right";
+  const side = offset !== 0 ? lastSide.current : settling ? lastSide.current : null;
+  const moving = offset !== 0 || settling;
+  const buttons = side === "left" ? leftButtons : rightButtons;
   const first = buttons[0];
+  const settleTransition = active ? undefined : `${SWIPE_SETTLE_MS}ms ${SWIPE_SETTLE_EASE}`;
 
   // An open card closes on a click elsewhere, on scrolling the list and on Escape.
   const close = useCallback(() => setOpenSwipe(null), [setOpenSwipe]);
@@ -160,12 +180,15 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
 
   return (
     <div ref={swipeRef} style={{ touchAction: "pan-y" }} className="relative overflow-hidden">
-      {offset !== 0 && first && (
+      {moving && side && first && (
         <div
           data-testid="swipe-field"
-          style={{ width: Math.abs(offset) }}
+          style={{
+            width: Math.abs(offset),
+            transition: settleTransition && `width ${settleTransition}`,
+          }}
           className={`absolute inset-y-0 flex overflow-hidden ${SWIPE_VISUALS[first].bg} ${
-            offset > 0 ? "left-0 flex-row" : "right-0 flex-row-reverse"
+            side === "right" ? "left-0 flex-row" : "right-0 flex-row-reverse"
           }`}
         >
           {buttons.map((action, i) => {
@@ -194,11 +217,11 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
       <button
         ref={setNodeRef}
         style={
-          offset !== 0
+          moving
             ? {
                 transform: `translateX(${offset}px)`,
                 backgroundColor: "var(--color-bg-primary)",
-                transition: active ? undefined : "transform 150ms ease-out",
+                transition: settleTransition && `transform ${settleTransition}`,
               }
             : undefined
         }

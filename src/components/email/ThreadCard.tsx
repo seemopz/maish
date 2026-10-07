@@ -101,19 +101,23 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
   // After a release the card and its field ease back to 0 instead of vanishing: keep
   // both mounted for the settle, and remember which side they were on.
   const [settling, setSettling] = useState(false);
-  const wasActive = useRef(false);
-  const lastSide = useRef<SwipeDirection | null>(null);
+  const [lastSide, setLastSide] = useState<SwipeDirection | null>(null);
+  const [prevOffset, setPrevOffset] = useState(offset);
+  if (offset !== prevOffset) {
+    // Derived during render, not in an effect: an effect would first commit a frame
+    // without the field and the transition, and the ease would start from a fresh node.
+    // Reaching 0 while idle covers a release and a close without a gesture (tap, Escape).
+    setPrevOffset(offset);
+    if (offset !== 0) setLastSide(offset < 0 ? "left" : "right");
+    else if (!active) setSettling(true);
+  }
   useEffect(() => {
-    const released = wasActive.current && !active;
-    wasActive.current = active;
-    if (!released) return;
-    setSettling(true);
+    if (!settling) return;
     const id = setTimeout(() => setSettling(false), SWIPE_SETTLE_MS);
     return () => clearTimeout(id);
-  }, [active]);
-  if (offset !== 0) lastSide.current = offset < 0 ? "left" : "right";
-  const side = offset !== 0 ? lastSide.current : settling ? lastSide.current : null;
+  }, [settling]);
   const moving = offset !== 0 || settling;
+  const side = offset !== 0 ? (offset < 0 ? "left" : "right") : settling ? lastSide : null;
   const buttons = side === "left" ? leftButtons : rightButtons;
   const first = buttons[0];
   const settleTransition = active ? undefined : `${SWIPE_SETTLE_MS}ms ${SWIPE_SETTLE_EASE}`;

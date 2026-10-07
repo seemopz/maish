@@ -228,10 +228,13 @@ describe("ThreadCard", () => {
       const { container } = renderCard();
       swipe(container, 40);
       expect(card(container).style.transition).toBe("");
+      const before = screen.getByTestId("swipe-field");
       release();
       expect(card(container).style.transform).toBe("translateX(0px)");
       expect(card(container).style.transition).toContain("transform 300ms");
       const field = screen.getByTestId("swipe-field");
+      // The same node, or the width change has nothing to animate from.
+      expect(field).toBe(before);
       expect(field.style.width).toBe("0px");
       expect(field.style.transition).toContain("width 300ms");
       settle();
@@ -287,6 +290,7 @@ describe("ThreadCard", () => {
       release();
       expect(card(container).style.transform).toBe("translateX(-128px)");
       act(() => useUIStore.getState().setOpenSwipe({ threadId: "other", side: "right" }));
+      expect(card(container).style.transform).toBe("translateX(0px)");
       settle();
       expect(card(container).style.transform).toBe("");
     });

@@ -376,6 +376,17 @@ describe("useSwipeGesture", () => {
       expect(onCommit).not.toHaveBeenCalled();
     });
 
+    it("holds at rest for a finger swipe too", () => {
+      const { el, hook } = setup();
+      pointer(el, "pointerdown", 100);
+      pointer(el, "pointermove", 60); // 40 px left
+      pointer(el, "pointermove", 300); // far past rest to the right
+      expect(hook.result.current.offset).toBe(0);
+      pointer(el, "pointerup", 300);
+      settle();
+      expect(onCommit).not.toHaveBeenCalled();
+    });
+
     it("respects a disallowed direction", () => {
       const { el, hook } = setup({ allowRight: false });
       pointer(el, "pointerdown", 50);
@@ -455,6 +466,46 @@ describe("useSwipeGesture", () => {
       quiet();
       expect(onCommit).toHaveBeenCalledTimes(1);
       expect(onReveal).not.toHaveBeenCalled();
+    });
+
+    describe("rest is a wall within one gesture", () => {
+      it("stops at rest when the fingers turn back after a swipe, and does not go to the other side", () => {
+        const { el, hook } = two();
+        wheel(el, 60); // 60 px left
+        wheel(el, -100); // back and on towards the right
+        expect(hook.result.current.offset).toBe(0);
+        wheel(el, -100);
+        expect(hook.result.current.offset).toBe(0);
+        quiet();
+        settle();
+        expect(onCommit).not.toHaveBeenCalled();
+        expect(onReveal).toHaveBeenCalledWith(null);
+        expect(hook.result.current.offset).toBe(0);
+      });
+
+      it("stops at rest when an open card is swiped back, and closes it", () => {
+        const { el, hook } = two({ revealed: "left" });
+        wheel(el, -300);
+        expect(hook.result.current.offset).toBe(0);
+        wheel(el, -300);
+        expect(hook.result.current.offset).toBe(0);
+        quiet();
+        // The store would now clear `revealed`; here the prop stays, so only the call is checked.
+        expect(onCommit).not.toHaveBeenCalled();
+        expect(onReveal).toHaveBeenCalledWith(null);
+      });
+
+      it("opens the other side only with a new swipe", () => {
+        const { el, hook } = two();
+        wheel(el, 60);
+        wheel(el, -100);
+        quiet();
+        settle();
+        for (const dx of [-20, -25, -25]) wheel(el, dx); // a second gesture, to the right
+        expect(hook.result.current.offset).toBeGreaterThan(0);
+        quiet();
+        expect(onReveal).toHaveBeenLastCalledWith("right");
+      });
     });
 
     describe("release physics", () => {

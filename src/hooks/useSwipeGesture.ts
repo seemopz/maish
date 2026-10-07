@@ -182,6 +182,8 @@ export function useSwipeGesture(
     /** Where the fingers have taken the card, before the rubber band; `offset` is what is shown. */
     let raw = 0;
     let samples: Sample[] = [];
+    /** The side (-1 left, 1 right) this gesture is on; 0 until it has left rest. A gesture never crosses rest. */
+    let lockSide = 0;
     let width = 0;
     let locked = false;
     /** The gesture began on a card whose buttons were open. */
@@ -206,11 +208,21 @@ export function useSwipeGesture(
       if (r > 0 && !allowRight) return rubber(r, width);
       return r;
     };
+    /** `r` limited to the card's width and to the side the gesture is on: pulling back stops at rest. */
+    const hold = (r: number) => {
+      const clamped = Math.max(-width, Math.min(width, r));
+      if (lockSide === 0) {
+        lockSide = Math.sign(clamped);
+        return clamped;
+      }
+      return lockSide < 0 ? Math.min(clamped, 0) : Math.max(clamped, 0);
+    };
     /** Takes over from a spring still running, at the point it has reached. */
     const grab = () => {
       const from = spring.current?.offset ?? restOffset();
       stopSpring();
       raw = offset = from;
+      lockSide = Math.sign(from);
       samples = [];
       startedOpen = restOffset() !== 0;
       locked = offset !== 0;
@@ -241,7 +253,7 @@ export function useSwipeGesture(
       const v = velocityOf(samples, performance.now());
       const out = direction === "left" ? -v : v; // speed away from the centre
       let open = false;
-      if (!blocked && !hit && revealPx > 0) {
+      if (!blocked && !hit && revealPx > 0 && abs >= 1) {
         open = Math.abs(out) >= FLICK_PX_S ? out > 0 && abs >= FLICK_MIN_PX : abs + project(out) >= SWIPE_REVEAL_MIN_PX;
       }
       const wasOpen = startedOpen;
@@ -260,6 +272,7 @@ export function useSwipeGesture(
     const reset = () => {
       offset = 0;
       raw = 0;
+      lockSide = 0;
       samples = [];
       locked = false;
       startedOpen = false;
@@ -334,7 +347,7 @@ export function useSwipeGesture(
         return;
       }
 
-      raw = Math.max(-width, Math.min(width, raw + dx));
+      raw = hold(raw + dx);
       offset = display(raw);
       if (Math.abs(offset) >= LOCK_PX) locked = true;
       show();
@@ -380,7 +393,7 @@ export function useSwipeGesture(
         grab();
         touchBase = raw;
       }
-      raw = Math.max(-width, Math.min(width, touchBase + dx));
+      raw = hold(touchBase + dx);
       offset = display(raw);
       show();
     };

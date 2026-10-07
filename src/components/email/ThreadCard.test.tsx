@@ -131,6 +131,7 @@ describe("ThreadCard", () => {
       }
     }
     const release = () => act(() => void vi.advanceTimersByTime(SWIPE_IDLE_MS + 1));
+    const settle = () => act(() => void vi.advanceTimersByTime(400));
     const card = (container: HTMLElement) => container.querySelector("button[aria-selected]") as HTMLElement;
     const renderCard = (thread = makeThread()) =>
       render(<ThreadCard thread={thread} isSelected={false} onClick={onClick} />);
@@ -219,7 +220,26 @@ describe("ThreadCard", () => {
       release();
       expect(runSwipeAction).not.toHaveBeenCalled();
       expect(useUIStore.getState().openSwipe).toBeNull();
+      settle();
       expect(card(container).style.transform).toBe("");
+    });
+
+    it("eases back after a release instead of snapping, and keeps the field for the ease", () => {
+      const { container } = renderCard();
+      swipe(container, 40);
+      expect(card(container).style.transition).toBe("");
+      const before = screen.getByTestId("swipe-field");
+      release();
+      expect(card(container).style.transform).toBe("translateX(0px)");
+      expect(card(container).style.transition).toContain("transform 300ms");
+      const field = screen.getByTestId("swipe-field");
+      // The same node, or the width change has nothing to animate from.
+      expect(field).toBe(before);
+      expect(field.style.width).toBe("0px");
+      expect(field.style.transition).toContain("width 300ms");
+      settle();
+      expect(card(container).style.transform).toBe("");
+      expect(screen.queryByTestId("swipe-field")).toBeNull();
     });
 
     it("closes on a tap on the card, without opening the thread", () => {
@@ -270,6 +290,8 @@ describe("ThreadCard", () => {
       release();
       expect(card(container).style.transform).toBe("translateX(-128px)");
       act(() => useUIStore.getState().setOpenSwipe({ threadId: "other", side: "right" }));
+      expect(card(container).style.transform).toBe("translateX(0px)");
+      settle();
       expect(card(container).style.transform).toBe("");
     });
 

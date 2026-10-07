@@ -16,6 +16,13 @@ function wheel(el: HTMLElement, deltaX: number, deltaY = 0, init: WheelEventInit
   return e;
 }
 
+/** Lets the settle spring run out. */
+function settle() {
+  act(() => {
+    vi.advanceTimersByTime(600);
+  });
+}
+
 function quiet() {
   act(() => {
     vi.advanceTimersByTime(SWIPE_IDLE_MS + 1);
@@ -78,7 +85,9 @@ describe("useSwipeGesture", () => {
     wheel(el, 20); // 80 < 100
     quiet();
     expect(onCommit).not.toHaveBeenCalled();
+    settle();
     expect(hook.result.current.offset).toBe(0);
+    expect(hook.result.current.settling).toBe(false);
   });
 
   it("reports armed once the threshold is crossed", () => {
@@ -181,6 +190,7 @@ describe("useSwipeGesture", () => {
     const { el, hook } = setup();
     for (const dx of [10, 15, 12, 9, 5, 3, 2, 1, 1]) wheel(el, dx);
     expect(onCommit).not.toHaveBeenCalled();
+    settle();
     expect(hook.result.current.offset).toBe(0);
     quiet();
   });
@@ -251,12 +261,16 @@ describe("useSwipeGesture", () => {
     expect(hook.result.current.offset).toBe(-300);
   });
 
-  it("does not move toward a direction that is switched off", () => {
+  it("gives like rubber toward a direction that is switched off, and never triggers", () => {
     const { el, hook } = setup({ allowLeft: false });
     wheel(el, 200);
-    expect(hook.result.current.offset).toBe(0);
+    const pulled = hook.result.current.offset;
+    expect(pulled).toBeLessThan(0);
+    expect(pulled).toBeGreaterThan(-100); // a 200 px pull moves the card less than half of it
     quiet();
+    settle();
     expect(onCommit).not.toHaveBeenCalled();
+    expect(hook.result.current.offset).toBe(0);
   });
 
   it("ignores pinch-zoom (ctrl+wheel)", () => {
@@ -321,6 +335,7 @@ describe("useSwipeGesture", () => {
       pointer(el, "pointermove", 110); // 60 < 100
       pointer(el, "pointerup", 110);
       expect(onCommit).not.toHaveBeenCalled();
+      settle();
       expect(hook.result.current.offset).toBe(0);
     });
 
@@ -346,6 +361,7 @@ describe("useSwipeGesture", () => {
       pointer(el, "pointerdown", 50);
       pointer(el, "pointermove", 230);
       pointer(el, "pointercancel", 230);
+      settle();
       expect(hook.result.current.offset).toBe(0);
       pointer(el, "pointerup", 230);
       expect(onCommit).not.toHaveBeenCalled();
@@ -364,9 +380,12 @@ describe("useSwipeGesture", () => {
       const { el, hook } = setup({ allowRight: false });
       pointer(el, "pointerdown", 50);
       pointer(el, "pointermove", 300);
-      expect(hook.result.current.offset).toBe(0);
+      expect(hook.result.current.offset).toBeGreaterThan(0);
+      expect(hook.result.current.offset).toBeLessThan(250);
       pointer(el, "pointerup", 300);
+      settle();
       expect(onCommit).not.toHaveBeenCalled();
+      expect(hook.result.current.offset).toBe(0);
     });
 
     it("swallows the click that follows a swipe, then lets clicks through", () => {
@@ -438,12 +457,101 @@ describe("useSwipeGesture", () => {
       expect(onReveal).not.toHaveBeenCalled();
     });
 
+    describe("release physics", () => {
+      /** One wheel event every 8 ms, like a trackpad. */
+      const feed = (el: HTMLElement, deltas: number[]) => {
+        for (const dx of deltas) {
+          wheel(el, dx);
+          act(() => {
+            vi.advanceTimersByTime(8);
+          });
+        }
+      };
+
+      it("opens on a fast short swipe that the distance alone would close", () => {
+        const { el } = two();
+        feed(el, [8, 8, 8, 6, 5, 4, 3, 2, 1]); // 44 px, under the 56 px light threshold
+        expect(onReveal).toHaveBeenCalledWith("left");
+      });
+
+      it("closes on a fast swipe back from open, though it is still far out", () => {
+        const { el } = two({ revealed: "left" });
+        feed(el, [-8, -8, -8, -6, -5, -4, -3, -2, -1]); // 44 px back from 144
+        expect(onReveal).toHaveBeenCalledWith(null);
+      });
+
+      it("runs from where the fingers let go to the open position without a jump", () => {
+        const { el, hook } = two();
+        feed(el, [8, 8, 8, 6, 5, 4, 3, 2, 1]);
+        const start = hook.result.current;
+        expect(start.settling).toBe(true);
+        expect(start.active).toBe(false);
+        expect(start.offset).toBeLessThan(0);
+        expect(start.offset).toBeGreaterThan(-144);
+        act(() => {
+          vi.advanceTimersByTime(50);
+        });
+        const mid = hook.result.current.offset;
+        expect(mid).toBeLessThan(start.offset); // heading out to -144
+        settle();
+        expect(hook.result.current.settling).toBe(false);
+      });
+
+      it("never swings past rest when it closes", () => {
+        const { el, hook } = two();
+        feed(el, [10, 15, 20]); // 45 px, slow
+        quiet();
+        const seen: number[] = [];
+        for (let i = 0; i < 40; i++) {
+          act(() => {
+            vi.advanceTimersByTime(16);
+          });
+          seen.push(hook.result.current.offset);
+        }
+        expect(Math.max(...seen)).toBeLessThanOrEqual(0);
+        expect(seen[seen.length - 1]).toBe(0);
+      });
+
+      it("takes over a running settle at the point it has reached", () => {
+        const { el, hook } = two();
+        feed(el, [10, 15, 20]);
+        quiet();
+        act(() => {
+          vi.advanceTimersByTime(48);
+        });
+        const mid = hook.result.current.offset;
+        expect(mid).toBeLessThan(0);
+        wheel(el, 5); // a new swipe starts from `mid`, not from rest
+        expect(hook.result.current.active).toBe(true);
+        expect(hook.result.current.offset).toBeCloseTo(mid - 5, 5);
+      });
+
+      it("settles on its own when the card is closed from outside", () => {
+        const ref = { current: makeEl() };
+        let revealed: "left" | null = "left";
+        const hook = renderHook(() =>
+          useSwipeGesture(ref, {
+            enabled: true, allowLeft: true, allowRight: true, onCommit,
+            revealLeftPx: 144, revealRightPx: 72, revealed, onReveal,
+          }),
+        );
+        expect(hook.result.current.offset).toBe(-144);
+        revealed = null;
+        hook.rerender();
+        expect(hook.result.current.settling).toBe(true);
+        expect(hook.result.current.offset).toBe(-144); // starts where it was
+        settle();
+        expect(hook.result.current.offset).toBe(0);
+      });
+    });
+
     it("snaps back below the light threshold", () => {
       const { el, hook } = two();
       for (const dx of [10, 15, 20]) wheel(el, dx); // 45 px
       quiet();
       expect(onReveal).toHaveBeenCalledWith(null);
       expect(onCommit).not.toHaveBeenCalled();
+      settle();
       expect(hook.result.current.offset).toBe(0);
     });
 
@@ -467,7 +575,7 @@ describe("useSwipeGesture", () => {
           ),
         };
       })();
-      expect(hook.result.current).toEqual({ offset: -144, armed: false, active: false });
+      expect(hook.result.current).toEqual({ offset: -144, armed: false, active: false, settling: false });
     });
 
     it("starts from the open position and closes on a swipe back", () => {

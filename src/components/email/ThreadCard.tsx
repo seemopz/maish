@@ -28,9 +28,6 @@ const SWIPE_VISUALS: Record<SwipeButtonAction, { bg: string; icon: ReactNode }> 
 
 /** Width of one swipe button, px. */
 const SWIPE_BUTTON_PX = 64;
-/** The card eases to rest after a release; no overshoot, like a critically damped spring. */
-const SWIPE_SETTLE_MS = 300;
-const SWIPE_SETTLE_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 
 interface ThreadCardProps {
   thread: Thread;
@@ -85,7 +82,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
 
   // Two-finger trackpad swipe or one-finger touch swipe; a single thread only, never over a multi-selection or a drag.
   // A light swipe opens the side's buttons, a full swipe runs the first one.
-  const { offset, armed, active } = useSwipeGesture(swipeRef, {
+  const { offset, armed } = useSwipeGesture(swipeRef, {
     enabled: !hasMultiSelect && !isDragging,
     allowLeft: leftButtons.length > 0,
     allowRight: rightButtons.length > 0,
@@ -98,29 +95,12 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
       if (action) runButton(action);
     },
   });
-  // After a release the card and its field ease back to 0 instead of vanishing: keep
-  // both mounted for the settle, and remember which side they were on.
-  const [settling, setSettling] = useState(false);
-  const [lastSide, setLastSide] = useState<SwipeDirection | null>(null);
-  const [prevOffset, setPrevOffset] = useState(offset);
-  if (offset !== prevOffset) {
-    // Derived during render, not in an effect: an effect would first commit a frame
-    // without the field and the transition, and the ease would start from a fresh node.
-    // Reaching 0 while idle covers a release and a close without a gesture (tap, Escape).
-    setPrevOffset(offset);
-    if (offset !== 0) setLastSide(offset < 0 ? "left" : "right");
-    else if (!active) setSettling(true);
-  }
-  useEffect(() => {
-    if (!settling) return;
-    const id = setTimeout(() => setSettling(false), SWIPE_SETTLE_MS);
-    return () => clearTimeout(id);
-  }, [settling]);
-  const moving = offset !== 0 || settling;
-  const side = offset !== 0 ? (offset < 0 ? "left" : "right") : settling ? lastSide : null;
+  // The hook runs the card to rest on a spring, so `offset` is non-zero until it arrives
+  // and the field under the card stays mounted for the whole settle.
+  const moving = offset !== 0;
+  const side: SwipeDirection | null = offset < 0 ? "left" : offset > 0 ? "right" : null;
   const buttons = side === "left" ? leftButtons : rightButtons;
   const first = buttons[0];
-  const settleTransition = active ? undefined : `${SWIPE_SETTLE_MS}ms ${SWIPE_SETTLE_EASE}`;
 
   // An open card closes on a click elsewhere, on scrolling the list and on Escape.
   const close = useCallback(() => setOpenSwipe(null), [setOpenSwipe]);
@@ -187,10 +167,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
       {moving && side && first && (
         <div
           data-testid="swipe-field"
-          style={{
-            width: Math.abs(offset),
-            transition: settleTransition && `width ${settleTransition}`,
-          }}
+          style={{ width: Math.abs(offset) }}
           className={`absolute inset-y-0 flex overflow-hidden ${SWIPE_VISUALS[first].bg} ${
             side === "right" ? "left-0 flex-row" : "right-0 flex-row-reverse"
           }`}
@@ -225,7 +202,6 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
             ? {
                 transform: `translateX(${offset}px)`,
                 backgroundColor: "var(--color-bg-primary)",
-                transition: settleTransition && `transform ${settleTransition}`,
               }
             : undefined
         }

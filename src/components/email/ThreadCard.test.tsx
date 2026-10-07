@@ -157,6 +157,7 @@ describe("ThreadCard", () => {
       release();
       expect(runSwipeAction).not.toHaveBeenCalled();
       expect(useUIStore.getState().openSwipe).toEqual({ threadId: "t1", side: "left" });
+      settle();
       // Rests open at two button widths; the buttons stay.
       expect(card(container).style.transform).toBe("translateX(-128px)");
       expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
@@ -224,19 +225,20 @@ describe("ThreadCard", () => {
       expect(card(container).style.transform).toBe("");
     });
 
-    it("eases back after a release instead of snapping, and keeps the field for the ease", () => {
+    it("runs back on a spring after a release, with the field under it all the way", () => {
       const { container } = renderCard();
       swipe(container, 40);
-      expect(card(container).style.transition).toBe("");
       const before = screen.getByTestId("swipe-field");
       release();
-      expect(card(container).style.transform).toBe("translateX(0px)");
-      expect(card(container).style.transition).toContain("transform 300ms");
-      const field = screen.getByTestId("swipe-field");
-      // The same node, or the width change has nothing to animate from.
-      expect(field).toBe(before);
-      expect(field.style.width).toBe("0px");
-      expect(field.style.transition).toContain("width 300ms");
+      // It starts where the fingers let go, not at rest, and the field is the same node.
+      expect(card(container).style.transform).toBe("translateX(-40px)");
+      expect(screen.getByTestId("swipe-field")).toBe(before);
+      act(() => void vi.advanceTimersByTime(50));
+      const mid = Number(/-?[\d.]+/.exec(card(container).style.transform)![0]);
+      expect(mid).toBeLessThan(0);
+      expect(mid).toBeGreaterThan(-40);
+      expect(screen.getByTestId("swipe-field")).toBe(before);
+      expect(card(container).style.transition).toBe("");
       settle();
       expect(card(container).style.transform).toBe("");
       expect(screen.queryByTestId("swipe-field")).toBeNull();
@@ -257,13 +259,16 @@ describe("ThreadCard", () => {
         swipe(container, 90);
         release();
         expect(useUIStore.getState().openSwipe).not.toBeNull();
+        settle();
       };
       reopen();
       act(() => void document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
       expect(useUIStore.getState().openSwipe).toBeNull();
+      settle();
       reopen();
       act(() => void document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
       expect(useUIStore.getState().openSwipe).toBeNull();
+      settle();
       reopen();
       act(() => void document.body.dispatchEvent(new Event("scroll")));
       expect(useUIStore.getState().openSwipe).toBeNull();
@@ -288,9 +293,11 @@ describe("ThreadCard", () => {
       const { container } = renderCard();
       swipe(container, 90);
       release();
+      settle();
       expect(card(container).style.transform).toBe("translateX(-128px)");
       act(() => useUIStore.getState().setOpenSwipe({ threadId: "other", side: "right" }));
-      expect(card(container).style.transform).toBe("translateX(0px)");
+      // A close from outside runs from where the card rested, not in one frame.
+      expect(card(container).style.transform).toBe("translateX(-128px)");
       settle();
       expect(card(container).style.transform).toBe("");
     });

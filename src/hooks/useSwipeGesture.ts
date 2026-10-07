@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { FLICK_PX_S, animateSpring, project, rubber, velocityOf, type Sample } from "@/utils/swipePhysics";
 
 export type SwipeDirection = "left" | "right";
 
@@ -26,6 +27,8 @@ export const SWIPE_IDLE_MS = 400;
 const TAIL_QUIET_MS = 150;
 /** Horizontal travel (px) before a swipe owns the wheel; until then vertical motion can cancel it. */
 const LOCK_PX = 12;
+/** A flick opens the buttons from this far out, so a twitch of the fingers does not. */
+const FLICK_MIN_PX = 24;
 /** Wheel events in line mode (deltaMode 1) count this many px per line. */
 const LINE_PX = 16;
 /**
@@ -66,9 +69,14 @@ export interface SwipeState {
   armed: boolean;
   /** True while fingers are moving the card; false at rest, including when the buttons are open. */
   active: boolean;
+  /** True while the card runs to rest on its spring after a release or a close. */
+  settling: boolean;
 }
 
-const IDLE_STATE: SwipeState = { offset: 0, armed: false, active: false };
+const IDLE_STATE: SwipeState = { offset: 0, armed: false, active: false, settling: false };
+
+const prefersReducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
 /** Distance at which a release commits. With open buttons it lies beyond them. */
 export function commitThreshold(width: number, revealPx = 0, startedOpen = false): number {
@@ -133,6 +141,33 @@ export function useSwipeGesture(
   }: SwipeOptions,
 ): SwipeState {
   const [state, setState] = useState<SwipeState>(IDLE_STATE);
+  /** The running settle spring and the offset it has reached; null when there is none. */
+  const spring = useRef<{ stop: () => void; offset: number } | null>(null);
+  const stopSpring = useCallback(() => {
+    spring.current?.stop();
+    spring.current = null;
+  }, []);
+  /** Runs the card from `from` to rest at `to` on a spring that starts at speed `v` (px/s). */
+  const settle = useCallback(
+    (from: number, to: number, v: number) => {
+      stopSpring();
+      if (Math.abs(from - to) < 0.5 || prefersReducedMotion()) {
+        setState(IDLE_STATE);
+        return;
+      }
+      const frame = (offset: number) => {
+        if (spring.current) spring.current.offset = offset;
+        setState({ offset, armed: false, active: false, settling: true });
+      };
+      frame(from);
+      const stop = animateSpring(from, to, v, frame, () => {
+        spring.current = null;
+        setState(IDLE_STATE);
+      });
+      spring.current = { stop, offset: from };
+    },
+    [stopSpring],
+  );
   const options = useRef({ allowLeft, allowRight, onCommit, revealLeftPx, revealRightPx, revealed, onReveal });
   useEffect(() => {
     options.current = { allowLeft, allowRight, onCommit, revealLeftPx, revealRightPx, revealed, onReveal };
@@ -144,6 +179,9 @@ export function useSwipeGesture(
 
     let mode: "idle" | "swiping" = "idle";
     let offset = 0;
+    /** Where the fingers have taken the card, before the rubber band; `offset` is what is shown. */
+    let raw = 0;
+    let samples: Sample[] = [];
     let width = 0;
     let locked = false;
     /** The gesture began on a card whose buttons were open. */
@@ -161,29 +199,68 @@ export function useSwipeGesture(
       const { revealed, revealLeftPx, revealRightPx } = options.current;
       return revealed === "left" ? -revealLeftPx : revealed === "right" ? revealRightPx : 0;
     };
-    const show = () =>
+    /** A pull towards a side with no buttons gives like rubber instead of following the fingers. */
+    const display = (r: number) => {
+      const { allowLeft, allowRight } = options.current;
+      if (r < 0 && !allowLeft) return -rubber(-r, width);
+      if (r > 0 && !allowRight) return rubber(r, width);
+      return r;
+    };
+    /** Takes over from a spring still running, at the point it has reached. */
+    const grab = () => {
+      const from = spring.current?.offset ?? restOffset();
+      stopSpring();
+      raw = offset = from;
+      samples = [];
+      startedOpen = restOffset() !== 0;
+      locked = offset !== 0;
+    };
+    const show = () => {
+      samples.push([performance.now(), offset]);
+      if (samples.length > 6) samples.shift();
       setState({
         offset,
         armed: Math.abs(offset) >= commitThreshold(width, revealPxFor(offset), startedOpen),
         active: true,
+        settling: false,
       });
-    /** Ends a gesture at `offset`: runs the action, opens or closes the buttons, or snaps back. */
+    };
+    /**
+     * Ends a gesture at `offset`: runs the action, or opens or closes the buttons,
+     * and lets the card run to rest on a spring that starts at the fingers' speed.
+     * A fast swipe decides by its direction, a slow one by where it would come to rest.
+     */
     const finish = () => {
+      const { allowLeft, allowRight } = options.current;
       const direction: SwipeDirection = offset < 0 ? "left" : "right";
       const revealPx = revealPxFor(offset);
       const abs = Math.abs(offset);
-      const hit = abs >= commitThreshold(width, revealPx, startedOpen);
-      const open = !hit && revealPx > 0 && abs >= SWIPE_REVEAL_MIN_PX;
+      // A pull towards a side with no buttons only gives; it never triggers.
+      const blocked = direction === "left" ? !allowLeft : !allowRight;
+      const hit = !blocked && abs >= commitThreshold(width, revealPx, startedOpen);
+      const v = velocityOf(samples, performance.now());
+      const out = direction === "left" ? -v : v; // speed away from the centre
+      let open = false;
+      if (!blocked && !hit && revealPx > 0) {
+        open = Math.abs(out) >= FLICK_PX_S ? out > 0 && abs >= FLICK_MIN_PX : abs + project(out) >= SWIPE_REVEAL_MIN_PX;
+      }
       const wasOpen = startedOpen;
+      const from = offset;
       reset();
-      if (hit) options.current.onCommit(direction);
-      // A swipe back past the rest position is clamped to 0 when the other side has
-      // no buttons; it still has to close the card it started on.
-      else if (revealPx > 0 || wasOpen) options.current.onReveal?.(open ? direction : null);
+      if (hit) {
+        options.current.onCommit(direction);
+        return;
+      }
+      // A swipe back past the rest position of an open card has to close it, whatever
+      // the other side is.
+      if ((!blocked && revealPx > 0) || wasOpen) options.current.onReveal?.(open ? direction : null);
+      settle(from, open ? (direction === "left" ? -revealPx : revealPx) : 0, v);
     };
 
     const reset = () => {
       offset = 0;
+      raw = 0;
+      samples = [];
       locked = false;
       startedOpen = false;
       peak = 0;
@@ -231,9 +308,7 @@ export function useSwipeGesture(
         }
         mode = "swiping";
         width = el.offsetWidth;
-        offset = restOffset();
-        locked = offset !== 0;
-        startedOpen = locked;
+        grab();
       } else if (!locked && Math.abs(dy) > Math.abs(dx)) {
         reset();
         mode = "idle";
@@ -259,10 +334,8 @@ export function useSwipeGesture(
         return;
       }
 
-      let next = offset + dx;
-      if (next < 0 && !options.current.allowLeft) next = 0;
-      if (next > 0 && !options.current.allowRight) next = 0;
-      offset = Math.max(-width, Math.min(width, next));
+      raw = Math.max(-width, Math.min(width, raw + dx));
+      offset = display(raw);
       if (Math.abs(offset) >= LOCK_PX) locked = true;
       show();
     };
@@ -272,6 +345,8 @@ export function useSwipeGesture(
     let touchId = -1;
     let startX = 0;
     let startY = 0;
+    /** Where the card was when the finger took over; the finger's travel adds to it. */
+    let touchBase = 0;
 
     const swallowClick = () => {
       const stop = (e: Event) => {
@@ -302,12 +377,11 @@ export function useSwipeGesture(
           return;
         }
         touchMode = "swiping";
-        startedOpen = restOffset() !== 0;
+        grab();
+        touchBase = raw;
       }
-      let next = restOffset() + dx;
-      if (next < 0 && !options.current.allowLeft) next = 0;
-      if (next > 0 && !options.current.allowRight) next = 0;
-      offset = Math.max(-width, Math.min(width, next));
+      raw = Math.max(-width, Math.min(width, touchBase + dx));
+      offset = display(raw);
       show();
     };
 
@@ -323,7 +397,11 @@ export function useSwipeGesture(
     // The browser took the gesture over (vertical scroll) or the system aborted it.
     const onPointerCancel = (e: PointerEvent) => {
       if (e.pointerId !== touchId) return;
-      if (touchMode === "swiping") reset();
+      if (touchMode === "swiping") {
+        const from = offset;
+        reset();
+        settle(from, restOffset(), 0);
+      }
       touchMode = "idle";
     };
 
@@ -339,11 +417,23 @@ export function useSwipeGesture(
       el.removeEventListener("pointerup", onPointerUp);
       el.removeEventListener("pointercancel", onPointerCancel);
       clearTimeout(timer);
+      stopSpring();
       setState(IDLE_STATE);
     };
-  }, [ref, enabled]);
+  }, [ref, enabled, settle, stopSpring]);
 
-  if (state.active) return state;
   const rest = revealed === "left" ? -revealLeftPx : revealed === "right" ? revealRightPx : 0;
-  return rest === 0 ? state : { offset: rest, armed: false, active: false };
+  // A close that comes from outside (tap elsewhere, Escape, another card opening) has
+  // no release to start the spring: run it here, from where the card was resting.
+  const activeNow = useRef(false);
+  activeNow.current = state.active;
+  const lastRest = useRef(rest);
+  useLayoutEffect(() => {
+    const from = lastRest.current;
+    lastRest.current = rest;
+    if (from !== rest && !activeNow.current && !spring.current) settle(from, rest, 0);
+  }, [rest, settle]);
+
+  if (state.active || state.settling) return state;
+  return rest === 0 ? state : { offset: rest, armed: false, active: false, settling: false };
 }

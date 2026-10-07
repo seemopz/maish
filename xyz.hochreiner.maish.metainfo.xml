@@ -12,7 +12,7 @@
   <url type="bugtracker">https://github.com/Seemops1337/maish/issues</url>
   <launchable type="desktop-id">xyz.hochreiner.maish.desktop</launchable>
   <releases>
-    <release version="0.8.0" date="2026-08-13" /> <!-- x-release-please-version -->
+    <release version="0.9.0" date="2026-08-13" /> <!-- x-release-please-version -->
   </releases>
   <developer id="xyz.hochreiner">
     <name>Seemops1337</name>

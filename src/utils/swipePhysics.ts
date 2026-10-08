@@ -1,10 +1,8 @@
 /**
  * Release physics for the swipe gesture: the fingers' speed decides open or close,
  * the card settles on a spring that starts at that speed, and a pull against a wall
- * gives like rubber. The feel is modelled on the SwipeRow micro-interaction of React
- * Bits as a reference only: nothing is copied (its licence, MIT + Commons Clause,
- * forbids redistributing a port). The formulas are the common ones: the rubber band
- * and deceleration rate of iOS scroll views, and a critically damped spring.
+ * gives like rubber. The formulas are the common ones: the rubber band and
+ * deceleration rate of iOS scroll views, and a critically damped spring.
  * Pure functions; `useSwipeGesture` owns the state.
  */
 

@@ -186,7 +186,9 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
       {moving && side && first && (
         <div
           data-testid="swipe-field"
-          style={{ width: Math.abs(offset) }}
+          // Fades in over the first px: the tail of the spring leaves a field a fraction of a px
+          // wide, which would show as a coloured hairline at the card's edge before it vanishes.
+          style={{ width: Math.abs(offset), opacity: Math.min(1, Math.abs(offset) / 16) }}
           className={`absolute inset-y-0 overflow-hidden ${SWIPE_VISUALS[first].bg} ${
             side === "right" ? "left-0" : "right-0"
           }`}

@@ -165,6 +165,14 @@ describe("ThreadCard", () => {
       expect(box("Delete").transition).toBe(""); // follows the card, no lag
     });
 
+    it("fades the field in over the first px, so a hairline never shows at the card's edge", () => {
+      const { container } = renderCard();
+      swipe(container, 4);
+      expect(screen.getByTestId("swipe-field").style.opacity).toBe("0.25");
+      swipe(container, 40);
+      expect(screen.getByTestId("swipe-field").style.opacity).toBe("1");
+    });
+
     it("fills the field with the first button at the full swipe and sends the second out, eased", () => {
       const { container } = renderCard();
       swipe(container, 230); // past the full swipe (200 px of 400)

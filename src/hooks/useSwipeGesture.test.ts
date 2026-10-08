@@ -495,6 +495,26 @@ describe("useSwipeGesture", () => {
         expect(onReveal).toHaveBeenCalledWith(null);
       });
 
+      it("is not locked to the wrong side by a twitch at the start of a swipe", () => {
+        const { el, hook } = two();
+        wheel(el, -2); // 2 px to the right: noise
+        wheel(el, 40);
+        wheel(el, 30);
+        expect(hook.result.current.offset).toBe(-68); // 2 px back from the twitch, then 70 px left
+      });
+
+      it("is not locked by the last px of a spring tail either", () => {
+        const { el, hook } = two();
+        for (const dx of [20, 25, 25]) wheel(el, dx);
+        quiet(); // opens, the spring starts
+        act(() => {
+          vi.advanceTimersByTime(250); // nearly at rest: a px or two from it
+        });
+        wheel(el, -30); // a swipe to the other side takes over there
+        wheel(el, -30);
+        expect(hook.result.current.active).toBe(true);
+      });
+
       it("opens the other side only with a new swipe", () => {
         const { el, hook } = two();
         wheel(el, 60);

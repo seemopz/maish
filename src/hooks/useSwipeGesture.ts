@@ -211,10 +211,10 @@ export function useSwipeGesture(
     /** `r` limited to the card's width and to the side the gesture is on: pulling back stops at rest. */
     const hold = (r: number) => {
       const clamped = Math.max(-width, Math.min(width, r));
-      if (lockSide === 0) {
-        lockSide = Math.sign(clamped);
-        return clamped;
-      }
+      // The side is only fixed once the card has really left rest: a first event that
+      // twitches the wrong way must not lock the whole gesture to that side.
+      if (lockSide === 0 && Math.abs(clamped) >= LOCK_PX) lockSide = Math.sign(clamped);
+      if (lockSide === 0) return clamped;
       return lockSide < 0 ? Math.min(clamped, 0) : Math.max(clamped, 0);
     };
     /** Takes over from a spring still running, at the point it has reached. */
@@ -222,7 +222,7 @@ export function useSwipeGesture(
       const from = spring.current?.offset ?? restOffset();
       stopSpring();
       raw = offset = from;
-      lockSide = Math.sign(from);
+      lockSide = Math.abs(from) >= LOCK_PX ? Math.sign(from) : 0;
       samples = [];
       startedOpen = restOffset() !== 0;
       locked = offset !== 0;

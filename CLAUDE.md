@@ -21,6 +21,16 @@ no changes sent upstream.
 - `feat!:` stays a minor bump below 1.0.0 (`bump-minor-pre-major`); 1.0.0 is cut by hand, never by a commit message.
 - After adding a feature, run `/document-feature` to add its help card.
 
+## Engineering rules
+
+- **Rust backend**: no `unwrap()`/`expect()` in production paths – return a `Result` and let the command surface the error. Do not block the async runtime (no sync I/O or long locks across `.await`). Run `cargo clippy --all-targets -- -D warnings` (CI gate) and `cargo test` for every touched crate.
+- **IMAP/SMTP**: follow the RFCs first, then handle server quirks (Gmail, Outlook, Dovecot, Stalwart) in a narrow, commented workaround. Tests never delete or move mail on a real account – use fixtures or a local test server.
+- **Tauri v2 boundary**: keep the command surface narrow, scope capabilities in `src-tauri/capabilities/default.json` to what the UI needs, and treat every argument from the webview as untrusted input – validate it in Rust.
+- **Credentials**: passwords, OAuth tokens and AI API keys are stored in SQLite only AES-encrypted with the key from the OS keychain (`credential_key.rs`, `getSecureSetting()`), never in plaintext and never in logs or error text. Changes to this path need a review by Wächter before merge.
+- **AI features**: mail content sent to an LLM is personal data. Gate every call on `isAiAvailable()`, send only what the feature needs, and make it visible to the user which feature sends what.
+- **Fork divergence**: keep Maish-specific behaviour in the areas listed under *Fork-specific behaviour* where practical and add a new entry there when a change diverges from Velo. Upstream fixes worth taking are pulled in by hand.
+- **React UI**: reuse the existing component and store patterns. Keyboard navigation must keep working, and list code must stay fast on large mailboxes (no per-row work that scales with mailbox size).
+
 ## Commands
 
 - Dev: `npm run tauri dev` · Vite only: `npm run dev`

@@ -23,7 +23,23 @@ export async function getActiveProviderName(): Promise<AiProvider> {
   return "claude";
 }
 
+/**
+ * The client every AI feature must go through. Refuses while the user has
+ * turned AI off (`ai_enabled`), so no mail content reaches a provider even
+ * when a key is still stored.
+ */
 export async function getActiveProvider(): Promise<AiProviderClient> {
+  if ((await getSetting("ai_enabled")) === "false") {
+    throw new AiError("NOT_CONFIGURED", "AI features are turned off in Settings");
+  }
+  return getProviderForConnectionTest();
+}
+
+/**
+ * Ignores `ai_enabled` so Settings can check a key before AI is turned on.
+ * Only for the "Test Connection" button, which sends no mail content.
+ */
+export async function getProviderForConnectionTest(): Promise<AiProviderClient> {
   const providerName = await getActiveProviderName();
 
   if (providerName === "ollama") {

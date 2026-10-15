@@ -41,6 +41,7 @@ import { createOllamaProvider } from "./providers/ollamaProvider";
 import { createCopilotProvider } from "./providers/copilotProvider";
 import {
   getActiveProvider,
+  getProviderForConnectionTest,
   getActiveProviderName,
   isAiAvailable,
   clearProviderClients,
@@ -221,6 +222,54 @@ describe("providerManager", () => {
       await getActiveProvider();
       await getActiveProvider();
       expect(createOllamaProvider).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("ai_enabled master toggle", () => {
+    function aiOffWithKey(key: string): Promise<string | null> {
+      if (key === "ai_enabled") return Promise.resolve("false");
+      if (key === "ai_provider") return Promise.resolve("claude");
+      if (key === "claude_api_key") return Promise.resolve("sk-ant-test");
+      return Promise.resolve(null);
+    }
+
+    it("getActiveProvider throws NOT_CONFIGURED when AI is turned off, even with a key", async () => {
+      mockGetSetting.mockImplementation(aiOffWithKey);
+
+      await expect(getActiveProvider()).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
+      expect(createClaudeProvider).not.toHaveBeenCalled();
+    });
+
+    it("getActiveProvider throws for ollama when AI is turned off", async () => {
+      mockGetSetting.mockImplementation(async (key: string) => {
+        if (key === "ai_enabled") return "false";
+        if (key === "ai_provider") return "ollama";
+        if (key === "ollama_server_url") return "http://localhost:11434";
+        return null;
+      });
+
+      await expect(getActiveProvider()).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
+      expect(createOllamaProvider).not.toHaveBeenCalled();
+    });
+
+    it("does not hand out a provider cached before AI was turned off", async () => {
+      mockGetSetting.mockImplementation(async (key: string) => {
+        if (key === "ai_provider") return "claude";
+        if (key === "claude_api_key") return "sk-ant-test";
+        return null;
+      });
+      await getActiveProvider();
+
+      mockGetSetting.mockImplementation(aiOffWithKey);
+
+      await expect(getActiveProvider()).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
+    });
+
+    it("getProviderForConnectionTest ignores the toggle so the key can be checked", async () => {
+      mockGetSetting.mockImplementation(aiOffWithKey);
+
+      await getProviderForConnectionTest();
+      expect(createClaudeProvider).toHaveBeenCalledWith("sk-ant-test", "claude-haiku-4-5-20251001");
     });
   });
 

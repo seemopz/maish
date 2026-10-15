@@ -1,6 +1,7 @@
 import { getEnabledSmartLabelRules } from "@/services/db/smartLabelRules";
 import { messageMatchesFilter } from "@/services/filters/filterEngine";
 import { classifyThreadsBySmartLabels } from "@/services/ai/aiService";
+import { isAiAvailable } from "@/services/ai/providerManager";
 import type { FilterCriteria } from "@/services/db/filters";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
 
@@ -82,7 +83,9 @@ export async function matchSmartLabels(
     }
   }
 
-  if (threadsForAi.length > 0 && allRulesForAi.length > 0) {
+  // Runs on every sync, so check availability here instead of logging a
+  // refused call each time; criteria matches above still apply with AI off
+  if (threadsForAi.length > 0 && allRulesForAi.length > 0 && (await isAiAvailable())) {
     try {
       const aiResults = await classifyThreadsBySmartLabels(threadsForAi, allRulesForAi);
 

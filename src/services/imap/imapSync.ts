@@ -44,7 +44,7 @@ import {
   type ThreadableMessage,
   type ThreadGroup,
 } from "../threading/threadBuilder";
-import { getPendingOpsForResource } from "../db/pendingOperations";
+import { getPendingOpsForResource, getResourceIdsWithOpenOps } from "../db/pendingOperations";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -558,7 +558,13 @@ export async function imapInitialSync(
   // Phase 1: List and sync folders
   onProgress?.({ phase: "folders", current: 0, total: 1 });
   const allFolders = await imapListFolders(config);
-  const syncableFolders = getSyncableFolders(allFolders);
+  // The inbox goes first: the list shows mail as soon as it is stored, and
+  // the inbox is what the user is looking at while the rest comes in.
+  const syncableFolders = getSyncableFolders(allFolders).sort(
+    (a, b) =>
+      Number(mapFolderToLabel(b).labelId === "INBOX") -
+      Number(mapFolderToLabel(a).labelId === "INBOX"),
+  );
   await syncFoldersToLabels(accountId, syncableFolders);
   console.log(`[imapSync] Initial sync for account ${accountId}: ${syncableFolders.length} syncable folders`);
   onProgress?.({ phase: "folders", current: 1, total: 1 });
@@ -639,7 +645,8 @@ export async function imapInitialSync(
       // Phase 2a: Lightweight search — get UIDs only (no message bodies over IPC)
       const sinceDate = computeSinceDate(daysBack);
       const searchResult = await imapSearchFolder(config, folder.raw_path, sinceDate);
-      const uidsToFetch = searchResult.uids;
+      // Newest first, so the top of the list fills in before older mail.
+      const uidsToFetch = [...searchResult.uids].sort((a, b) => b - a);
 
       // Reset circuit breaker on success
       consecutiveFailures = 0;
@@ -730,6 +737,9 @@ export async function imapInitialSync(
                 isImportant: false,
                 hasAttachments: parsed.hasAttachments,
               });
+              // Labelled right away, so the message shows in its folder while
+              // the sync is still running. Phase 4 replaces the placeholder.
+              await setThreadLabels(accountId, parsed.id, parsed.labelIds);
               await upsertMessage({
                 id: parsed.id,
                 accountId,
@@ -881,16 +891,28 @@ export async function imapInitialSync(
   // ---------------------------------------------------------------------------
   onProgress?.({ phase: "storing_threads", current: 0, total: threadGroups.length });
 
+  const placeholdersRemoved = new Set<string>();
+  // Messages whose thread was left alone because of a pending local
+  // operation. They still sit in their placeholder thread, which therefore
+  // has to survive: messages.thread_id cascades on delete.
+  const skippedMessageIds = new Set<string>();
+
   for (let batchStart = 0; batchStart < threadGroups.length; batchStart += THREAD_BATCH_SIZE) {
     const batch = threadGroups.slice(batchStart, batchStart + THREAD_BATCH_SIZE);
 
     // Pre-check pending ops OUTSIDE the transaction to avoid nested DB issues
+    // The list shows the placeholders while the sync runs, so the user may
+    // already have archived or moved one: its queued operation names the
+    // placeholder id, not the final thread id.
+    // Read once per batch, as an action can arrive at any time.
+    const withOpenOps = await getResourceIdsWithOpenOps(accountId);
     const skippedThreadIds = new Set<string>();
     for (const group of batch) {
-      const pendingOps = await getPendingOpsForResource(accountId, group.threadId);
-      if (pendingOps.length > 0) {
-        console.log(`[imapSync] Skipping thread ${group.threadId}: has ${pendingOps.length} pending local ops`);
+      const busy = [group.threadId, ...group.messageIds].find((id) => withOpenOps.has(id));
+      if (busy !== undefined) {
+        console.log(`[imapSync] Skipping thread ${group.threadId}: ${busy} has pending local ops`);
         skippedThreadIds.add(group.threadId);
+        for (const id of group.messageIds) skippedMessageIds.add(id);
       }
     }
 
@@ -946,6 +968,13 @@ export async function imapInitialSync(
         // Batch-update thread IDs for all messages in this thread
         const messageIds = messages.map((m) => m.id);
         await updateMessageThreadIds(accountId, messageIds, group.threadId);
+
+        // Drop the placeholders in the same transaction. Left for Phase 5, a
+        // list refreshed in between shows every message twice.
+        for (const id of messageIds) {
+          if (id !== group.threadId) await deleteThread(accountId, id);
+          placeholdersRemoved.add(id);
+        }
       }
     });
 
@@ -962,11 +991,13 @@ export async function imapInitialSync(
   // Phase 2 created a placeholder thread per message (threadId = messageId).
   // Phase 4 merged messages into real threads and updated message thread IDs.
   // Placeholder threads that are no longer referenced by any final thread group
-  // should be deleted to avoid ghost threads in the UI.
+  // should be deleted to avoid ghost threads in the UI. Phase 4 already
+  // removed those of the threads it stored; skipped threads keep theirs.
   const finalThreadIds = new Set(threadGroups.map((g) => g.threadId));
   const allMessageIds = new Set(allMeta.keys());
   let orphanCount = 0;
   for (const msgId of allMessageIds) {
+    if (placeholdersRemoved.has(msgId) || skippedMessageIds.has(msgId)) continue;
     // If this message's placeholder ID isn't a final thread ID, it's orphaned
     if (!finalThreadIds.has(msgId)) {
       await deleteThread(accountId, msgId);

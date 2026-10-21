@@ -187,6 +187,20 @@ export async function getPendingOpsForResource(
   );
 }
 
+/**
+ * Every resource of an account with an operation still waiting or being sent,
+ * in one query, for callers that would otherwise ask once per thread.
+ */
+export async function getResourceIdsWithOpenOps(accountId: string): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.select<{ resource_id: string }[]>(
+    `SELECT DISTINCT resource_id FROM pending_operations
+     WHERE account_id = $1 AND status IN ('pending', 'executing')`,
+    [accountId],
+  );
+  return new Set(rows.map((r) => r.resource_id));
+}
+
 export async function compactQueue(accountId?: string): Promise<number> {
   const db = await getDb();
 

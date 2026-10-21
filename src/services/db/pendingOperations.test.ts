@@ -22,6 +22,7 @@ import {
   getPendingOpsCount,
   getFailedOpsCount,
   getPendingOpsForResource,
+  getResourceIdsWithOpenOps,
   compactQueue,
   clearFailedOperations,
   retryFailedOperations,
@@ -211,6 +212,18 @@ describe("pendingOperations DB service", () => {
       expect(mockDb.select).toHaveBeenCalledWith(
         expect.stringContaining("resource_id = $2"),
         ["acct-1", "thread-1"],
+      );
+    });
+  });
+
+  describe("getResourceIdsWithOpenOps", () => {
+    it("includes operations that are being sent, not only waiting ones", async () => {
+      mockDb.select.mockResolvedValueOnce([{ resource_id: "t1" }, { resource_id: "t2" }]);
+      const ids = await getResourceIdsWithOpenOps("acct-1");
+      expect(ids).toEqual(new Set(["t1", "t2"]));
+      expect(mockDb.select).toHaveBeenCalledWith(
+        expect.stringContaining("status IN ('pending', 'executing')"),
+        ["acct-1"],
       );
     });
   });

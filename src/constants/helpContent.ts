@@ -131,10 +131,11 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: "Initial sync",
         summary: "First sync downloads your email history.",
         description:
-          "When you add a new account, the app performs an initial sync that downloads your last year of email (configurable). This builds a local database for fast offline search and browsing. Depending on your inbox size, this can take a few minutes. You can use the app normally while the sync runs in the background — read, compose, and send without waiting. After the initial sync, the app switches to delta sync (every 60 seconds) to fetch only new changes. Gmail uses the History API for delta sync; IMAP uses UID-based tracking.",
+          "When you add a new account, the app performs an initial sync that downloads your last year of email (configurable). This builds a local database for fast offline search and browsing. Depending on your inbox size, this can take a few minutes. Mail shows up in the list while the sync is still running, inbox and newest messages first, and the list refreshes every few seconds; IMAP accounts group conversations once the download is done. You can use the app normally while the sync runs in the background — read, compose, and send without waiting. After the initial sync, the app switches to delta sync (every 60 seconds) to fetch only new changes. Gmail uses the History API for delta sync; IMAP uses UID-based tracking.",
         tips: [
           { text: "Change the sync period (30 days to 1 year) in Settings > Accounts." },
           { text: "The app is fully usable during the initial sync." },
+          { text: "Messages appear as they arrive; on IMAP accounts, replies join their conversation at the end of the sync." },
           { text: "Delta sync runs every 60 seconds after the first sync completes." },
           { text: "A small spinner in the bottom-left corner shows a running sync; hover it for progress. If a sync fails, it turns into a red warning icon with the error as tooltip." },
           { text: "Click the reload button next to the folder name to sync right away.", shortcut: "F5" },

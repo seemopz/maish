@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { nextSyncDisplay, syncProgressMessage } from "./syncStatus";
+import { nextSyncDisplay, syncProgressMessage, createSyncRefreshThrottle, SYNC_REFRESH_INTERVAL_MS } from "./syncStatus";
 
 describe("nextSyncDisplay", () => {
   it("goes idle when a sync finishes cleanly", () => {
@@ -71,5 +71,31 @@ describe("syncProgressMessage", () => {
     expect(syncProgressMessage({ phase: "labels", current: 0, total: 1 })).toBe("Syncing labels...");
     expect(syncProgressMessage({ phase: "threads", current: 2, total: 9 })).toBe("Building threads... (2/9)");
     expect(syncProgressMessage({ phase: "messages", current: 3, total: 7 })).toBe("Syncing: 3/7 messages");
+  });
+});
+
+describe("createSyncRefreshThrottle", () => {
+  const messages = { phase: "messages" as const, current: 200, total: 5000 };
+
+  it("refreshes on the first progress report of a sync", () => {
+    const due = createSyncRefreshThrottle();
+    expect(due(messages, 1_000)).toBe(true);
+  });
+
+  it("refreshes at most once per interval while the sync runs", () => {
+    const due = createSyncRefreshThrottle();
+    expect(due(messages, 1_000)).toBe(true);
+    expect(due(messages, 1_000 + SYNC_REFRESH_INTERVAL_MS - 1)).toBe(false);
+    expect(due(messages, 1_000 + SYNC_REFRESH_INTERVAL_MS)).toBe(true);
+  });
+
+  it("ignores a status without progress, as a delta sync sends", () => {
+    const due = createSyncRefreshThrottle();
+    expect(due(undefined, 1_000)).toBe(false);
+  });
+
+  it("leaves the end of the sync to the done event", () => {
+    const due = createSyncRefreshThrottle();
+    expect(due({ phase: "done", current: 1, total: 1 }, 1_000)).toBe(false);
   });
 });

@@ -259,14 +259,22 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
 
   const clearSearch = useThreadStore((s) => s.clearSearch);
 
-  const loadThreads = useCallback(async () => {
+  /**
+   * `quiet` is the refresh while a first sync stores mail: it keeps the search
+   * and the spinner, and leaves a list scrolled past its first page alone,
+   * which a reload would cut back to one page.
+   */
+  const loadThreads = useCallback(async (quiet = false) => {
     if (!activeAccountId) {
       setThreads([]);
       return;
     }
+    if (quiet && useThreadStore.getState().threads.length > PAGE_SIZE) return;
 
-    clearSearch();
-    setLoading(true);
+    if (!quiet) {
+      clearSearch();
+      setLoading(true);
+    }
     setHasMore(true);
     try {
       // Smart folder query path
@@ -303,7 +311,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     } catch (err) {
       console.error("Failed to load threads:", err);
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [activeAccountId, activeLabel, activeCategory, isSmartFolder, activeSmartFolder, setThreads, setLoading, mapDbThreads, clearSearch]);
 
@@ -466,6 +474,13 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       if (timer) clearTimeout(timer);
     };
   }, [loadThreads, activeAccountId, activeLabel]);
+
+  // Show mail a first sync has already stored (App throttles the event)
+  useEffect(() => {
+    const handler = () => void loadThreads(true);
+    window.addEventListener("maish-sync-progress", handler);
+    return () => window.removeEventListener("maish-sync-progress", handler);
+  }, [loadThreads]);
 
   // Infinite scroll: load more when near bottom
   useEffect(() => {

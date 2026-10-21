@@ -74,7 +74,7 @@ import { StartupErrorBanner } from "./components/ui/StartupErrorBanner";
 import { UpdateToast } from "./components/ui/UpdateToast";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { formatSyncError } from "./utils/networkErrors";
-import { nextSyncDisplay, syncProgressMessage } from "./utils/syncStatus";
+import { nextSyncDisplay, syncProgressMessage, createSyncRefreshThrottle } from "./utils/syncStatus";
 import { router } from "./router";
 import { getSelectedThreadId } from "./router/navigate";
 import { parseSwipeActions } from "./utils/swipeActions";
@@ -408,12 +408,17 @@ export default function App() {
   const backfillDoneRef = useRef(false);
   const syncErrorsRef = useRef(new Map<string, string>());
   const syncingRef = useRef(new Set<string>());
+  const syncRefreshDueRef = useRef(createSyncRefreshThrottle());
   useEffect(() => {
     const unsub = onSyncStatus((accountId, status, progress, error) => {
       const errors = syncErrorsRef.current;
       let message: string | null = null;
       if (status === "syncing") {
         message = syncProgressMessage(progress);
+        // A first sync stores mail as it goes; show it before the sync is done.
+        if (syncRefreshDueRef.current(progress, Date.now())) {
+          window.dispatchEvent(new Event("maish-sync-progress"));
+        }
       } else if (status === "error") {
         message = error ? `Sync failed: ${formatSyncError(error)}` : "Sync failed";
       }

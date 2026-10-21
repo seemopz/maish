@@ -50,3 +50,21 @@ export function syncProgressMessage(progress?: SyncProgress): string {
   if (progress?.phase === "threads") return `Building threads... (${progress.current}/${progress.total})`;
   return "Syncing...";
 }
+
+/** How often the mail list re-reads the database while a first sync stores mail. */
+export const SYNC_REFRESH_INTERVAL_MS = 3_000;
+
+/**
+ * Decide, per sync status, whether the mail list should reload now. Only a
+ * first sync reports progress, and it stores mail as it goes, so the list can
+ * show it before the sync is done. The "done" event reloads anyway.
+ */
+export function createSyncRefreshThrottle(): (progress: SyncProgress | undefined, now: number) => boolean {
+  let last = Number.NEGATIVE_INFINITY;
+  return (progress, now) => {
+    if (!progress || progress.phase === "done") return false;
+    if (now - last < SYNC_REFRESH_INTERVAL_MS) return false;
+    last = now;
+    return true;
+  };
+}

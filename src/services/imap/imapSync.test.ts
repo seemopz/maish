@@ -67,6 +67,7 @@ vi.mock("../db/folderSyncState", () => ({
 }));
 vi.mock("../db/pendingOperations", () => ({
   getPendingOpsForResource: vi.fn(() => []),
+  getResourceIdsWithOpenOps: vi.fn(async () => new Set<string>()),
 }));
 
 import { imapMessageToParsedMessage, imapInitialSync, imapDeltaSync, formatImapDate, computeSinceDate, isConnectionError, resetUndeliveredUidAttempts } from "./imapSync";
@@ -85,7 +86,7 @@ import { upsertMessage, updateMessageThreadIds, getMessagesForThread, deleteMess
 import { upsertThread, deleteThread, setThreadLabels, getThreadLabelIds, deleteEmptyThreads } from "../db/threads";
 import { upsertAttachment } from "../db/attachments";
 import { buildThreads } from "../threading/threadBuilder";
-import { getPendingOpsForResource } from "../db/pendingOperations";
+import { getPendingOpsForResource, getResourceIdsWithOpenOps } from "../db/pendingOperations";
 import { getAllFolderSyncStates, upsertFolderSyncState } from "../db/folderSyncState";
 
 describe("imapMessageToParsedMessage", () => {
@@ -920,6 +921,132 @@ describe("imapDeltaSync — thread state of messages it did not fetch", () => {
  * UIDs above last_uid, so the messages in the abandoned chunk were never
  * fetched again: a silent hole in the mailbox that no later sync closes.
  */
+/**
+ * The list reads the database, so a message shows as soon as the sync has
+ * stored it under a thread that carries its folder label. The threading pass
+ * at the end replaces those per-message placeholders with the real threads.
+ */
+describe("imapInitialSync — mail shows before the sync is done", () => {
+  const mockGetAccount = vi.mocked(getAccount);
+  const mockImapListFolders = vi.mocked(imapListFolders);
+  const mockImapSearchFolder = vi.mocked(imapSearchFolder);
+  const mockImapFetchMessages = vi.mocked(imapFetchMessages);
+  const now = () => Math.floor(Date.now() / 1000);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockGetAccount.mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
+  });
+
+  afterEach(() => {
+    mockImapSearchFolder.mockReset();
+    mockImapFetchMessages.mockReset();
+    mockImapListFolders.mockReset();
+    vi.mocked(getResourceIdsWithOpenOps).mockReset();
+    vi.mocked(getResourceIdsWithOpenOps).mockResolvedValue(new Set());
+    vi.useRealTimers();
+  });
+
+  /** One INBOX holding a two-message conversation. */
+  function setupConversation() {
+    const root = createMockImapMessage({ uid: 1, message_id: "<m1@test>", subject: "Hi", date: now() });
+    const reply = createMockImapMessage({
+      uid: 2,
+      message_id: "<m2@test>",
+      in_reply_to: "<m1@test>",
+      references: "<m1@test>",
+      subject: "Re: Hi",
+      date: now() + 60,
+    });
+    mockImapListFolders.mockResolvedValue([
+      createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 2 }),
+    ]);
+    mockImapSearchFolder.mockResolvedValue({
+      uids: [1, 2],
+      folder_status: createMockImapFolderStatus({ exists: 2 }),
+    });
+    mockImapFetchMessages.mockResolvedValue(createMockImapFetchResult([root, reply]));
+  }
+
+  it("labels each placeholder thread with its folder as the message is stored", async () => {
+    setupConversation();
+
+    const labelledBeforeThreading: string[][] = [];
+    await imapInitialSync("acc-1", 365, (progress) => {
+      if (progress.phase === "threading") {
+        for (const call of vi.mocked(setThreadLabels).mock.calls) {
+          labelledBeforeThreading.push([call[1], ...call[2]]);
+        }
+      }
+    });
+
+    expect(labelledBeforeThreading).toContainEqual(["imap-acc-1-INBOX-1", "INBOX", "UNREAD"]);
+    expect(labelledBeforeThreading).toContainEqual(["imap-acc-1-INBOX-2", "INBOX", "UNREAD"]);
+  });
+
+  it("syncs the inbox before the other folders", async () => {
+    mockImapListFolders.mockResolvedValue([
+      createMockImapFolder({ path: "Archive", raw_path: "Archive", exists: 1 }),
+      createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 1 }),
+    ]);
+    mockImapSearchFolder.mockResolvedValue({
+      uids: [],
+      folder_status: createMockImapFolderStatus({ exists: 1 }),
+    });
+
+    const syncPromise = imapInitialSync("acc-1");
+    await vi.runAllTimersAsync();
+    await syncPromise;
+
+    expect(mockImapSearchFolder.mock.calls.map((c) => c[1])).toEqual(["INBOX", "Archive"]);
+  });
+
+  it("fetches the newest messages of a folder first", async () => {
+    mockImapListFolders.mockResolvedValue([
+      createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 3 }),
+    ]);
+    mockImapSearchFolder.mockResolvedValue({
+      uids: [1, 2, 3],
+      folder_status: createMockImapFolderStatus({ exists: 3 }),
+    });
+    mockImapFetchMessages.mockResolvedValue(createMockImapFetchResult([]));
+
+    await imapInitialSync("acc-1");
+
+    expect(mockImapFetchMessages.mock.calls[0]![2]).toEqual([3, 2, 1]);
+  });
+
+  it("removes a message's placeholder in the same batch that moves it to its thread", async () => {
+    setupConversation();
+
+    let deletedWhenBatchDone: string[] = [];
+    await imapInitialSync("acc-1", 365, (progress) => {
+      if (progress.phase === "storing_threads" && progress.current > 0) {
+        deletedWhenBatchDone = vi.mocked(deleteThread).mock.calls.map((c) => c[1]);
+      }
+    });
+
+    // Otherwise a list refreshed between the batches and the cleanup shows
+    // every message twice: once in its placeholder, once in its thread.
+    expect(deletedWhenBatchDone).toEqual(
+      expect.arrayContaining(["imap-acc-1-INBOX-1", "imap-acc-1-INBOX-2"]),
+    );
+  });
+
+  it("leaves a conversation alone when the user acted on one of its placeholders", async () => {
+    setupConversation();
+    vi.mocked(getResourceIdsWithOpenOps).mockResolvedValue(new Set(["imap-acc-1-INBOX-2"]));
+
+    await imapInitialSync("acc-1");
+
+    // The queued operation names the placeholder; deleting it would take the
+    // message with it (messages.thread_id cascades) and strand the operation.
+    expect(vi.mocked(updateMessageThreadIds)).not.toHaveBeenCalled();
+    expect(vi.mocked(deleteThread).mock.calls.map((c) => c[1])).not.toContain("imap-acc-1-INBOX-2");
+  });
+});
+
 describe("imapInitialSync — last_uid after a chunk is given up on", () => {
   const mockGetAccount = vi.mocked(getAccount);
   const mockImapListFolders = vi.mocked(imapListFolders);
@@ -952,7 +1079,7 @@ describe("imapInitialSync — last_uid after a chunk is given up on", () => {
   function serveExcept(failFrom: number) {
     mockImapFetchMessages.mockImplementation(async (_c, _f, uids) => {
       const requested = uids as number[];
-      if (requested[0] === failFrom) {
+      if (requested.includes(failFrom)) {
         // Not a connection error, so it is abandoned without a retry.
         throw new Error("Server refused the fetch");
       }

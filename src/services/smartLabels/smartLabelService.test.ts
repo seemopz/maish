@@ -12,9 +12,14 @@ vi.mock("@/services/ai/aiService", () => ({
   classifyThreadsBySmartLabels: vi.fn(),
 }));
 
+vi.mock("@/services/ai/providerManager", () => ({
+  isAiAvailable: vi.fn(),
+}));
+
 import { getEnabledSmartLabelRules } from "@/services/db/smartLabelRules";
 import { messageMatchesFilter } from "@/services/filters/filterEngine";
 import { classifyThreadsBySmartLabels } from "@/services/ai/aiService";
+import { isAiAvailable } from "@/services/ai/providerManager";
 import { matchSmartLabels } from "./smartLabelService";
 import type { ParsedMessage } from "@/services/gmail/messageParser";
 
@@ -50,6 +55,7 @@ function makeMessage(overrides: Partial<ParsedMessage> = {}): ParsedMessage {
 describe("matchSmartLabels", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(isAiAvailable).mockResolvedValue(true);
   });
 
   it("returns empty when no rules exist", async () => {
@@ -104,6 +110,38 @@ describe("matchSmartLabels", () => {
 
     expect(result).toEqual([{ threadId: "t1", labelIds: ["label-jobs"] }]);
     expect(classifyThreadsBySmartLabels).toHaveBeenCalled();
+  });
+
+  it("does not send threads to AI when AI is turned off, criteria still match", async () => {
+    vi.mocked(isAiAvailable).mockResolvedValue(false);
+    vi.mocked(getEnabledSmartLabelRules).mockResolvedValue([
+      {
+        id: "r1",
+        account_id: "acc-1",
+        label_id: "label-jobs",
+        ai_description: "Job applications",
+        criteria_json: JSON.stringify({ from: "recruiter" }),
+        is_enabled: 1,
+        sort_order: 0,
+        created_at: 100,
+      },
+      {
+        id: "r2",
+        account_id: "acc-1",
+        label_id: "label-invoices",
+        ai_description: "Invoices",
+        criteria_json: null,
+        is_enabled: 1,
+        sort_order: 1,
+        created_at: 100,
+      },
+    ]);
+    vi.mocked(messageMatchesFilter).mockReturnValue(true);
+
+    const result = await matchSmartLabels("acc-1", [makeMessage()]);
+
+    expect(classifyThreadsBySmartLabels).not.toHaveBeenCalled();
+    expect(result).toEqual([{ threadId: "t1", labelIds: ["label-jobs"] }]);
   });
 
   it("merges criteria and AI matches without duplicates", async () => {

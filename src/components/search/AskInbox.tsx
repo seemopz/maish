@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Sparkles, X, Send, ExternalLink } from "lucide-react";
 import { askMyInbox, type AskInboxResult } from "@/services/ai/askInbox";
+import { AiError } from "@/services/ai/errors";
 import { useAccountStore } from "@/stores/accountStore";
 import { navigateToLabel } from "@/router/navigate";
 
@@ -27,7 +28,9 @@ export function AskInbox({ isOpen, onClose }: AskInboxProps) {
     } catch (err) {
       console.error("Ask inbox failed:", err);
       setResult({
-        answer: "Sorry, something went wrong. Please check your AI configuration and try again.",
+        answer: err instanceof AiError && err.code === "NOT_CONFIGURED"
+          ? err.message
+          : "Sorry, something went wrong. Please check your AI configuration and try again.",
         sourceMessages: [],
       });
     } finally {

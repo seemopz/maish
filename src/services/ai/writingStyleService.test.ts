@@ -182,6 +182,16 @@ describe("writingStyleService", () => {
       expect(result).toBe(false);
     });
 
+    it("returns false when the provider is refused (AI turned off)", async () => {
+      const { getActiveProvider } = await import("./providerManager");
+      const { AiError } = await import("./errors");
+      vi.mocked(getActiveProvider).mockRejectedValueOnce(
+        new AiError("NOT_CONFIGURED", "AI features are turned off in Settings"),
+      );
+      const result = await isAutoDraftEnabled();
+      expect(result).toBe(false);
+    });
+
     it("returns true when AI is configured and enabled", async () => {
       const result = await isAutoDraftEnabled();
       expect(result).toBe(true);

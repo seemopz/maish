@@ -1,4 +1,4 @@
-import { getActiveProvider } from "./providerManager";
+import { getActiveProvider, getProviderForConnectionTest } from "./providerManager";
 import { getAiCache, setAiCache } from "@/services/db/aiCache";
 import { AiError } from "./errors";
 import type { DbMessage } from "@/services/db/messages";
@@ -237,7 +237,7 @@ export async function extractTaskFromThread(
 
 export async function testConnection(): Promise<boolean> {
   try {
-    const provider = await getActiveProvider();
+    const provider = await getProviderForConnectionTest();
     return await provider.testConnection();
   } catch {
     return false;

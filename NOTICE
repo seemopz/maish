@@ -526,6 +526,13 @@ Modifications made in this fork, as required by section 4(b) of the License:
 - src/components/email/ThreadCard.tsx — after a release the card and the
   buttons under it ease back to rest (300 ms, no overshoot) instead of
   disappearing at once.
+- src/services/ai/providerManager.ts, src/services/ai/aiService.ts,
+  src/services/smartLabels/smartLabelService.ts,
+  src/components/search/AskInbox.tsx — turning off "Enable AI features" now
+  stops every AI call, not only the ones that checked it: auto-draft replies,
+  smart-label classification during sync, Ask My Inbox, task extraction and
+  writing-style analysis no longer send mail content while a key is stored.
+  "Test Connection" in Settings still works with AI turned off.
 - src/services/imap/imapSync.ts, src/services/db/pendingOperations.ts,
   src/App.tsx, src/components/layout/EmailList.tsx, src/utils/syncStatus.ts —
   mail shows while a first (or full) sync is still running: the IMAP initial

@@ -81,6 +81,24 @@ export function onSyncStatus(cb: SyncStatusCallback): () => void {
   };
 }
 
+const syncRequestCallbacks = new Set<() => void>();
+
+/**
+ * Called whenever a sync is asked for: by the user, for a new account or when
+ * the network comes back. The background timer's runs are not reported, so the
+ * UI can tell a fresh attempt from the minute-by-minute retry of a failure.
+ */
+export function onSyncRequested(cb: () => void): () => void {
+  syncRequestCallbacks.add(cb);
+  return () => {
+    syncRequestCallbacks.delete(cb);
+  };
+}
+
+function notifySyncRequested(): void {
+  for (const cb of syncRequestCallbacks) cb();
+}
+
 /**
  * Run a sync for a single Gmail API account (initial or delta).
  */
@@ -350,6 +368,7 @@ async function runSync(accountIds: string[], onQueued?: () => void): Promise<voi
  * Run sync for a single account, queuing if already running.
  */
 export async function syncAccount(accountId: string): Promise<void> {
+  notifySyncRequested();
   return runSync([accountId]);
 }
 
@@ -403,6 +422,7 @@ export function stopBackgroundSync(): void {
  * Waits for completion even if a background sync is in progress.
  */
 export async function triggerSync(accountIds: string[]): Promise<void> {
+  notifySyncRequested();
   await runSync(accountIds);
 }
 
@@ -428,6 +448,7 @@ async function runSyncOrThrow(
     });
   }
   for (const id of accountIds) prepareOutcomes.delete(id);
+  notifySyncRequested();
   await runSync(accountIds, options.onQueued);
   const failures = accountIds.flatMap((id) => {
     const error = prepareOutcomes.get(id);

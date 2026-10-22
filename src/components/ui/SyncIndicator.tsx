@@ -5,7 +5,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { useUndoStore } from "@/stores/undoStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useAccountStore } from "@/stores/accountStore";
-import { triggerSync } from "@/services/gmail/syncManager";
+import { triggerSync, onSyncRequested } from "@/services/gmail/syncManager";
 
 /** A sync shorter than this never shows the pill, so the background delta sync every minute does not flash it. */
 export const SYNC_PILL_DELAY_MS = 1_000;
@@ -17,49 +17,47 @@ export const SYNC_ERROR_VISIBLE_MS = 8_000;
  * while a sync runs, the error with a retry button after a failure. Idle renders nothing.
  * While an undo toast is visible the pill sits above it, so the undo button never moves.
  *
- * The background sync retries every minute without checking whether it can succeed, so a failure is
- * shown once: until a sync succeeds, the same error and the spinner of the runs that repeat it stay
- * off screen (the reload button stays red). A sync the user starts shows both again.
+ * The background sync retries every minute without checking whether it can succeed, so each failure is
+ * shown once: until a sync succeeds, the errors already shown and the spinner of the runs that repeat
+ * them stay off screen (the reload button stays red). Errors are remembered as a set, because with two
+ * failing accounts the message alternates between them. A sync that was asked for (by the user, for a
+ * new account, on reconnect; see `onSyncRequested`) shows both again.
  */
 export function SyncIndicator() {
   const syncState = useUIStore((s) => s.syncState);
   const syncMessage = useUIStore((s) => s.syncMessage);
-  // Every sync the user starts (reload button, F5, a folder's context menu) marks the folder first.
-  const userSync = useUIStore((s) => s.isSyncingFolder !== null);
   const undoVisible = useUndoStore((s) => s.message !== null);
   const undoSendVisible = useComposerStore((s) => s.undoSendVisible);
   const [shownError, setShownError] = useState<{ message: string } | null>(null);
   const [spinnerShown, setSpinnerShown] = useState(false);
-  const seenError = useRef<string | null>(null);
+  const seenErrors = useRef(new Set<string>());
   const pillRef = useRef<HTMLDivElement>(null);
 
-  const forgetError = () => {
-    seenError.current = null;
+  const forgetErrors = () => {
+    seenErrors.current.clear();
     setShownError(null);
   };
 
-  // Declared before the state effect, so a user's sync is known before its first status arrives.
-  useEffect(() => {
-    if (userSync) forgetError();
-  }, [userSync]);
+  // syncManager reports the request before the sync's first status, so the set is empty by then.
+  useEffect(() => onSyncRequested(forgetErrors), []);
 
   // A progress update does not restart the delay.
   const errorMessage = syncState === "error" ? (syncMessage ?? "Sync failed") : null;
   useEffect(() => {
     if (syncState === "idle") {
-      forgetError();
+      forgetErrors();
       setSpinnerShown(false);
       return;
     }
     if (errorMessage !== null) {
       setSpinnerShown(false);
-      if (errorMessage !== seenError.current) {
-        seenError.current = errorMessage;
+      if (!seenErrors.current.has(errorMessage)) {
+        seenErrors.current.add(errorMessage);
         setShownError({ message: errorMessage });
       }
       return;
     }
-    if (seenError.current !== null) return;
+    if (seenErrors.current.size > 0) return;
     const timer = setTimeout(() => setSpinnerShown(true), SYNC_PILL_DELAY_MS);
     return () => clearTimeout(timer);
   }, [syncState, errorMessage]);
@@ -80,9 +78,7 @@ export function SyncIndicator() {
 
   const handleRetry = () => {
     const ids = useAccountStore.getState().accounts.filter((a) => a.isActive).map((a) => a.id);
-    if (ids.length === 0) return;
-    forgetError();
-    void triggerSync(ids);
+    if (ids.length > 0) void triggerSync(ids);
   };
 
   return (

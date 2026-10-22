@@ -2,8 +2,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 
 const mockTriggerSync = vi.fn();
+const syncRequestListeners = new Set<() => void>();
+/** What syncManager does for every sync that is asked for (not the background timer). */
+const requestSync = () => act(() => syncRequestListeners.forEach((cb) => cb()));
 vi.mock("@/services/gmail/syncManager", () => ({
-  triggerSync: (ids: string[]) => mockTriggerSync(ids),
+  triggerSync: (ids: string[]) => {
+    syncRequestListeners.forEach((cb) => cb());
+    mockTriggerSync(ids);
+  },
+  onSyncRequested: (cb: () => void) => {
+    syncRequestListeners.add(cb);
+    return () => syncRequestListeners.delete(cb);
+  },
 }));
 
 import { SyncIndicator, SYNC_PILL_DELAY_MS, SYNC_ERROR_VISIBLE_MS } from "./SyncIndicator";
@@ -41,7 +51,7 @@ function failAndFade(message: string) {
 beforeEach(() => {
   vi.useFakeTimers();
   mockTriggerSync.mockReset();
-  useUIStore.setState({ syncState: "idle", syncMessage: null, isSyncingFolder: null });
+  useUIStore.setState({ syncState: "idle", syncMessage: null });
   useUndoStore.setState({ message: null });
   useComposerStore.setState({ undoSendVisible: false });
   useAccountStore.setState({ accounts: [account("a1", true), account("a2", false), account("a3", true)] });
@@ -140,12 +150,37 @@ describe("SyncIndicator", () => {
     expect(pill()!.textContent).toBe("Sync failed: timeoutRetry");
   });
 
-  it("shows the spinner and a repeated failure of a sync the user started", () => {
+  it("keeps the repeated failures of two accounts off screen once each was shown", () => {
+    render(<SyncIndicator />);
+    const shown: string[] = [];
+    const record = () => {
+      const text = pill()?.textContent;
+      if (text && shown[shown.length - 1] !== text) shown.push(text);
+    };
+    for (let minute = 0; minute < 3; minute++) {
+      // The order nextSyncDisplay() reports: each account's own error, then the last remembered one.
+      setSync("syncing", "Syncing...");
+      advance(SYNC_PILL_DELAY_MS * 2);
+      record();
+      setSync("error", "Sync failed: A");
+      record();
+      setSync("syncing", "Syncing...");
+      advance(SYNC_PILL_DELAY_MS * 2);
+      record();
+      setSync("error", "Sync failed: B");
+      record();
+      advance(60_000);
+      record();
+    }
+    expect(shown).toEqual(["Syncing...", "Sync failed: ARetry", "Sync failed: A", "Sync failed: BRetry"]);
+  });
+
+  it("shows the spinner and a repeated failure of a sync that was asked for", () => {
     render(<SyncIndicator />);
     failAndFade("Sync failed: timeout");
 
-    // The reload button, F5 and the folder context menu mark the folder before they sync.
-    act(() => useUIStore.getState().setSyncingFolder("inbox"));
+    // Reload button, F5, context menu, tray, settings, a new account's first sync, back online.
+    requestSync();
     setSync("syncing", "Syncing...");
     advance(SYNC_PILL_DELAY_MS);
     expect(pill()!.textContent).toBe("Syncing...");

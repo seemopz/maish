@@ -253,6 +253,29 @@ export async function imapFetchRawMessage(
   return invoke<string>('imap_fetch_raw_message', { config, folder, uid });
 }
 
+export interface MessageFlags {
+  uid: number;
+  is_read: boolean;
+  is_starred: boolean;
+}
+
+export interface FolderFlagsResult {
+  uidvalidity: number;
+  messages: MessageFlags[];
+}
+
+/**
+ * UID and flags of every message in a UID range ("120:*"), no bodies. Complete
+ * or an error, never a partial list: a UID missing from it means expunged.
+ */
+export async function imapFetchFlags(
+  config: ImapConfig,
+  folder: string,
+  uidRange: string
+): Promise<FolderFlagsResult> {
+  return invoke<FolderFlagsResult>('imap_fetch_flags', { config, folder, uidRange });
+}
+
 /**
  * Check multiple folders for new UIDs in a single IMAP connection.
  * Replaces N separate imapGetFolderStatus + imapFetchNewUids calls with one round-trip.

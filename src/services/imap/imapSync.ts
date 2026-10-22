@@ -1,4 +1,4 @@
-import type { ImapConfig, ImapMessage, DeltaCheckRequest, DeltaCheckResult } from "./tauriCommands";
+import type { ImapConfig, ImapFolder, ImapMessage, DeltaCheckRequest, DeltaCheckResult } from "./tauriCommands";
 import {
   imapListFolders,
   imapGetFolderStatus,
@@ -44,6 +44,7 @@ import {
   type ThreadableMessage,
   type ThreadGroup,
 } from "../threading/threadBuilder";
+import { reconcileFolder } from "./imapReconcile";
 import { getPendingOpsForResource, getResourceIdsWithOpenOps } from "../db/pendingOperations";
 
 // ---------------------------------------------------------------------------
@@ -1085,6 +1086,28 @@ async function recordFolderStates(
 }
 
 /**
+ * Flag and expunge pass over the folders whose new-mail check went through.
+ * Sequential: one pooled session at a time, and a folder that fails is retried
+ * by the next sync.
+ */
+async function reconcileFolders(
+  accountId: string,
+  config: ImapConfig,
+  folders: ImapFolder[],
+  syncStateMap: Map<string, FolderSyncState>,
+): Promise<void> {
+  for (const folder of folders) {
+    await reconcileFolder({
+      accountId,
+      config,
+      folderPath: folder.raw_path,
+      folderLabelId: mapFolderToLabel(folder).labelId,
+      uidvalidity: syncStateMap.get(folder.raw_path)?.uidvalidity ?? null,
+    });
+  }
+}
+
+/**
  * Perform delta sync for an IMAP account.
  * Fetches only new messages since the last sync using stored UID state.
  */
@@ -1119,6 +1142,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   // Separate folders into new (no saved state) vs existing (have saved state)
   const newFolders = syncableFolders.filter((f) => !syncStateMap.has(f.raw_path));
   const existingFolders = syncableFolders.filter((f) => syncStateMap.has(f.raw_path));
+  // Existing folders whose check went through with the same UIDVALIDITY.
+  const reconcilable: ImapFolder[] = [];
 
   // Handle new folders: search for UIDs then fetch in chunks
   let consecutiveFailures = 0;
@@ -1317,6 +1342,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           continue;
         }
 
+        reconcilable.push(folder);
+
         // Normal delta: fetch the new UIDs returned by delta check
         if (deltaResult.new_uids.length === 0) {
           succeededFolders++;
@@ -1375,6 +1402,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
   if (allThreadable.length === 0) {
     await recordFolderStates(accountId, folderStates, allImapMsgs, new Set());
+    await reconcileFolders(accountId, config, reconcilable, syncStateMap);
     return { messages: [] };
   }
 
@@ -1410,6 +1438,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
   // Update sync state timestamp
   await updateAccountSyncState(accountId, `imap-synced-${Date.now()}`);
+
+  await reconcileFolders(accountId, config, reconcilable, syncStateMap);
 
   return { messages: storedMessages };
 }

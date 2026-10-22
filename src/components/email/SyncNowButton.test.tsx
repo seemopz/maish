@@ -48,4 +48,13 @@ describe("SyncNowButton", () => {
     render(<SyncNowButton />);
     expect((screen.getByRole("button", { name: "Sync now" }) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("keeps a failed sync visible in red with the error as tooltip", () => {
+    useUIStore.setState({ syncState: "error", syncMessage: "Sync failed: timeout" });
+    render(<SyncNowButton />);
+    const btn = screen.getByRole("button", { name: "Sync now" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute("title")).toBe("Sync failed: timeout – Sync now");
+    expect(btn.className).toContain("text-danger");
+  });
 });

@@ -37,6 +37,13 @@ describe("openaiProvider", () => {
     });
   });
 
+  it.each(["length", "content_filter"])("rejects a reply that finished with %s", async (finish_reason) => {
+    mockCreate.mockResolvedValue({ choices: [{ finish_reason, message: { content: "" } }] });
+    await expect(
+      createOpenAIProvider("sk-test", "gpt-6-luna").complete({ systemPrompt: "s", userContent: "u" }),
+    ).rejects.toThrow(finish_reason);
+  });
+
   it("tests the connection by looking up the model", async () => {
     mockRetrieve.mockResolvedValue({ id: "gpt-6-luna" });
     expect(await createOpenAIProvider("sk-test", "gpt-6-luna").testConnection()).toBe(true);

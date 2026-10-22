@@ -54,9 +54,15 @@ describe("summary language", () => {
   });
 
   it("skips and clears the cache on refresh", async () => {
-    vi.mocked(getAiCache).mockResolvedValueOnce("old");
     expect(await summarizeThread("t1", "a1", messages, { refresh: true })).toBe("ok");
+    expect(getAiCache).not.toHaveBeenCalled();
     expect(deleteAiCache).toHaveBeenCalledWith("a1", "t1", "summary_de");
+  });
+
+  it("caches nothing when the provider rejects an incomplete reply", async () => {
+    mockComplete.mockRejectedValueOnce(new Error("Claude stopped early (max_tokens), the reply is incomplete"));
+    await expect(summarizeThread("t1", "a1", messages)).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    expect(setAiCache).not.toHaveBeenCalled();
   });
 
   it("answers Ask Inbox in the summary language, or in the question's language", async () => {

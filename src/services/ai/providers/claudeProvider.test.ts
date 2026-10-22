@@ -52,6 +52,18 @@ describe("claudeProvider", () => {
     expect(await createClaudeProvider("k", "m").complete({ systemPrompt: "s", userContent: "u" })).toBe("");
   });
 
+  it.each(["max_tokens", "refusal"])("rejects a reply that stopped with %s", async (stop_reason) => {
+    mockFetch.mockResolvedValue(ok({ stop_reason, content: [{ type: "text", text: "Half a sen" }] }));
+    await expect(
+      createClaudeProvider("k", "m").complete({ systemPrompt: "s", userContent: "u" }),
+    ).rejects.toThrow(stop_reason);
+  });
+
+  it("still passes the connection test when the short test reply hits max_tokens", async () => {
+    mockFetch.mockResolvedValue(ok({ stop_reason: "max_tokens", content: [] }));
+    expect(await createClaudeProvider("k", "m").testConnection()).toBe(true);
+  });
+
   it("aborts a request after a timeout", async () => {
     mockFetch.mockResolvedValue(ok({ content: [{ type: "text", text: "x" }] }));
     await createClaudeProvider("k", "m").complete({ systemPrompt: "s", userContent: "u" });

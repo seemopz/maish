@@ -77,7 +77,7 @@ export function SmartReplySuggestions({ threadId, accountId, messages, noReply }
     });
   }, [messages, openComposer]);
 
-  if (!available || messages.length === 0 || noReply) return null;
+  if (!available || messages.length === 0 || noReply || (replies?.length === 0 && !loading)) return null;
 
   return (
     <div className="mx-4 my-2 px-3 py-2.5 rounded-md border border-border-primary bg-bg-secondary">

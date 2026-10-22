@@ -47,6 +47,12 @@ describe("smart replies cache", () => {
     mockComplete.mockResolvedValue('["Mach ich!", "<b></b>"]');
     expect(await generateSmartReplies("t1", "a1", messages)).toEqual(["Mach ich!"]);
   });
+
+  it("caches nothing when no usable reply is left", async () => {
+    mockComplete.mockResolvedValue('["", "<b></b>"]');
+    expect(await generateSmartReplies("t1", "a1", messages)).toEqual([]);
+    expect(setAiCache).not.toHaveBeenCalled();
+  });
 });
 
 describe("summary language", () => {

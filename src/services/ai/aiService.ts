@@ -156,6 +156,8 @@ export async function generateSmartReplies(
     .filter(Boolean)
     // Fewer suggestions rather than a filler in a language the mail may not use.
     .slice(0, 3);
+  // Nothing usable: ask again next time instead of caching an empty card.
+  if (replies.length === 0) return [];
 
   // Cache the result
   await setAiCache(accountId, threadId, SMART_REPLIES_CACHE, JSON.stringify(replies));

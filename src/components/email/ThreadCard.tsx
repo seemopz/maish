@@ -5,6 +5,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import { formatRelativeDate } from "@/utils/date";
+import { senderHue, CATEGORY_HUES } from "@/utils/hue";
 import { Paperclip, Star, Check, Pin, BellRing, VolumeX, Archive, Trash2, MailOpen, Clock, Ban } from "lucide-react";
 import { useSwipeGesture, isSwipeTail, type SwipeDirection } from "@/hooks/useSwipeGesture";
 import { resolveSwipeActions, describeSwipeAction, type SwipeButtonAction } from "@/utils/swipeActions";
@@ -12,10 +13,8 @@ import { runSwipeAction } from "@/services/swipeActions";
 import { logToFile } from "@/services/logFile";
 import { snoozeThread } from "@/services/snooze/snoozeManager";
 import { SnoozeDialog } from "./SnoozeDialog";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { DragData } from "@/components/dnd/DndProvider";
-
-const BADGE_CATEGORIES = new Set(["Updates", "Promotions", "Social", "Newsletters"]);
 
 const SWIPE_VISUALS: Record<SwipeButtonAction, { bg: string; icon: ReactNode }> = {
   trash: { bg: "bg-danger", icon: <Trash2 size={16} /> },
@@ -181,6 +180,11 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
     thread.fromAddress?.[0] ??
     "?"
   ).toUpperCase();
+  const avatarHue = useMemo(
+    () => ({ "--hue": senderHue(thread.fromAddress ?? thread.fromName ?? "") }) as CSSProperties,
+    [thread.fromAddress, thread.fromName],
+  );
+  const categoryHue = category ? CATEGORY_HUES[category] : undefined;
 
   return (
     <div ref={swipeRef} style={{ touchAction: "pan-y" }} className="relative overflow-hidden">
@@ -243,19 +247,23 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
             : isMultiSelected
               ? "bg-bg-selected"
               : isSelected
-                ? "bg-bg-selected shadow-[inset_2px_0_0_var(--color-text-primary)]"
+                ? "bg-bg-selected shadow-[inset_2px_0_0_var(--color-highlight)]"
                 : "hover:bg-bg-hover"
         } ${isSpam ? "bg-danger/5" : ""}`}
       >
         <div className="flex items-start gap-3">
           {/* Avatar */}
           <div
+            data-testid="sender-avatar"
+            style={isMultiSelected ? undefined : avatarHue}
             className={`rounded-full flex items-center justify-center shrink-0 font-medium ${
               emailDensity === "compact" ? "w-6 h-6 text-[11px]" : emailDensity === "spacious" ? "w-9 h-9 text-sm" : "w-8 h-8 text-xs"
             } ${
-              isMultiSelected || !thread.isRead
+              isMultiSelected
                 ? "bg-accent text-on-accent"
-                : "bg-bg-tertiary text-text-secondary border border-border-primary"
+                : thread.isRead
+                  ? "tint-soft"
+                  : "tint-solid"
             }`}
           >
             {isMultiSelected ? <Check size={emailDensity === "compact" ? 14 : 16} /> : initial}
@@ -293,8 +301,11 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
               <span className="text-xs text-text-tertiary truncate flex-1">
                 {thread.snippet}
               </span>
-              {showCategoryBadge && category && category !== "Primary" && BADGE_CATEGORIES.has(category) && (
-                <span className="shrink-0 font-mono text-[10px] leading-4 uppercase tracking-wide px-1.5 rounded-full border border-border-primary text-text-tertiary">
+              {showCategoryBadge && categoryHue !== undefined && (
+                <span
+                  style={{ "--hue": categoryHue } as CSSProperties}
+                  className="shrink-0 font-mono text-[10px] leading-4 uppercase tracking-wide px-1.5 rounded-full border border-border-primary tint-ink"
+                >
                   {category}
                 </span>
               )}
@@ -319,7 +330,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
                 </span>
               )}
               {thread.isStarred && (
-                <span className="shrink-0 text-text-primary star-animate" title="Starred">
+                <span className="shrink-0 text-star star-animate" title="Starred">
                   <Star size={12} className="fill-current" />
                 </span>
               )}

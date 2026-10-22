@@ -5,6 +5,8 @@
 /*
  * Design tokens — monochrome, after Vercel's Geist system.
  * Surfaces separate by value and hairline borders, not by shadow or color.
+ * Color marks identity and state only: sender avatars, categories, the star
+ * and the current selection.
  */
 @theme {
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -32,6 +34,10 @@
   --color-warning: #c25100;
   --color-success: #297a3a;
 
+  /* Current selection (thread bar, active nav icon) and the starred state */
+  --color-highlight: #0068d6;
+  --color-star: #c27a00;
+
   --color-sidebar-bg: #fafafa;
   --color-sidebar-text: #171717;
   --color-sidebar-hover: rgba(0, 0, 0, 0.04);
@@ -54,6 +60,19 @@
   --shadow-2xl: 0 0 0 1px var(--color-border-primary), 0 16px 48px rgba(0, 0, 0, 0.12);
 
   --overlay-backdrop: rgba(0, 0, 0, 0.32);
+}
+
+/*
+ * Hue tints: OKLCH lightness and chroma; the hue comes from --hue on the element.
+ * Equal lightness keeps every hue at the same contrast (AA for text in both themes).
+ * Plain custom properties, not @theme, so Tailwind always emits them.
+ */
+:root {
+  --tint-soft-bg: 0.94 0.04;
+  --tint-soft-fg: 0.43 0.12;
+  --tint-solid-bg: 0.52 0.13;
+  --tint-solid-fg: #ffffff;
+  --tint-ink: 0.48 0.13;
 }
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -83,6 +102,15 @@
   --color-danger: #ff6166;
   --color-warning: #ff990a;
   --color-success: #62c073;
+
+  --color-highlight: #52a8ff;
+  --color-star: #ffb224;
+
+  --tint-soft-bg: 0.31 0.06;
+  --tint-soft-fg: 0.86 0.08;
+  --tint-solid-bg: 0.74 0.12;
+  --tint-solid-fg: #0a0a0a;
+  --tint-ink: 0.78 0.12;
 
   --color-sidebar-bg: #111111;
   --color-sidebar-text: #ededed;
@@ -140,6 +168,24 @@ samp {
   letter-spacing: 0.071em;
   text-transform: uppercase;
   color: var(--color-text-tertiary);
+}
+
+/*
+ * Hue tints — set --hue (degrees) on the element, see src/utils/hue.ts.
+ * soft: read avatars; solid: unread avatars; ink: text and icons on any surface.
+ */
+@utility tint-soft {
+  background-color: oklch(var(--tint-soft-bg) var(--hue));
+  color: oklch(var(--tint-soft-fg) var(--hue));
+}
+
+@utility tint-solid {
+  background-color: oklch(var(--tint-solid-bg) var(--hue));
+  color: var(--tint-solid-fg);
+}
+
+@utility tint-ink {
+  color: oklch(var(--tint-ink) var(--hue));
 }
 
 /* Tight display tracking for headings */

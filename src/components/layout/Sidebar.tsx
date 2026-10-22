@@ -12,6 +12,7 @@ import { useContextMenuStore } from "@/stores/contextMenuStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 import { useActiveLabel, useActiveCategory } from "@/hooks/useRouteNavigation";
 import { navigateToLabel } from "@/router/navigate";
+import { CATEGORY_HUES } from "@/utils/hue";
 import {
   Inbox,
   Star,
@@ -380,6 +381,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
           const Icon = item.icon;
           const isInbox = item.id === "inbox";
           const startsNewGroup = index > 0 && item.group !== visibleNavItems[index - 1]?.group;
+          const isActive = isInbox ? (activeLabel === "inbox" && (inboxViewMode === "unified" || activeCategory === "Primary")) : activeLabel === item.id;
           return (
             <div key={item.id}>
               {startsNewGroup && (
@@ -387,7 +389,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
               )}
               <DroppableNavItem
                 id={item.id}
-                isActive={isInbox ? (activeLabel === "inbox" && (inboxViewMode === "unified" || activeCategory === "Primary")) : activeLabel === item.id}
+                isActive={isActive}
                 collapsed={collapsed}
                 onClick={() => {
                   if (isInbox && inboxViewMode === "split") {
@@ -404,7 +406,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                     {isSyncingFolder === item.id ? (
                       <Loader2 size={16} className="shrink-0 animate-spin text-text-tertiary" />
                     ) : (
-                      <Icon size={16} className="shrink-0" />
+                      <Icon size={16} className={`shrink-0 ${isActive ? "text-highlight" : ""}`} />
                     )}
                     {!collapsed && (
                       <span className="flex-1 truncate">{item.label}</span>
@@ -448,6 +450,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                   {CATEGORY_ITEMS.map((cat) => {
                     const CatIcon = cat.icon;
                     const isCatActive = activeLabel === "inbox" && activeCategory === cat.id;
+                    const catHue = CATEGORY_HUES[cat.id];
                     return (
                       <button
                         key={cat.id}
@@ -460,7 +463,11 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                             : "text-text-tertiary hover:text-text-primary hover:bg-sidebar-hover"
                         }`}
                       >
-                        <CatIcon size={14} className="shrink-0" />
+                        <CatIcon
+                          size={14}
+                          style={catHue === undefined ? undefined : ({ "--hue": catHue } as React.CSSProperties)}
+                          className={`shrink-0 ${catHue === undefined ? "" : "tint-ink"}`}
+                        />
                         <span className="flex-1 truncate">{cat.label}</span>
                       </button>
                     );

@@ -6,6 +6,7 @@ import type { Thread } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
 import { runSwipeAction } from "@/services/swipeActions";
 import { logToFile } from "@/services/logFile";
+import { senderHue } from "@/utils/hue";
 
 vi.mock("@dnd-kit/core", () => ({
   useDraggable: () => ({
@@ -83,6 +84,32 @@ describe("ThreadCard", () => {
     render(<ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} />);
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("Test subject")).toBeInTheDocument();
+  });
+
+  it("tints the avatar with the sender's hue, solid while unread and soft once read", () => {
+    const { rerender } = render(<ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} />);
+    const avatar = screen.getByTestId("sender-avatar");
+    expect(avatar.style.getPropertyValue("--hue")).toBe(String(senderHue("alice@example.com")));
+    expect(avatar).toHaveClass("tint-solid");
+
+    rerender(<ThreadCard thread={makeThread({ isRead: true })} isSelected={false} onClick={onClick} />);
+    expect(screen.getByTestId("sender-avatar")).toHaveClass("tint-soft");
+  });
+
+  it("colours the category badge with the category's hue", () => {
+    render(
+      <ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} category="Social" showCategoryBadge />,
+    );
+    const badge = screen.getByText("Social");
+    expect(badge).toHaveClass("tint-ink");
+    expect(badge.style.getPropertyValue("--hue")).toBe("315");
+  });
+
+  it("shows no badge for the primary category", () => {
+    render(
+      <ThreadCard thread={makeThread()} isSelected={false} onClick={onClick} category="Primary" showCategoryBadge />,
+    );
+    expect(screen.queryByText("Primary")).not.toBeInTheDocument();
   });
 
   it("applies red background for spam threads", () => {

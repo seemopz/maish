@@ -86,6 +86,17 @@ Stalwart server.
   usually belongs to an address that already has a mail account, so inserting a
   second row fails. Discovery additionally probes `accounts.imap_host`, because
   self-hosted setups routinely split mail domain and server host
+- **IMAP delta sync reconciles stored mail, not only new UIDs**
+  (`src/services/imap/imapReconcile.ts`, `imap_fetch_flags` in
+  `src-tauri/src/imap/client.rs`). `UID > last_uid` never revisits a message
+  once stored, so a read/star change or an expunge/move done in another client
+  stayed wrong for good. Per folder, at most every 10 minutes and on the first
+  sync after start, `UID FETCH n:* (UID FLAGS)` is compared with the stored
+  rows (n = lowest stored UID): flags are taken over, rows the server no longer
+  lists are deleted. The list must be complete — the command fails on a
+  timeout rather than returning less, because a missing UID means "delete".
+  Threads with a queued local operation and folders whose UIDVALIDITY changed
+  are skipped
 
 
 ## Pitfalls

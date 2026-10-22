@@ -42,6 +42,11 @@ describe("smart replies cache", () => {
     expect(await generateSmartReplies("t1", "a1", messages)).toEqual(["Mach ich!", "Gerne.", "Erledigt."]);
     expect(setAiCache).toHaveBeenCalledWith("a1", "t1", "smart_replies_v2", expect.any(String));
   });
+
+  it("shows fewer replies instead of padding them with an English one", async () => {
+    mockComplete.mockResolvedValue('["Mach ich!", "<b></b>"]');
+    expect(await generateSmartReplies("t1", "a1", messages)).toEqual(["Mach ich!"]);
+  });
 });
 
 describe("summary language", () => {

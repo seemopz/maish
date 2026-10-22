@@ -152,11 +152,10 @@ export async function generateSmartReplies(
   // Validate and sanitize each reply
   replies = replies
     .filter((r): r is string => typeof r === "string")
-    .map((r) => r.replace(/<[^>]*>/g, "").slice(0, 200));
-
-  // Ensure exactly 3 replies
-  while (replies.length < 3) replies.push("Thanks for the update.");
-  replies = replies.slice(0, 3);
+    .map((r) => r.replace(/<[^>]*>/g, "").trim().slice(0, 200))
+    .filter(Boolean)
+    // Fewer suggestions rather than a filler in a language the mail may not use.
+    .slice(0, 3);
 
   // Cache the result
   await setAiCache(accountId, threadId, SMART_REPLIES_CACHE, JSON.stringify(replies));

@@ -53,10 +53,17 @@ describe("reconcileFolder", () => {
     mockFlags.mockResolvedValue({ uidvalidity: 7, messages: [remote(3), remote(4), remote(5)] });
   });
 
-  it("asks the server from the lowest stored UID up", async () => {
+  it("lists the whole folder on the server", async () => {
     await reconcileFolder(args);
 
-    expect(mockFlags).toHaveBeenCalledWith(config, "INBOX", "3:*");
+    expect(mockFlags).toHaveBeenCalledWith(config, "INBOX");
+  });
+
+  it("reads the stored rows after the server list, not before", async () => {
+    await reconcileFolder(args);
+
+    const listed = mockFlags.mock.invocationCallOrder[0]!;
+    expect(mockLocal.mock.invocationCallOrder.at(-1)!).toBeGreaterThan(listed);
   });
 
   it("takes over a read flag that changed on the server for an old message", async () => {

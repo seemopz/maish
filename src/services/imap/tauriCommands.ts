@@ -265,15 +265,15 @@ export interface FolderFlagsResult {
 }
 
 /**
- * UID and flags of every message in a UID range ("120:*"), no bodies. Complete
- * or an error, never a partial list: a UID missing from it means expunged.
+ * UID and flags of every message in a folder, no bodies. Complete (checked
+ * against the folder's message count) or an error, never a partial list: a UID
+ * missing from it means expunged.
  */
 export async function imapFetchFlags(
   config: ImapConfig,
-  folder: string,
-  uidRange: string
+  folder: string
 ): Promise<FolderFlagsResult> {
-  return invoke<FolderFlagsResult>('imap_fetch_flags', { config, folder, uidRange });
+  return invoke<FolderFlagsResult>('imap_fetch_flags', { config, folder });
 }
 
 /**

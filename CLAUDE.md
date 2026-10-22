@@ -91,12 +91,13 @@ Stalwart server.
   `src-tauri/src/imap/client.rs`). `UID > last_uid` never revisits a message
   once stored, so a read/star change or an expunge/move done in another client
   stayed wrong for good. Per folder, at most every 10 minutes and on the first
-  sync after start, `UID FETCH n:* (UID FLAGS)` is compared with the stored
-  rows (n = lowest stored UID): flags are taken over, rows the server no longer
-  lists are deleted. The list must be complete — the command fails on a
-  timeout rather than returning less, because a missing UID means "delete".
-  Threads with a queued local operation and folders whose UIDVALIDITY changed
-  are skipped
+  sync after start, `FETCH 1:EXISTS (UID FLAGS)` is compared with the stored
+  rows: flags are taken over, rows the server no longer lists are deleted. The
+  list must be complete, and that is checked against the `EXISTS` count of
+  SELECT: async-imap ends a FETCH stream at the tagged reply without looking at
+  its status, so a `NO`/`BAD` or a dropped connection reads as a short list, not
+  an error, and a missing UID means "delete". Threads with a queued local
+  operation and folders whose UIDVALIDITY changed are skipped
 
 
 ## Pitfalls

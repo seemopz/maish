@@ -55,15 +55,13 @@ export async function reconcileFolder(args: ReconcileFolderArgs): Promise<Reconc
   if (last !== undefined && now - last < RECONCILE_INTERVAL_MS) return none;
 
   try {
-    const local = await getLocalMessagesInFolder(accountId, folderPath);
-    if (local.length === 0) {
+    // Nothing stored from this folder: not worth listing it.
+    if ((await getLocalMessagesInFolder(accountId, folderPath)).length === 0) {
       lastReconciledAt.set(key, now);
       return none;
     }
 
-    // Stored mail below this UID is outside the sync window or gone already.
-    const minUid = local.reduce((min, m) => Math.min(min, m.imap_uid), Infinity);
-    const server = await imapFetchFlags(config, folderPath, `${minUid}:*`);
+    const server = await imapFetchFlags(config, folderPath);
 
     // Other UIDs now: the folder is about to be resynced from scratch, and the
     // list above says nothing about the messages stored under the old ones.
@@ -75,6 +73,9 @@ export async function reconcileFolder(args: ReconcileFolderArgs): Promise<Reconc
       return none;
     }
 
+    // Read after the (slow) fetch, so a flag the user set meanwhile is in the
+    // snapshot and a queued action is seen: the server list can be older.
+    const local = await getLocalMessagesInFolder(accountId, folderPath);
     const serverByUid = new Map(server.messages.map((m) => [m.uid, m]));
     // A thread with a local action still queued is the user's version of the truth.
     const busy = await getResourceIdsWithOpenOps(accountId);

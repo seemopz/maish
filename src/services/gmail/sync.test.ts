@@ -227,6 +227,41 @@ describe("deltaSync history position", () => {
     expect(updateAccountSyncState).toHaveBeenCalledWith("acc-streak", "200");
   });
 
+  it("is not mistaken for an expired history when the count reads 404", async () => {
+    const items = Array.from({ length: 404 }, (_, i) => ({
+      id: `${i}`,
+      labelsRemoved: [{ message: { id: `m${i}`, threadId: `t-bad-${i}` } }],
+    }));
+    const client = createMockClient(items);
+    (client.getThread as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network down"));
+
+    await expect(deltaSync(client, "acc-404", "99")).rejects.toThrow("404 thread(s) could not be synced");
+  });
+
+  it("does not notify again for threads a failed run already stored", async () => {
+    mockNotify.mockClear();
+    const newMail = (threadId: string) => ({
+      id: threadId,
+      messagesAdded: [{ message: { id: `msg-${threadId}`, threadId, labelIds: ["INBOX", "UNREAD"] } }],
+    });
+    const client = createMockClient([newMail("t-ok"), newMail("t-bad")]);
+    const getThread = client.getThread as ReturnType<typeof vi.fn>;
+    const original = getThread.getMockImplementation()!;
+    let badFails = true;
+    getThread.mockImplementation((threadId: string, format?: string) =>
+      threadId === "t-bad" && badFails ? Promise.reject(new Error("network down")) : original(threadId, format),
+    );
+
+    await expect(deltaSync(client, "acc-retry", "99")).rejects.toThrow("could not be synced");
+    badFails = false;
+    await deltaSync(client, "acc-retry", "99");
+
+    const notified = mockNotify.mock.calls.map((c) => c[2]);
+    expect(notified.filter((t) => t === "t-ok")).toHaveLength(1);
+    expect(notified.filter((t) => t === "t-bad")).toHaveLength(1);
+    expect(updateAccountSyncState).toHaveBeenCalledWith("acc-retry", "200");
+  });
+
   it("drops a thread the server no longer has and moves on", async () => {
     const client = clientFailingOn(new Error("Gmail API error: 404 {\"error\":{\"code\":404}}"));
 

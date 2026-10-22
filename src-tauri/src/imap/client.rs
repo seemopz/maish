@@ -531,43 +531,51 @@ fn read_and_starred(flags: &[Flag<'_>]) -> (bool, bool) {
     )
 }
 
-/// The range comes from the webview and goes into a FETCH command verbatim, so
-/// only `from:*` and `from:to` pass.
-fn validate_uid_range(range: &str) -> Result<(), String> {
-    let ok = range.split_once(':').is_some_and(|(from, to)| {
-        !from.is_empty()
-            && from.bytes().all(|b| b.is_ascii_digit())
-            && (to == "*" || (!to.is_empty() && to.bytes().all(|b| b.is_ascii_digit())))
-    });
-    if ok {
+/// The flag list is complete only when it has as many entries as the mailbox
+/// reported in SELECT. async-imap ends a FETCH stream at the tagged reply
+/// without looking at its status, so a `NO`/`BAD` or a connection that dropped
+/// between two responses reads as a short or empty list, not as an error.
+fn check_flag_list_complete(exists: u32, got: usize) -> Result<(), String> {
+    if got == exists as usize {
         Ok(())
     } else {
-        Err(format!("invalid UID range: {range:?}"))
+        Err(format!("incomplete flag list: got {got} of {exists}"))
     }
 }
 
-/// List UID and flags of every message in `uid_range` (e.g. "120:*") without
-/// fetching bodies. A delta sync only looks above its last UID, so this is how
-/// a read, starred, deleted or moved message further down gets noticed.
+/// List UID and flags of every message in `folder` without fetching bodies. A
+/// delta sync only looks above its last UID, so this is how a read, starred,
+/// deleted or moved message further down gets noticed.
 ///
-/// All or nothing: a timeout or a broken stream is an error, never a shorter
-/// list, because the caller deletes local mail the server no longer lists.
+/// All or nothing: the caller deletes local mail the server no longer lists,
+/// so a short list is an error (see [`check_flag_list_complete`]). The fetch
+/// is by sequence number `1:EXISTS`: no EXPUNGE may arrive during a FETCH
+/// (RFC 3501 §7.4.1), and a message that arrives meanwhile cannot change the
+/// range.
 pub async fn fetch_flags(
     session: &mut ImapSession,
     folder: &str,
-    uid_range: &str,
 ) -> Result<FolderFlagsResult, String> {
-    validate_uid_range(uid_range)?;
     let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
+    let uidvalidity = mailbox.uid_validity.unwrap_or(0);
 
+    // `1:*` on an empty mailbox is a BAD on many servers.
+    if mailbox.exists == 0 {
+        return Ok(FolderFlagsResult {
+            uidvalidity,
+            messages: vec![],
+        });
+    }
+
+    let range = format!("1:{}", mailbox.exists);
     let fetched = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
         let stream = session
-            .uid_fetch(uid_range, "(UID FLAGS)")
+            .fetch(&range, "(UID FLAGS)")
             .await
-            .map_err(|e| format!("UID FETCH {folder} flags failed: {e}"))?;
+            .map_err(|e| format!("FETCH {folder} flags failed: {e}"))?;
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
     })
     .await;
@@ -576,7 +584,7 @@ pub async fn fetch_flags(
         Err(_) => {
             session.taint();
             return Err(format!(
-                "UID FETCH {folder} flags timed out after {}s — check your server settings or network connection",
+                "FETCH {folder} flags timed out after {}s — check your server settings or network connection",
                 IMAP_FETCH_TIMEOUT.as_secs()
             ));
         }
@@ -586,7 +594,7 @@ pub async fn fetch_flags(
     for item in items {
         let fetch = item.map_err(|e| {
             session.taint_unless_refusal(&e);
-            format!("UID FETCH {folder} flags failed: {e}")
+            format!("FETCH {folder} flags failed: {e}")
         })?;
         let Some(uid) = fetch.uid else { continue };
         let flags: Vec<_> = fetch.flags().collect();
@@ -597,9 +605,10 @@ pub async fn fetch_flags(
             is_starred,
         });
     }
+    check_flag_list_complete(mailbox.exists, messages.len())?;
 
     Ok(FolderFlagsResult {
-        uidvalidity: mailbox.uid_validity.unwrap_or(0),
+        uidvalidity,
         messages,
     })
 }
@@ -2075,20 +2084,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn uid_range_accepts_only_plain_ranges() {
-        for ok in ["1:*", "120:4000", "7:7"] {
-            assert!(validate_uid_range(ok).is_ok(), "{ok}");
-        }
-        for bad in ["", "*", "1", ":*", "1:", "1,2:*", "1:* (BODY[])", "a:*", "1:2:3", "1:*\r\nA1 LOGOUT"] {
-            assert!(validate_uid_range(bad).is_err(), "{bad:?}");
-        }
+    fn flag_list_must_match_the_mailbox_count() {
+        assert!(check_flag_list_complete(0, 0).is_ok());
+        assert!(check_flag_list_complete(3, 3).is_ok());
+        assert_eq!(
+            check_flag_list_complete(3, 1).unwrap_err(),
+            "incomplete flag list: got 1 of 3"
+        );
+        assert!(check_flag_list_complete(3, 0).is_err());
+        assert!(check_flag_list_complete(3, 4).is_err());
     }
 
     #[test]
     fn read_and_starred_reads_seen_and_flagged() {
         assert_eq!(read_and_starred(&[]), (false, false));
         assert_eq!(read_and_starred(&[Flag::Seen]), (true, false));
-        assert_eq!(read_and_starred(&[Flag::Flagged, Flag::Answered]), (false, true));
+        assert_eq!(
+            read_and_starred(&[Flag::Flagged, Flag::Answered]),
+            (false, true)
+        );
         assert_eq!(read_and_starred(&[Flag::Seen, Flag::Flagged]), (true, true));
     }
 

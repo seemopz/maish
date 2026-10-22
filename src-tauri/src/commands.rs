@@ -1,8 +1,8 @@
 use crate::imap::client as imap_client;
 use crate::imap::pool::ImapPool;
 use crate::imap::types::{
-    DeltaCheckRequest, DeltaCheckResult, FolderFlagsResult, ImapConfig, ImapFetchResult, ImapFolder,
-    ImapFolderSearchResult, ImapFolderStatus, ImapMessage,
+    DeltaCheckRequest, DeltaCheckResult, FolderFlagsResult, ImapConfig, ImapFetchResult,
+    ImapFolder, ImapFolderSearchResult, ImapFolderStatus, ImapMessage,
 };
 use crate::smtp::client as smtp_client;
 use crate::smtp::types::{SmtpConfig, SmtpSendResult};
@@ -80,10 +80,9 @@ pub async fn imap_fetch_flags(
     pool: State<'_, ImapPool>,
     config: ImapConfig,
     folder: String,
-    uid_range: String,
 ) -> Result<FolderFlagsResult, String> {
     let mut session = pool.acquire(&config).await?;
-    let result = imap_client::fetch_flags(&mut session, &folder, &uid_range).await?;
+    let result = imap_client::fetch_flags(&mut session, &folder).await?;
     session.release();
     Ok(result)
 }

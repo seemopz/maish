@@ -266,6 +266,16 @@ const MAX_THREAD_FAILURE_RETRIES = 5;
 const threadFailureStreak = new Map<string, number>();
 
 /**
+ * Threads a failed run did store, with the history position it saw. A retry
+ * from the same position skips them: refetching would send their desktop
+ * notification again and run the filters a second time.
+ */
+const storedBeforeRetry = new Map<string, { latestHistoryId: string; threadIds: Set<string> }>();
+
+/** Thrown when threads failed and the run is to be repeated; not an expired history. */
+class ThreadRetryError extends Error {}
+
+/**
  * Delta sync: fetch only changes since last sync using history API.
  *
  * The history position is saved only once every affected thread is stored.
@@ -361,7 +371,10 @@ export async function deltaSync(
     const vipSenders = smartNotifications ? await getVipSenders(accountId) : new Set<string>();
 
     // Re-fetch affected threads in parallel (max 5 concurrent)
-    const threadIds = [...affectedThreadIds];
+    const stored = storedBeforeRetry.get(accountId);
+    const alreadyStored = stored?.latestHistoryId === latestHistoryId ? stored.threadIds : new Set<string>();
+    const threadIds = [...affectedThreadIds].filter((id) => !alreadyStored.has(id));
+    const storedThisRun = new Set(alreadyStored);
     const failedThreadIds: string[] = [];
     await parallelLimit(
       threadIds.map((threadId) => async () => {
@@ -427,6 +440,7 @@ export async function deltaSync(
               .then(({ applySmartLabelsToMessages }) => applySmartLabelsToMessages(accountId, newMessages))
               .catch((err) => console.error("Smart label error:", err));
           }
+          storedThisRun.add(threadId);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           if (message.includes("Gmail API error: 404")) {
@@ -445,13 +459,15 @@ export async function deltaSync(
       const streak = (threadFailureStreak.get(accountId) ?? 0) + 1;
       if (streak <= MAX_THREAD_FAILURE_RETRIES) {
         threadFailureStreak.set(accountId, streak);
-        throw new Error(
+        storedBeforeRetry.set(accountId, { latestHistoryId, threadIds: storedThisRun });
+        throw new ThreadRetryError(
           `${failedThreadIds.length} thread(s) could not be synced, will retry (${streak}/${MAX_THREAD_FAILURE_RETRIES})`,
         );
       }
       console.error(`Giving up on ${failedThreadIds.length} thread(s) after ${streak - 1} retries`);
     }
     threadFailureStreak.delete(accountId);
+    storedBeforeRetry.delete(accountId);
 
     await updateAccountSyncState(accountId, latestHistoryId);
 
@@ -460,6 +476,7 @@ export async function deltaSync(
       .then(({ categorizeNewThreads }) => categorizeNewThreads(accountId))
       .catch((err) => console.error("Categorization error:", err));
   } catch (err) {
+    if (err instanceof ThreadRetryError) throw err;
     // historyId might be too old — need full re-sync
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("404") || message.includes("historyId")) {

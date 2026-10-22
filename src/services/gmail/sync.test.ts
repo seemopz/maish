@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { deltaSync } from "./sync";
 import { GmailClient } from "./client";
+import { updateAccountSyncState } from "../db/accounts";
+import { deleteThread } from "../db/threads";
 
 // Mock all DB modules
 vi.mock("../db/threads", () => ({
   upsertThread: vi.fn(),
   setThreadLabels: vi.fn(),
+  deleteThread: vi.fn(),
   getMutedThreadIds: vi.fn().mockResolvedValue(new Set()),
 }));
 vi.mock("../db/messages", () => ({
@@ -180,5 +183,91 @@ describe("deltaSync notifications", () => {
     await deltaSync(client, "account-1", "99");
 
     expect(mockNotify).not.toHaveBeenCalled();
+  });
+});
+
+describe("deltaSync history position", () => {
+  const history = [
+    { id: "100", labelsRemoved: [{ message: { id: "m1", threadId: "t-ok" } }] },
+    { id: "101", labelsRemoved: [{ message: { id: "m2", threadId: "t-bad" } }] },
+  ];
+
+  /** getThread fails for `t-bad` with the given error. */
+  function clientFailingOn(error: Error): GmailClient {
+    const client = createMockClient(history);
+    const ok = client.getThread as ReturnType<typeof vi.fn>;
+    const original = ok.getMockImplementation()!;
+    ok.mockImplementation((threadId: string, format?: string) =>
+      threadId === "t-bad" ? Promise.reject(error) : original(threadId, format),
+    );
+    return client;
+  }
+
+  beforeEach(() => {
+    vi.mocked(updateAccountSyncState).mockClear();
+    vi.mocked(deleteThread).mockClear();
+  });
+
+  it("does not move past a thread that could not be fetched", async () => {
+    const client = clientFailingOn(new Error("network down"));
+
+    await expect(deltaSync(client, "acc-fail", "99")).rejects.toThrow("could not be synced");
+
+    expect(updateAccountSyncState).not.toHaveBeenCalled();
+  });
+
+  it("moves on after repeated failures of the same thread", async () => {
+    const client = clientFailingOn(new Error("network down"));
+
+    for (let i = 0; i < 5; i++) {
+      await expect(deltaSync(client, "acc-streak", "99")).rejects.toThrow("could not be synced");
+    }
+    await deltaSync(client, "acc-streak", "99");
+
+    expect(updateAccountSyncState).toHaveBeenCalledWith("acc-streak", "200");
+  });
+
+  it("is not mistaken for an expired history when the count reads 404", async () => {
+    const items = Array.from({ length: 404 }, (_, i) => ({
+      id: `${i}`,
+      labelsRemoved: [{ message: { id: `m${i}`, threadId: `t-bad-${i}` } }],
+    }));
+    const client = createMockClient(items);
+    (client.getThread as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("network down"));
+
+    await expect(deltaSync(client, "acc-404", "99")).rejects.toThrow("404 thread(s) could not be synced");
+  });
+
+  it("does not notify again for threads a failed run already stored", async () => {
+    mockNotify.mockClear();
+    const newMail = (threadId: string) => ({
+      id: threadId,
+      messagesAdded: [{ message: { id: `msg-${threadId}`, threadId, labelIds: ["INBOX", "UNREAD"] } }],
+    });
+    const client = createMockClient([newMail("t-ok"), newMail("t-bad")]);
+    const getThread = client.getThread as ReturnType<typeof vi.fn>;
+    const original = getThread.getMockImplementation()!;
+    let badFails = true;
+    getThread.mockImplementation((threadId: string, format?: string) =>
+      threadId === "t-bad" && badFails ? Promise.reject(new Error("network down")) : original(threadId, format),
+    );
+
+    await expect(deltaSync(client, "acc-retry", "99")).rejects.toThrow("could not be synced");
+    badFails = false;
+    await deltaSync(client, "acc-retry", "99");
+
+    const notified = mockNotify.mock.calls.map((c) => c[2]);
+    expect(notified.filter((t) => t === "t-ok")).toHaveLength(1);
+    expect(notified.filter((t) => t === "t-bad")).toHaveLength(1);
+    expect(updateAccountSyncState).toHaveBeenCalledWith("acc-retry", "200");
+  });
+
+  it("drops a thread the server no longer has and moves on", async () => {
+    const client = clientFailingOn(new Error("Gmail API error: 404 {\"error\":{\"code\":404}}"));
+
+    await deltaSync(client, "acc-gone", "99");
+
+    expect(deleteThread).toHaveBeenCalledWith("acc-gone", "t-bad");
+    expect(updateAccountSyncState).toHaveBeenCalledWith("acc-gone", "200");
   });
 });

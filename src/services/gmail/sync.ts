@@ -1,7 +1,7 @@
 import { GmailClient } from "./client";
 import { parseGmailMessage, type ParsedMessage } from "./messageParser";
 import { upsertLabel } from "../db/labels";
-import { upsertThread, setThreadLabels } from "../db/threads";
+import { upsertThread, setThreadLabels, deleteThread } from "../db/threads";
 import { upsertMessage } from "../db/messages";
 import { upsertAttachment } from "../db/attachments";
 import { updateAccountSyncState } from "../db/accounts";
@@ -258,7 +258,29 @@ export async function initialSync(
 }
 
 /**
+ * How often in a row a delta sync may fail to re-fetch some threads before the
+ * history position moves on anyway. A thread that fails every time must not
+ * hold the position (and so re-fetch everything since) for good.
+ */
+const MAX_THREAD_FAILURE_RETRIES = 5;
+const threadFailureStreak = new Map<string, number>();
+
+/**
+ * Threads a failed run did store, with the history position it saw. A retry
+ * from the same position skips them: refetching would send their desktop
+ * notification again and run the filters a second time.
+ */
+const storedBeforeRetry = new Map<string, { latestHistoryId: string; threadIds: Set<string> }>();
+
+/** Thrown when threads failed and the run is to be repeated; not an expired history. */
+class ThreadRetryError extends Error {}
+
+/**
  * Delta sync: fetch only changes since last sync using history API.
+ *
+ * The history position is saved only once every affected thread is stored.
+ * Saving it past a thread that failed would lose that change for good, since
+ * history is never listed again from before the saved position.
  */
 /**
  * Process a batch of promises with limited concurrency.
@@ -349,7 +371,11 @@ export async function deltaSync(
     const vipSenders = smartNotifications ? await getVipSenders(accountId) : new Set<string>();
 
     // Re-fetch affected threads in parallel (max 5 concurrent)
-    const threadIds = [...affectedThreadIds];
+    const stored = storedBeforeRetry.get(accountId);
+    const alreadyStored = stored?.latestHistoryId === latestHistoryId ? stored.threadIds : new Set<string>();
+    const threadIds = [...affectedThreadIds].filter((id) => !alreadyStored.has(id));
+    const storedThisRun = new Set(alreadyStored);
+    const failedThreadIds: string[] = [];
     await parallelLimit(
       threadIds.map((threadId) => async () => {
         try {
@@ -414,12 +440,34 @@ export async function deltaSync(
               .then(({ applySmartLabelsToMessages }) => applySmartLabelsToMessages(accountId, newMessages))
               .catch((err) => console.error("Smart label error:", err));
           }
+          storedThisRun.add(threadId);
         } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (message.includes("Gmail API error: 404")) {
+            // Deleted on the server: nothing to fetch, and the stored copy has to go.
+            await deleteThread(accountId, threadId);
+            return;
+          }
           console.error(`Failed to re-sync thread ${threadId}:`, err);
+          failedThreadIds.push(threadId);
         }
       }),
       10,
     );
+
+    if (failedThreadIds.length > 0) {
+      const streak = (threadFailureStreak.get(accountId) ?? 0) + 1;
+      if (streak <= MAX_THREAD_FAILURE_RETRIES) {
+        threadFailureStreak.set(accountId, streak);
+        storedBeforeRetry.set(accountId, { latestHistoryId, threadIds: storedThisRun });
+        throw new ThreadRetryError(
+          `${failedThreadIds.length} thread(s) could not be synced, will retry (${streak}/${MAX_THREAD_FAILURE_RETRIES})`,
+        );
+      }
+      console.error(`Giving up on ${failedThreadIds.length} thread(s) after ${streak - 1} retries`);
+    }
+    threadFailureStreak.delete(accountId);
+    storedBeforeRetry.delete(accountId);
 
     await updateAccountSyncState(accountId, latestHistoryId);
 
@@ -428,6 +476,7 @@ export async function deltaSync(
       .then(({ categorizeNewThreads }) => categorizeNewThreads(accountId))
       .catch((err) => console.error("Categorization error:", err));
   } catch (err) {
+    if (err instanceof ThreadRetryError) throw err;
     // historyId might be too old — need full re-sync
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes("404") || message.includes("historyId")) {

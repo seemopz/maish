@@ -87,6 +87,22 @@ pub struct ImapFolderSearchResult {
     pub folder_status: ImapFolderStatus,
 }
 
+/// Flags of one message, without its body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageFlags {
+    pub uid: u32,
+    pub is_read: bool,
+    pub is_starred: bool,
+}
+
+/// Every message the server holds in a UID range, with its flags. The list is
+/// complete or the command fails: a caller treats a missing UID as expunged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FolderFlagsResult {
+    pub uidvalidity: u32,
+    pub messages: Vec<MessageFlags>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeltaCheckRequest {
     pub folder: String,

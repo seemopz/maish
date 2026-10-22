@@ -523,6 +523,117 @@ pub async fn fetch_message_body(
     )
 }
 
+/// Seen and Flagged state out of a FETCH flag list.
+fn read_and_starred(flags: &[Flag<'_>]) -> (bool, bool) {
+    (
+        flags.iter().any(|f| matches!(f, Flag::Seen)),
+        flags.iter().any(|f| matches!(f, Flag::Flagged)),
+    )
+}
+
+/// The flag list is complete only when it has as many entries as the mailbox
+/// reported in SELECT. async-imap ends a FETCH stream at the tagged reply
+/// without looking at its status, so a `NO`/`BAD` or a connection that dropped
+/// between two responses reads as a short or empty list, not as an error.
+fn check_flag_list_complete(exists: u32, got: usize) -> Result<(), String> {
+    if got == exists as usize {
+        Ok(())
+    } else {
+        Err(format!("incomplete flag list: got {got} of {exists}"))
+    }
+}
+
+/// List UID and flags of every message in `folder` without fetching bodies. A
+/// delta sync only looks above its last UID, so this is how a read, starred,
+/// deleted or moved message further down gets noticed.
+///
+/// All or nothing: the caller deletes local mail the server no longer lists,
+/// so a short list is an error (see [`check_flag_list_complete`]). The fetch
+/// is by sequence number `1:EXISTS`: no EXPUNGE may arrive during a FETCH
+/// (RFC 3501 §7.4.1), and a message that arrives meanwhile cannot change the
+/// range.
+pub async fn fetch_flags(
+    session: &mut ImapSession,
+    folder: &str,
+) -> Result<FolderFlagsResult, String> {
+    let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
+        .await
+        .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
+    // async-imap turns a SELECT whose response ends early into defaults (no
+    // UIDVALIDITY, EXISTS 0), which would read as an emptied folder. Every
+    // server sends UIDVALIDITY, and a UID comparison is meaningless without it.
+    let Some(uidvalidity) = mailbox.uid_validity else {
+        session.taint();
+        return Err(format!("SELECT {folder} gave no UIDVALIDITY"));
+    };
+
+    // `1:*` on an empty mailbox is a BAD on many servers. The NOOP shows a
+    // connection that was lost right after SELECT as an error, not as "empty".
+    if mailbox.exists == 0 {
+        match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.noop()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                session.taint_unless_refusal(&e);
+                return Err(format!("NOOP after SELECT {folder} failed: {e}"));
+            }
+            Err(_) => {
+                session.taint();
+                return Err(format!(
+                    "NOOP after SELECT {folder} timed out after {}s",
+                    IMAP_CMD_TIMEOUT.as_secs()
+                ));
+            }
+        }
+        return Ok(FolderFlagsResult {
+            uidvalidity,
+            messages: vec![],
+        });
+    }
+
+    let range = format!("1:{}", mailbox.exists);
+    let fetched = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
+        let stream = session
+            .fetch(&range, "(UID FLAGS)")
+            .await
+            .map_err(|e| format!("FETCH {folder} flags failed: {e}"))?;
+        Ok::<_, String>(stream.collect::<Vec<_>>().await)
+    })
+    .await;
+    let items = match fetched {
+        Ok(items) => items?,
+        Err(_) => {
+            session.taint();
+            return Err(format!(
+                "FETCH {folder} flags timed out after {}s — check your server settings or network connection",
+                IMAP_FETCH_TIMEOUT.as_secs()
+            ));
+        }
+    };
+
+    let mut messages = Vec::with_capacity(items.len());
+    for item in items {
+        let fetch = item.map_err(|e| {
+            session.taint_unless_refusal(&e);
+            format!("FETCH {folder} flags failed: {e}")
+        })?;
+        let Some(uid) = fetch.uid else { continue };
+        let flags: Vec<_> = fetch.flags().collect();
+        let (is_read, is_starred) = read_and_starred(&flags);
+        messages.push(MessageFlags {
+            uid,
+            is_read,
+            is_starred,
+        });
+    }
+    check_flag_list_complete(mailbox.exists, messages.len())?;
+
+    Ok(FolderFlagsResult {
+        uidvalidity,
+        messages,
+    })
+}
+
 /// Get UIDs of messages newer than `last_uid`.
 pub async fn fetch_new_uids(
     session: &mut ImapSession,
@@ -1992,6 +2103,29 @@ fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flag_list_must_match_the_mailbox_count() {
+        assert!(check_flag_list_complete(0, 0).is_ok());
+        assert!(check_flag_list_complete(3, 3).is_ok());
+        assert_eq!(
+            check_flag_list_complete(3, 1).unwrap_err(),
+            "incomplete flag list: got 1 of 3"
+        );
+        assert!(check_flag_list_complete(3, 0).is_err());
+        assert!(check_flag_list_complete(3, 4).is_err());
+    }
+
+    #[test]
+    fn read_and_starred_reads_seen_and_flagged() {
+        assert_eq!(read_and_starred(&[]), (false, false));
+        assert_eq!(read_and_starred(&[Flag::Seen]), (true, false));
+        assert_eq!(
+            read_and_starred(&[Flag::Flagged, Flag::Answered]),
+            (false, true)
+        );
+        assert_eq!(read_and_starred(&[Flag::Seen, Flag::Flagged]), (true, true));
+    }
 
     // The first attempt hangs like a dropped SYN, the retry reaches the (bound,
     // never-accepting) listener, which is enough for the handshake to complete.

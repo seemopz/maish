@@ -10,6 +10,7 @@ vi.mock("./tauriCommands", () => ({
   imapDeltaCheck: vi.fn(),
 }));
 vi.mock("../logFile", () => ({ logToFile: vi.fn() }));
+vi.mock("./imapReconcile", () => ({ reconcileFolder: vi.fn() }));
 vi.mock("./imapConfigBuilder", () => ({
   buildImapConfig: vi.fn(() => ({
     host: "imap.example.com",
@@ -79,6 +80,7 @@ import {
   createMockImapFetchResult,
 } from "@/test/mocks";
 import { logToFile } from "../logFile";
+import { reconcileFolder } from "./imapReconcile";
 import { imapListFolders, imapSearchFolder, imapFetchMessages, imapDeltaCheck } from "./tauriCommands";
 import { getAccount } from "../db/accounts";
 import { withTransaction } from "../db/connection";
@@ -1652,5 +1654,95 @@ describe("empty folders and partial folder failures", () => {
       await expect(imapDeltaSync("acc-1")).resolves.toEqual({ messages: [] });
       expect(logToFile).toHaveBeenCalledWith("warn", expect.stringContaining("Archive"));
     });
+  });
+});
+
+/**
+ * A delta sync only asks the server for UIDs above last_uid, so mail that was
+ * read, starred, deleted or moved elsewhere after it was stored stayed as it
+ * was for good. Each folder whose check went through gets a flag pass.
+ */
+describe("imapDeltaSync — flag pass over stored mail", () => {
+  const mockGetAccount = vi.mocked(getAccount);
+  const mockImapListFolders = vi.mocked(imapListFolders);
+  const mockImapSearchFolder = vi.mocked(imapSearchFolder);
+  const mockImapFetchMessages = vi.mocked(imapFetchMessages);
+  const mockImapDeltaCheck = vi.mocked(imapDeltaCheck);
+  const mockGetAllFolderSyncStates = vi.mocked(getAllFolderSyncStates);
+  const mockReconcile = vi.mocked(reconcileFolder);
+
+  const syncState = (folder: string, uidvalidity: number) => ({
+    account_id: "acc-1",
+    folder_path: folder,
+    uidvalidity,
+    last_uid: 10,
+    modseq: null,
+    last_sync_at: 0,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetAccount.mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
+    mockImapListFolders.mockResolvedValue([
+      createMockImapFolder({ path: "INBOX", raw_path: "INBOX" }),
+      createMockImapFolder({ path: "Archive", raw_path: "Archive" }),
+    ]);
+    mockGetAllFolderSyncStates.mockResolvedValue([syncState("INBOX", 1), syncState("Archive", 5)] as never);
+    mockImapDeltaCheck.mockResolvedValue([
+      { folder: "INBOX", uidvalidity: 1, new_uids: [], uidvalidity_changed: false },
+      { folder: "Archive", uidvalidity: 5, new_uids: [], uidvalidity_changed: false },
+    ] as never);
+  });
+
+  it("reconciles every existing folder even when nothing new arrived", async () => {
+    await imapDeltaSync("acc-1");
+
+    expect(mockReconcile).toHaveBeenCalledTimes(2);
+    expect(mockReconcile).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "acc-1", folderPath: "INBOX", folderLabelId: "INBOX", uidvalidity: 1 }),
+    );
+    expect(mockReconcile).toHaveBeenCalledWith(
+      expect.objectContaining({ folderPath: "Archive", folderLabelId: "Archive", uidvalidity: 5 }),
+    );
+  });
+
+  it("reconciles after new mail was stored too", async () => {
+    mockImapDeltaCheck.mockResolvedValue([
+      { folder: "INBOX", uidvalidity: 1, new_uids: [11], uidvalidity_changed: false },
+      { folder: "Archive", uidvalidity: 5, new_uids: [], uidvalidity_changed: false },
+    ] as never);
+    mockImapFetchMessages.mockResolvedValue(
+      createMockImapFetchResult([createMockImapMessage({ uid: 11, message_id: "<n@test>" })]),
+    );
+
+    await imapDeltaSync("acc-1");
+
+    expect(mockReconcile).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(upsertMessage).mock.invocationCallOrder[0]!).toBeLessThan(
+      mockReconcile.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("skips a folder that is being resynced for a UIDVALIDITY change", async () => {
+    mockImapDeltaCheck.mockResolvedValue([
+      { folder: "INBOX", uidvalidity: 2, new_uids: [], uidvalidity_changed: true },
+      { folder: "Archive", uidvalidity: 5, new_uids: [], uidvalidity_changed: false },
+    ] as never);
+    mockImapSearchFolder.mockResolvedValue({ uids: [], folder_status: createMockImapFolderStatus({ uidvalidity: 2 }) });
+
+    await imapDeltaSync("acc-1");
+
+    expect(mockReconcile.mock.calls.map(([a]) => a.folderPath)).toEqual(["Archive"]);
+  });
+
+  it("skips a folder whose check failed", async () => {
+    mockImapDeltaCheck.mockResolvedValue([
+      { folder: "INBOX", uidvalidity: 1, new_uids: [], uidvalidity_changed: false, error: "SELECT failed" },
+      { folder: "Archive", uidvalidity: 5, new_uids: [], uidvalidity_changed: false },
+    ] as never);
+
+    await imapDeltaSync("acc-1");
+
+    expect(mockReconcile.mock.calls.map(([a]) => a.folderPath)).toEqual(["Archive"]);
   });
 });

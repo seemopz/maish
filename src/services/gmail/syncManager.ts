@@ -81,22 +81,30 @@ export function onSyncStatus(cb: SyncStatusCallback): () => void {
   };
 }
 
-const syncRequestCallbacks = new Set<() => void>();
+const syncRequestCallbacks = new Set<(settled: Promise<void>) => void>();
 
 /**
  * Called whenever a sync is asked for: by the user, for a new account or when
  * the network comes back. The background timer's runs are not reported, so the
  * UI can tell a fresh attempt from the minute-by-minute retry of a failure.
+ * `settled` resolves once the requested run is over, also when it was queued
+ * behind a running sync.
  */
-export function onSyncRequested(cb: () => void): () => void {
+export function onSyncRequested(cb: (settled: Promise<void>) => void): () => void {
   syncRequestCallbacks.add(cb);
   return () => {
     syncRequestCallbacks.delete(cb);
   };
 }
 
-function notifySyncRequested(): void {
-  for (const cb of syncRequestCallbacks) cb();
+/** `runSync` for a sync that was asked for: report it before its run starts. */
+function requestSync(accountIds: string[], onQueued?: () => void): Promise<void> {
+  let settle!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  for (const cb of syncRequestCallbacks) cb(settled);
+  return runSync(accountIds, onQueued).finally(settle);
 }
 
 /**
@@ -368,8 +376,7 @@ async function runSync(accountIds: string[], onQueued?: () => void): Promise<voi
  * Run sync for a single account, queuing if already running.
  */
 export async function syncAccount(accountId: string): Promise<void> {
-  notifySyncRequested();
-  return runSync([accountId]);
+  return requestSync([accountId]);
 }
 
 /**
@@ -422,8 +429,7 @@ export function stopBackgroundSync(): void {
  * Waits for completion even if a background sync is in progress.
  */
 export async function triggerSync(accountIds: string[]): Promise<void> {
-  notifySyncRequested();
-  await runSync(accountIds);
+  await requestSync(accountIds);
 }
 
 export interface ResyncOptions {
@@ -448,8 +454,7 @@ async function runSyncOrThrow(
     });
   }
   for (const id of accountIds) prepareOutcomes.delete(id);
-  notifySyncRequested();
-  await runSync(accountIds, options.onQueued);
+  await requestSync(accountIds, options.onQueued);
   const failures = accountIds.flatMap((id) => {
     const error = prepareOutcomes.get(id);
     return error ? [error] : [];

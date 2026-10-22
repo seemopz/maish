@@ -395,6 +395,29 @@ describe("syncManager", () => {
       await triggerSync(["a1"]);
       expect(requested).toHaveBeenCalledTimes(4);
     });
+
+    it("settles a queued request only once its own run is over", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id, "100"));
+      let finishFirst!: () => void;
+      mockDeltaSync.mockImplementationOnce(() => new Promise<void>((resolve) => (finishFirst = resolve)));
+      const settledRuns: Promise<void>[] = [];
+      const unsubscribe = onSyncRequested((settled) => settledRuns.push(settled));
+
+      startBackgroundSync(["a1"]);
+      await wait(10);
+      const queued = syncAccount("a2");
+      let done = false;
+      void settledRuns[0]!.then(() => (done = true));
+      await wait(10);
+      expect(done).toBe(false);
+
+      finishFirst();
+      await queued;
+      await wait(0);
+      expect(done).toBe(true);
+      expect(mockDeltaSync).toHaveBeenCalledTimes(2);
+      unsubscribe();
+    });
   });
 
   describe("error coercion", () => {

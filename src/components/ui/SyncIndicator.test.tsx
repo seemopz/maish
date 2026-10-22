@@ -2,15 +2,29 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 
 const mockTriggerSync = vi.fn();
-const syncRequestListeners = new Set<() => void>();
-/** What syncManager does for every sync that is asked for (not the background timer). */
-const requestSync = () => act(() => syncRequestListeners.forEach((cb) => cb()));
+const syncRequestListeners = new Set<(settled: Promise<void>) => void>();
+/**
+ * What syncManager does for every sync that is asked for (not the background timer).
+ * Returns the function that ends the requested run, queued or not.
+ */
+function requestSync(): () => Promise<void> {
+  let settle!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  act(() => syncRequestListeners.forEach((cb) => cb(settled)));
+  return () =>
+    act(async () => {
+      settle();
+      await settled;
+    });
+}
 vi.mock("@/services/gmail/syncManager", () => ({
   triggerSync: (ids: string[]) => {
-    syncRequestListeners.forEach((cb) => cb());
+    syncRequestListeners.forEach((cb) => cb(new Promise<void>(() => {})));
     mockTriggerSync(ids);
   },
-  onSyncRequested: (cb: () => void) => {
+  onSyncRequested: (cb: (settled: Promise<void>) => void) => {
     syncRequestListeners.add(cb);
     return () => syncRequestListeners.delete(cb);
   },
@@ -211,6 +225,36 @@ describe("SyncIndicator", () => {
     expect(pill()!.textContent).toBe("Sync failed: ARetry");
     advance(SYNC_ERROR_VISIBLE_MS - SYNC_PILL_DELAY_MS);
     advance(200);
+    expect(pill()).toBeNull();
+  });
+
+  it("shows the spinner of a requested sync that waited behind a failing background run", () => {
+    render(<SyncIndicator />);
+    failAndFade("Sync failed: A");
+
+    // The background run of account A is under way when a new account B is added; B is queued.
+    setSync("syncing", "Syncing...");
+    requestSync();
+    setSync("error", "Sync failed: A");
+    setSync("syncing", "Syncing: 10/5000 messages");
+    advance(30_000);
+    expect(pill()!.textContent).toBe("Syncing: 10/5000 messages");
+  });
+
+  it("keeps the background repeats hidden again once the requested run is over", async () => {
+    render(<SyncIndicator />);
+    failAndFade("Sync failed: A");
+    const settle = requestSync();
+    setSync("syncing", "Syncing...");
+    setSync("error", "Sync failed: A");
+    advance(SYNC_ERROR_VISIBLE_MS);
+    advance(200);
+    await settle();
+
+    setSync("syncing", "Syncing...");
+    advance(SYNC_PILL_DELAY_MS * 5);
+    expect(pill()).toBeNull();
+    setSync("error", "Sync failed: A");
     expect(pill()).toBeNull();
   });
 

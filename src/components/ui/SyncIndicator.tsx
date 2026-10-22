@@ -31,6 +31,8 @@ export function SyncIndicator() {
   const [shownError, setShownError] = useState<{ message: string } | null>(null);
   const [spinnerShown, setSpinnerShown] = useState(false);
   const seenErrors = useRef(new Set<string>());
+  // Requested runs not yet over; their spinner shows even when it waited behind a failing background run.
+  const openRequests = useRef(0);
   const pillRef = useRef<HTMLDivElement>(null);
 
   const forgetErrors = () => {
@@ -39,7 +41,17 @@ export function SyncIndicator() {
   };
 
   // syncManager reports the request before the sync's first status, so the set is empty by then.
-  useEffect(() => onSyncRequested(forgetErrors), []);
+  useEffect(
+    () =>
+      onSyncRequested((settled) => {
+        forgetErrors();
+        openRequests.current++;
+        void settled.then(() => {
+          openRequests.current--;
+        });
+      }),
+    [],
+  );
 
   // A progress update does not restart the delay.
   const errorMessage = syncState === "error" ? (syncMessage ?? "Sync failed") : null;
@@ -57,7 +69,7 @@ export function SyncIndicator() {
       }
       return;
     }
-    if (seenErrors.current.size > 0) return;
+    if (seenErrors.current.size > 0 && openRequests.current === 0) return;
     const timer = setTimeout(() => setSpinnerShown(true), SYNC_PILL_DELAY_MS);
     return () => clearTimeout(timer);
   }, [syncState, errorMessage]);

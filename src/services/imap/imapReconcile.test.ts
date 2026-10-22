@@ -49,6 +49,7 @@ describe("reconcileFolder", () => {
     vi.clearAllMocks();
     resetReconcileClock();
     vi.mocked(getResourceIdsWithOpenOps).mockResolvedValue(new Set());
+    vi.mocked(setMessageFlags).mockResolvedValue(true);
     mockLocal.mockResolvedValue([local(3), local(4), local(5)]);
     mockFlags.mockResolvedValue({ uidvalidity: 7, messages: [remote(3), remote(4), remote(5)] });
   });
@@ -59,11 +60,39 @@ describe("reconcileFolder", () => {
     expect(mockFlags).toHaveBeenCalledWith(config, "INBOX");
   });
 
-  it("reads the stored rows after the server list, not before", async () => {
+  it("snapshots the stored rows before the server list is fetched", async () => {
     await reconcileFolder(args);
 
-    const listed = mockFlags.mock.invocationCallOrder[0]!;
-    expect(mockLocal.mock.invocationCallOrder.at(-1)!).toBeGreaterThan(listed);
+    expect(mockLocal.mock.invocationCallOrder[0]!).toBeLessThan(mockFlags.mock.invocationCallOrder[0]!);
+  });
+
+  it("does not count a flag change the user made during the fetch", async () => {
+    vi.mocked(setMessageFlags).mockResolvedValue(false);
+    mockLocal.mockResolvedValue([local(3, { is_read: 0 })]);
+    mockFlags.mockResolvedValue({ uidvalidity: 7, messages: [remote(3, { is_read: true })] });
+
+    const result = await reconcileFolder(args);
+
+    expect(setMessageFlags).toHaveBeenCalledWith(
+      "acc-1",
+      "imap-acc-1-INBOX-3",
+      { isRead: false, isStarred: false },
+      { isRead: true, isStarred: false },
+    );
+    expect(refreshThreadFlags).not.toHaveBeenCalled();
+    expect(result).toEqual({ updated: 0, removed: 0 });
+  });
+
+  it("leaves a thread alone whose queued action was sent during the fetch", async () => {
+    vi.mocked(getResourceIdsWithOpenOps)
+      .mockResolvedValueOnce(new Set(["t3"]))
+      .mockResolvedValueOnce(new Set());
+    mockLocal.mockResolvedValue([local(3, { is_read: 0 })]);
+    mockFlags.mockResolvedValue({ uidvalidity: 7, messages: [remote(3, { is_read: true })] });
+
+    await reconcileFolder(args);
+
+    expect(setMessageFlags).not.toHaveBeenCalled();
   });
 
   it("takes over a read flag that changed on the server for an old message", async () => {
@@ -72,7 +101,12 @@ describe("reconcileFolder", () => {
 
     const result = await reconcileFolder(args);
 
-    expect(setMessageFlags).toHaveBeenCalledWith("acc-1", "imap-acc-1-INBOX-3", true, false);
+    expect(setMessageFlags).toHaveBeenCalledWith(
+      "acc-1",
+      "imap-acc-1-INBOX-3",
+      { isRead: false, isStarred: false },
+      { isRead: true, isStarred: false },
+    );
     expect(setMessageFlags).toHaveBeenCalledTimes(1);
     expect(refreshThreadFlags).toHaveBeenCalledWith("acc-1", "t3");
     expect(result).toEqual({ updated: 1, removed: 0 });
@@ -87,8 +121,18 @@ describe("reconcileFolder", () => {
 
     await reconcileFolder(args);
 
-    expect(setMessageFlags).toHaveBeenCalledWith("acc-1", "imap-acc-1-INBOX-3", true, true);
-    expect(setMessageFlags).toHaveBeenCalledWith("acc-1", "imap-acc-1-INBOX-4", true, false);
+    expect(setMessageFlags).toHaveBeenCalledWith(
+      "acc-1",
+      "imap-acc-1-INBOX-3",
+      { isRead: true, isStarred: false },
+      { isRead: true, isStarred: true },
+    );
+    expect(setMessageFlags).toHaveBeenCalledWith(
+      "acc-1",
+      "imap-acc-1-INBOX-4",
+      { isRead: true, isStarred: true },
+      { isRead: true, isStarred: false },
+    );
   });
 
   it("removes a message the server no longer lists and refreshes its thread", async () => {

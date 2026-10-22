@@ -560,10 +560,31 @@ pub async fn fetch_flags(
         .await
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
-    let uidvalidity = mailbox.uid_validity.unwrap_or(0);
+    // async-imap turns a SELECT whose response ends early into defaults (no
+    // UIDVALIDITY, EXISTS 0), which would read as an emptied folder. Every
+    // server sends UIDVALIDITY, and a UID comparison is meaningless without it.
+    let Some(uidvalidity) = mailbox.uid_validity else {
+        session.taint();
+        return Err(format!("SELECT {folder} gave no UIDVALIDITY"));
+    };
 
-    // `1:*` on an empty mailbox is a BAD on many servers.
+    // `1:*` on an empty mailbox is a BAD on many servers. The NOOP shows a
+    // connection that was lost right after SELECT as an error, not as "empty".
     if mailbox.exists == 0 {
+        match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.noop()).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                session.taint_unless_refusal(&e);
+                return Err(format!("NOOP after SELECT {folder} failed: {e}"));
+            }
+            Err(_) => {
+                session.taint();
+                return Err(format!(
+                    "NOOP after SELECT {folder} timed out after {}s",
+                    IMAP_CMD_TIMEOUT.as_secs()
+                ));
+            }
+        }
         return Ok(FolderFlagsResult {
             uidvalidity,
             messages: vec![],

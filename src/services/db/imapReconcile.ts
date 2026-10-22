@@ -21,17 +21,36 @@ export async function getLocalMessagesInFolder(
   );
 }
 
+export interface MessageFlagState {
+  isRead: boolean;
+  isStarred: boolean;
+}
+
+/**
+ * Set a message's flags only if it still has the `expected` ones, so a flag the
+ * user changed since the caller read the row is not overwritten. Returns
+ * whether the row was changed.
+ */
 export async function setMessageFlags(
   accountId: string,
   messageId: string,
-  isRead: boolean,
-  isStarred: boolean,
-): Promise<void> {
+  expected: MessageFlagState,
+  next: MessageFlagState,
+): Promise<boolean> {
   const db = await getDb();
-  await db.execute(
-    "UPDATE messages SET is_read = $1, is_starred = $2 WHERE account_id = $3 AND id = $4",
-    [isRead ? 1 : 0, isStarred ? 1 : 0, accountId, messageId],
+  const result = await db.execute(
+    `UPDATE messages SET is_read = $1, is_starred = $2
+      WHERE account_id = $3 AND id = $4 AND is_read = $5 AND is_starred = $6`,
+    [
+      next.isRead ? 1 : 0,
+      next.isStarred ? 1 : 0,
+      accountId,
+      messageId,
+      expected.isRead ? 1 : 0,
+      expected.isStarred ? 1 : 0,
+    ],
   );
+  return result.rowsAffected > 0;
 }
 
 /**

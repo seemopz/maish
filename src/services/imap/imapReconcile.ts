@@ -55,11 +55,15 @@ export async function reconcileFolder(args: ReconcileFolderArgs): Promise<Reconc
   if (last !== undefined && now - last < RECONCILE_INTERVAL_MS) return none;
 
   try {
-    // Nothing stored from this folder: not worth listing it.
-    if ((await getLocalMessagesInFolder(accountId, folderPath)).length === 0) {
+    // The snapshot is taken before the (slow) fetch: a flag the user sets while
+    // it runs is then a difference to the snapshot, which setMessageFlags
+    // refuses to overwrite, instead of a stale server value winning.
+    const local = await getLocalMessagesInFolder(accountId, folderPath);
+    if (local.length === 0) {
       lastReconciledAt.set(key, now);
       return none;
     }
+    const busyBefore = await getResourceIdsWithOpenOps(accountId);
 
     const server = await imapFetchFlags(config, folderPath);
 
@@ -73,15 +77,21 @@ export async function reconcileFolder(args: ReconcileFolderArgs): Promise<Reconc
       return none;
     }
 
-    // Read after the (slow) fetch, so a flag the user set meanwhile is in the
-    // snapshot and a queued action is seen: the server list can be older.
-    const local = await getLocalMessagesInFolder(accountId, folderPath);
     const serverByUid = new Map(server.messages.map((m) => [m.uid, m]));
-    // A thread with a local action still queued is the user's version of the truth.
-    const busy = await getResourceIdsWithOpenOps(accountId);
+    // A thread with a local action still queued is the user's version of the
+    // truth. Read on both sides of the fetch: an action sent meanwhile is gone
+    // from the queue by now.
+    const busy = new Set([...busyBefore, ...(await getResourceIdsWithOpenOps(accountId))]);
 
     const gone: typeof local = [];
-    const changed: { id: string; threadId: string; isRead: boolean; isStarred: boolean }[] = [];
+    const changed: {
+      id: string;
+      threadId: string;
+      isRead: boolean;
+      isStarred: boolean;
+      wasRead: boolean;
+      wasStarred: boolean;
+    }[] = [];
     for (const msg of local) {
       if (busy.has(msg.thread_id) || busy.has(msg.id)) continue;
       const remote = serverByUid.get(msg.imap_uid);
@@ -93,14 +103,28 @@ export async function reconcileFolder(args: ReconcileFolderArgs): Promise<Reconc
           threadId: msg.thread_id,
           isRead: remote.is_read,
           isStarred: remote.is_starred,
+          wasRead: msg.is_read === 1,
+          wasStarred: msg.is_starred === 1,
         });
       }
     }
 
+    let written = 0;
     if (gone.length > 0 || changed.length > 0) {
       await withTransaction(async () => {
-        for (const c of changed) await setMessageFlags(accountId, c.id, c.isRead, c.isStarred);
-        const flagThreads = new Set(changed.map((c) => c.threadId));
+        const flagThreads = new Set<string>();
+        for (const c of changed) {
+          const applied = await setMessageFlags(
+            accountId,
+            c.id,
+            { isRead: c.wasRead, isStarred: c.wasStarred },
+            { isRead: c.isRead, isStarred: c.isStarred },
+          );
+          if (applied) {
+            written++;
+            flagThreads.add(c.threadId);
+          }
+        }
         const goneThreads = new Set(gone.map((m) => m.thread_id));
         for (const threadId of flagThreads) {
           if (!goneThreads.has(threadId)) await refreshThreadFlags(accountId, threadId);
@@ -117,12 +141,12 @@ export async function reconcileFolder(args: ReconcileFolderArgs): Promise<Reconc
       });
       logToFile(
         "info",
-        `[imapReconcile] ${folderPath}: ${changed.length} message(s) changed flags, ${gone.length} no longer on the server`,
+        `[imapReconcile] ${folderPath}: ${written} message(s) changed flags, ${gone.length} no longer on the server`,
       );
     }
 
     lastReconciledAt.set(key, now);
-    return { updated: changed.length, removed: gone.length };
+    return { updated: written, removed: gone.length };
   } catch (err) {
     logToFile(
       "warn",

@@ -108,13 +108,19 @@ export async function transformText(
   return callAi(prompts[type], text);
 }
 
+/**
+ * Cache type of smart replies. Bumped when replies started following the mail
+ * language, so replies cached before (always English) are not served again.
+ */
+export const SMART_REPLIES_CACHE = "smart_replies_v2";
+
 export async function generateSmartReplies(
   threadId: string,
   accountId: string,
   messages: DbMessage[],
 ): Promise<string[]> {
   // Check cache first
-  const cached = await getAiCache(accountId, threadId, "smart_replies");
+  const cached = await getAiCache(accountId, threadId, SMART_REPLIES_CACHE);
   if (cached) {
     try {
       return JSON.parse(cached) as string[];
@@ -153,7 +159,7 @@ export async function generateSmartReplies(
   replies = replies.slice(0, 3);
 
   // Cache the result
-  await setAiCache(accountId, threadId, "smart_replies", JSON.stringify(replies));
+  await setAiCache(accountId, threadId, SMART_REPLIES_CACHE, JSON.stringify(replies));
   return replies;
 }
 

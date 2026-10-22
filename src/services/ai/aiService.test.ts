@@ -20,9 +20,29 @@ vi.mock("@/services/db/settings", () => ({
   getSetting: (key: string) => mockGetSetting(key),
 }));
 
-import { classifyThreadsBySmartLabels, summarizeThread, askInbox, extractTaskFromThread } from "./aiService";
+import { classifyThreadsBySmartLabels, summarizeThread, askInbox, extractTaskFromThread, generateSmartReplies } from "./aiService";
 import { getAiCache, setAiCache, deleteAiCache } from "@/services/db/aiCache";
 import type { DbMessage } from "@/services/db/messages";
+
+describe("smart replies cache", () => {
+  const messages = [
+    { subject: "Druck", from_name: "Anna", from_address: "anna@example.de", date: 0, body_text: "Bitte ausdrucken" },
+  ] as unknown as DbMessage[];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSetting.mockImplementation(async () => null);
+    mockComplete.mockResolvedValue('["Mach ich!", "Gerne.", "Erledigt."]');
+  });
+
+  it("ignores replies cached before they followed the mail language", async () => {
+    vi.mocked(getAiCache).mockImplementationOnce(async (_a, _t, type) =>
+      type === "smart_replies" ? '["Sure, will do!", "Thanks!", "Got it."]' : null,
+    );
+    expect(await generateSmartReplies("t1", "a1", messages)).toEqual(["Mach ich!", "Gerne.", "Erledigt."]);
+    expect(setAiCache).toHaveBeenCalledWith("a1", "t1", "smart_replies_v2", expect.any(String));
+  });
+});
 
 describe("summary language", () => {
   const messages = [

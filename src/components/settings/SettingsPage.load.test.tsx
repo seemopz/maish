@@ -40,6 +40,6 @@ describe("SettingsPage load", () => {
     await waitFor(() => expect(getSetting).toHaveBeenCalledWith("ai_writing_style_enabled"));
     // Each secure setting is read on its own, so one bad one does not hide the others.
     expect(getSecureSetting).toHaveBeenCalledWith("claude_api_key");
-    expect(getSecureSetting).toHaveBeenCalledWith("copilot_api_key");
+    expect(getSecureSetting).toHaveBeenCalledWith("gemini_api_key");
   });
 });

@@ -74,14 +74,13 @@ Most email clients are slow, bloated, or send your data to someone else's server
 
 ### AI
 
-Five providers with selectable models -- choose one or mix and match:
+Four providers with selectable models -- choose one or mix and match:
 
 | Provider | Models |
 |----------|--------|
-| **Anthropic Claude** | Haiku 4.5, Sonnet 4, Opus 4 |
-| **OpenAI** | GPT-4o Mini, GPT-4o, GPT-4.1 Nano, GPT-4.1 Mini, GPT-4.1 |
-| **Google Gemini** | 2.5 Flash, 2.5 Pro |
-| **GitHub Copilot** (GitHub Models) | GPT-4o Mini, GPT-4o, GPT-4.1 Nano, GPT-4.1 Mini, GPT-4.1 |
+| **Anthropic Claude** | Haiku 4.5, Sonnet 5.5, Opus 5.5, Fable 5.1 |
+| **OpenAI** | GPT-6 Luna, GPT-6.1 Sol, GPT-6 Astra |
+| **Google Gemini** | 3.5 Flash-Lite, 3.8 Flash, 4 Argon |
 | **Ollama** (local) | Any model installed on your Ollama server |
 
 Thread summaries, smart reply suggestions, AI compose & reply, text transform (improve/shorten/formalize), Ask My Inbox (natural language search). Pick which model to use per provider in Settings. All results cached locally.
@@ -131,7 +130,7 @@ No build tools or programming knowledge required -- just download, install, and 
 
 **IMAP/SMTP:** Click "Add IMAP Account" in the account switcher. Enter your email and password -- Maish auto-discovers server settings for popular providers (Outlook, Yahoo, iCloud, Fastmail, etc.). For other providers, enter IMAP/SMTP server details manually. No Google Cloud project needed.
 
-**AI (optional):** Add an API key for [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [Google Gemini](https://aistudio.google.com/), or a GitHub token for [GitHub Models](https://github.com/marketplace/models) (Copilot), in Settings -- or point Maish at a local [Ollama](https://ollama.com/) server. Then select which model to use for each provider.
+**AI (optional):** Add an API key for [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [Google Gemini](https://aistudio.google.com/), in Settings -- or point Maish at a local [Ollama](https://ollama.com/) server. Then select which model to use for each provider.
 
 ### Building from source
 
@@ -160,7 +159,7 @@ See [Development Guide](docs/development.md) for all commands, testing, and buil
 | **Editor** | TipTap v3 |
 | **Email** | Gmail API, IMAP/SMTP (via async-imap + lettre in Rust) |
 | **Database** | SQLite + FTS5 (37 tables) |
-| **AI** | Claude, GPT, Gemini, GitHub Copilot, Ollama |
+| **AI** | Claude, GPT, Gemini, Ollama |
 | **Testing** | Vitest + Testing Library |
 
 See [Architecture](docs/architecture.md) for detailed design, data flow, and project structure.

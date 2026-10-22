@@ -338,3 +338,24 @@ describe("upsert conflict targets", () => {
     expect(unbacked).toEqual([]);
   });
 });
+
+describe("v27 Copilot removal", () => {
+  it("drops the Copilot token and model and keeps every other setting", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    db.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    const insert = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
+    insert.run("ai_provider", "copilot");
+    insert.run("copilot_api_key", "enc:ciphertext");
+    insert.run("copilot_model", "openai/gpt-4o");
+    insert.run("claude_api_key", "enc:other");
+
+    const v27 = MIGRATIONS.find((m) => m.version === 27)!;
+    for (const statement of splitStatements(v27.sql)) db.exec(statement);
+
+    expect(db.prepare("SELECT key, value FROM settings ORDER BY key").all()).toEqual([
+      { key: "ai_provider", value: "copilot" },
+      { key: "claude_api_key", value: "enc:other" },
+    ]);
+  });
+});

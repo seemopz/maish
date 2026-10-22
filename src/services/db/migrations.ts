@@ -904,6 +904,18 @@ export const MIGRATIONS = [
         ON follow_up_reminders(account_id, thread_id);
     `,
   },
+  {
+    version: 27,
+    description: "Remove the GitHub Copilot provider settings",
+    sql: `
+      -- GitHub retired GitHub Models, the API behind the Copilot provider, on
+      -- 2026-07-30, and the provider is gone. Drop its stored token (a GitHub
+      -- PAT) instead of leaving an unreachable credential behind. An
+      -- ai_provider of 'copilot' needs no rewrite: every reader treats an
+      -- unknown provider as claude.
+      DELETE FROM settings WHERE key IN ('copilot_api_key', 'copilot_model');
+    `,
+  },
 ];
 
 /**

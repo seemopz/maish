@@ -340,22 +340,49 @@ describe("upsert conflict targets", () => {
 });
 
 describe("v27 Copilot removal", () => {
-  it("drops the Copilot token and model and keeps every other setting", async () => {
-    const { DatabaseSync } = await import("node:sqlite");
+  function runV27(rows: [string, string][]): unknown[] {
+    // process.getBuiltinModule keeps node:sqlite away from Vite, which cannot
+    // bundle it under Node 22 (CI).
+    const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
     const db = new DatabaseSync(":memory:");
     db.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
     const insert = db.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
-    insert.run("ai_provider", "copilot");
-    insert.run("copilot_api_key", "enc:ciphertext");
-    insert.run("copilot_model", "openai/gpt-4o");
-    insert.run("claude_api_key", "enc:other");
+    for (const [key, value] of rows) insert.run(key, value);
 
     const v27 = MIGRATIONS.find((m) => m.version === 27)!;
     for (const statement of splitStatements(v27.sql)) db.exec(statement);
+    return db.prepare("SELECT key, value FROM settings ORDER BY key").all();
+  }
 
-    expect(db.prepare("SELECT key, value FROM settings ORDER BY key").all()).toEqual([
-      { key: "ai_provider", value: "copilot" },
+  it("drops the Copilot token and model and turns AI off instead of switching to Claude", () => {
+    expect(
+      runV27([
+        ["ai_provider", "copilot"],
+        ["ai_enabled", "true"],
+        ["copilot_api_key", "enc:ciphertext"],
+        ["copilot_model", "openai/gpt-4o"],
+        ["claude_api_key", "enc:other"],
+      ]),
+    ).toEqual([
+      { key: "ai_enabled", value: "false" },
       { key: "claude_api_key", value: "enc:other" },
+    ]);
+  });
+
+  it("turns AI off for a Copilot user who never stored ai_enabled", () => {
+    expect(runV27([["ai_provider", "copilot"]])).toEqual([{ key: "ai_enabled", value: "false" }]);
+  });
+
+  it("leaves another provider and its AI switch alone", () => {
+    expect(
+      runV27([
+        ["ai_provider", "openai"],
+        ["ai_enabled", "true"],
+        ["copilot_api_key", "enc:stale"],
+      ]),
+    ).toEqual([
+      { key: "ai_enabled", value: "true" },
+      { key: "ai_provider", value: "openai" },
     ]);
   });
 });

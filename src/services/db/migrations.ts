@@ -910,9 +910,15 @@ export const MIGRATIONS = [
     sql: `
       -- GitHub retired GitHub Models, the API behind the Copilot provider, on
       -- 2026-07-30, and the provider is gone. Drop its stored token (a GitHub
-      -- PAT) instead of leaving an unreachable credential behind. An
-      -- ai_provider of 'copilot' needs no rewrite: every reader treats an
-      -- unknown provider as claude.
+      -- PAT) instead of leaving an unreachable credential behind. A user who
+      -- had Copilot selected gets AI turned off rather than silently moved to
+      -- Claude (every reader treats an unknown provider as claude), which
+      -- would start sending mail to a provider they never chose.
+      INSERT INTO settings (key, value)
+        SELECT 'ai_enabled', 'false'
+        WHERE EXISTS (SELECT 1 FROM settings WHERE key = 'ai_provider' AND value = 'copilot')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+      DELETE FROM settings WHERE key = 'ai_provider' AND value = 'copilot';
       DELETE FROM settings WHERE key IN ('copilot_api_key', 'copilot_model');
     `,
   },

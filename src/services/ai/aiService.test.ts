@@ -12,9 +12,75 @@ vi.mock("./providerManager", () => ({
 vi.mock("@/services/db/aiCache", () => ({
   getAiCache: vi.fn(() => Promise.resolve(null)),
   setAiCache: vi.fn(),
+  deleteAiCache: vi.fn(),
 }));
 
-import { classifyThreadsBySmartLabels } from "./aiService";
+const mockGetSetting = vi.fn((_key: string): Promise<string | null> => Promise.resolve(null));
+vi.mock("@/services/db/settings", () => ({
+  getSetting: (key: string) => mockGetSetting(key),
+}));
+
+import { classifyThreadsBySmartLabels, summarizeThread, askInbox, extractTaskFromThread } from "./aiService";
+import { getAiCache, setAiCache, deleteAiCache } from "@/services/db/aiCache";
+import type { DbMessage } from "@/services/db/messages";
+
+describe("summary language", () => {
+  const messages = [
+    { subject: "Termin", from_name: "Anna", from_address: "anna@example.de", date: 0, body_text: "Hallo" },
+  ] as unknown as DbMessage[];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComplete.mockResolvedValue("ok");
+    mockGetSetting.mockImplementation(async () => null);
+  });
+
+  function systemPrompt(): string {
+    return mockComplete.mock.calls[0][0].systemPrompt as string;
+  }
+
+  it("summarizes in German when the setting is unset", async () => {
+    await summarizeThread("t1", "a1", messages);
+    expect(systemPrompt()).toContain("in German, even if");
+    expect(getAiCache).toHaveBeenCalledWith("a1", "t1", "summary_de");
+    expect(setAiCache).toHaveBeenCalledWith("a1", "t1", "summary_de", "ok");
+  });
+
+  it("follows the mail language and caches per language", async () => {
+    mockGetSetting.mockImplementation(async (key) => (key === "ai_summary_language" ? "email" : null));
+    await summarizeThread("t1", "a1", messages);
+    expect(systemPrompt()).toContain("in the same language as the emails");
+    expect(setAiCache).toHaveBeenCalledWith("a1", "t1", "summary_email", "ok");
+  });
+
+  it("skips and clears the cache on refresh", async () => {
+    expect(await summarizeThread("t1", "a1", messages, { refresh: true })).toBe("ok");
+    expect(getAiCache).not.toHaveBeenCalled();
+    expect(deleteAiCache).toHaveBeenCalledWith("a1", "t1", "summary_de");
+  });
+
+  it("caches nothing when the provider rejects an incomplete reply", async () => {
+    mockComplete.mockRejectedValueOnce(new Error("Claude stopped early (max_tokens), the reply is incomplete"));
+    await expect(summarizeThread("t1", "a1", messages)).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    expect(setAiCache).not.toHaveBeenCalled();
+  });
+
+  it("answers Ask Inbox in the summary language, or in the question's language", async () => {
+    mockGetSetting.mockImplementation(async (key) => (key === "ai_summary_language" ? "en" : null));
+    await askInbox("Wann ist der Termin?", "a1", "ctx");
+    expect(systemPrompt()).toContain("in English, even if");
+
+    mockComplete.mockClear();
+    mockGetSetting.mockImplementation(async (key) => (key === "ai_summary_language" ? "email" : null));
+    await askInbox("Wann ist der Termin?", "a1", "ctx");
+    expect(systemPrompt()).toContain("same language as the user's question");
+  });
+
+  it("extracts tasks in the summary language", async () => {
+    await extractTaskFromThread("t1", "a1", messages);
+    expect(systemPrompt()).toContain("in German, even if");
+  });
+});
 
 describe("classifyThreadsBySmartLabels", () => {
   beforeEach(() => {

@@ -1,5 +1,6 @@
 import { getActiveProvider, getProviderForConnectionTest } from "./providerManager";
-import { getAiCache, setAiCache } from "@/services/db/aiCache";
+import { getAiCache, setAiCache, deleteAiCache } from "@/services/db/aiCache";
+import { getSetting } from "@/services/db/settings";
 import { AiError } from "./errors";
 import type { DbMessage } from "@/services/db/messages";
 import {
@@ -14,7 +15,14 @@ import {
   ASK_INBOX_PROMPT,
   SMART_LABEL_PROMPT,
   EXTRACT_TASK_PROMPT,
+  parseSummaryLanguage,
+  withSummaryLanguage,
+  type SummaryLanguage,
 } from "./prompts";
+
+async function getSummaryLanguage(): Promise<SummaryLanguage> {
+  return parseSummaryLanguage(await getSetting("ai_summary_language"));
+}
 
 async function callAi(systemPrompt: string, userContent: string): Promise<string> {
   try {
@@ -50,18 +58,24 @@ export async function summarizeThread(
   threadId: string,
   accountId: string,
   messages: DbMessage[],
+  { refresh = false }: { refresh?: boolean } = {},
 ): Promise<string> {
-  // Check cache first
-  const cached = await getAiCache(accountId, threadId, "summary");
-  if (cached) return cached;
+  // Cached per language, so changing the setting shows a fresh summary
+  const language = await getSummaryLanguage();
+  const cacheType = `summary_${language}`;
+  if (refresh) {
+    await deleteAiCache(accountId, threadId, cacheType);
+  } else {
+    const cached = await getAiCache(accountId, threadId, cacheType);
+    if (cached) return cached;
+  }
 
   const subject = messages[0]?.subject ?? "No subject";
   const formatted = messages.map(formatMessageForSummary).join("\n---\n");
   const combined = `Subject: ${subject}\n\n${formatted}`.slice(0, 6000);
-  const summary = await callAi(SUMMARIZE_PROMPT, combined);
+  const summary = await callAi(withSummaryLanguage(SUMMARIZE_PROMPT, language), combined);
 
-  // Cache the result
-  await setAiCache(accountId, threadId, "summary", summary);
+  await setAiCache(accountId, threadId, cacheType, summary);
   return summary;
 }
 
@@ -149,7 +163,8 @@ export async function askInbox(
   context: string,
 ): Promise<string> {
   const userContent = `<email_content>${context}</email_content>\n\nQuestion: ${question}`;
-  return callAi(ASK_INBOX_PROMPT, userContent);
+  const prompt = withSummaryLanguage(ASK_INBOX_PROMPT, await getSummaryLanguage(), "the user's question");
+  return callAi(prompt, userContent);
 }
 
 const VALID_CATEGORIES = new Set(["Primary", "Updates", "Promotions", "Social", "Newsletters"]);
@@ -232,7 +247,7 @@ export async function extractTaskFromThread(
   const subject = messages[0]?.subject ?? "No subject";
   const formatted = messages.map(formatMessageForSummary).join("\n---\n");
   const combined = `<email_content>Subject: ${subject}\n\n${formatted}</email_content>`.slice(0, 6000);
-  return callAi(EXTRACT_TASK_PROMPT, combined);
+  return callAi(withSummaryLanguage(EXTRACT_TASK_PROMPT, await getSummaryLanguage()), combined);
 }
 
 export async function testConnection(): Promise<boolean> {

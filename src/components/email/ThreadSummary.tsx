@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Sparkles, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { isAiAvailable } from "@/services/ai/providerManager";
 import { summarizeThread } from "@/services/ai/aiService";
-import { deleteAiCache } from "@/services/db/aiCache";
 import type { DbMessage } from "@/services/db/messages";
 
 interface ThreadSummaryProps {
@@ -49,11 +48,10 @@ export function ThreadSummary({ threadId, accountId, messages }: ThreadSummaryPr
   }, [available, messages.length, summary, loadSummary]);
 
   const handleRefresh = useCallback(async () => {
-    await deleteAiCache(accountId, threadId, "summary");
     setSummary(null);
     setLoading(true);
     try {
-      const result = await summarizeThread(threadId, accountId, messages);
+      const result = await summarizeThread(threadId, accountId, messages, { refresh: true });
       setSummary(result);
     } catch (err) {
       console.error("Failed to refresh summary:", err);

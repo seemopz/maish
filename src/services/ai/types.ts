@@ -13,8 +13,8 @@ export interface AiProviderClient {
 
 export const DEFAULT_MODELS: Record<AiProvider, string> = {
   claude: "claude-haiku-4-5-20251001",
-  openai: "gpt-4o-mini",
-  gemini: "gemini-2.5-flash-preview-05-20",
+  openai: "gpt-6-luna",
+  gemini: "gemini-3.5-flash-lite",
   ollama: "llama3.2",
   copilot: "openai/gpt-4o-mini",
 };
@@ -24,22 +24,24 @@ export interface ModelOption {
   label: string;
 }
 
+// Ids checked against the providers' model docs in October 2026. A saved id
+// that drops out of this list falls back to the default (resolveModel).
 export const PROVIDER_MODELS: Record<Exclude<AiProvider, "ollama">, ModelOption[]> = {
   claude: [
     { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-    { id: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-    { id: "claude-opus-4-20250514", label: "Claude Opus 4" },
+    { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
+    { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
+    { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
   ],
   openai: [
-    { id: "gpt-4o-mini", label: "GPT-4o Mini" },
-    { id: "gpt-4o", label: "GPT-4o" },
-    { id: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
-    { id: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
-    { id: "gpt-4.1", label: "GPT-4.1" },
+    { id: "gpt-6-luna", label: "GPT-6 Luna" },
+    { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
+    { id: "gpt-6-astra", label: "GPT-6 Astra" },
   ],
   gemini: [
-    { id: "gemini-2.5-flash-preview-05-20", label: "Gemini 2.5 Flash" },
-    { id: "gemini-2.5-pro-preview-05-06", label: "Gemini 2.5 Pro" },
+    { id: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
+    { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+    { id: "gemini-4-argon", label: "Gemini 4 Argon" },
   ],
   copilot: [
     { id: "openai/gpt-4o-mini", label: "GPT-4o Mini (Low)" },
@@ -49,6 +51,14 @@ export const PROVIDER_MODELS: Record<Exclude<AiProvider, "ollama">, ModelOption[
     { id: "openai/gpt-4.1", label: "GPT-4.1 (High)" },
   ],
 };
+
+/** The saved model if the provider still offers it, otherwise the provider's default. */
+export function resolveModel(
+  provider: Exclude<AiProvider, "ollama">,
+  saved: string | null | undefined,
+): string {
+  return saved && PROVIDER_MODELS[provider].some((m) => m.id === saved) ? saved : DEFAULT_MODELS[provider];
+}
 
 export const MODEL_SETTINGS: Record<Exclude<AiProvider, "ollama">, string> = {
   claude: "claude_model",

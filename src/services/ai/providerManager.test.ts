@@ -107,7 +107,7 @@ describe("providerManager", () => {
       });
 
       await getActiveProvider();
-      expect(createOpenAIProvider).toHaveBeenCalledWith("sk-test", "gpt-4o-mini");
+      expect(createOpenAIProvider).toHaveBeenCalledWith("sk-test", "gpt-6-luna");
     });
 
     it("creates gemini provider with default model", async () => {
@@ -118,26 +118,42 @@ describe("providerManager", () => {
       });
 
       await getActiveProvider();
-      expect(createGeminiProvider).toHaveBeenCalledWith("AItest", "gemini-2.5-flash-preview-05-20");
+      expect(createGeminiProvider).toHaveBeenCalledWith("AItest", "gemini-3.5-flash-lite");
     });
 
     it("uses custom model from settings when configured", async () => {
       mockGetSetting.mockImplementation(async (key: string) => {
         if (key === "ai_provider") return "claude";
         if (key === "claude_api_key") return "sk-ant-test";
-        if (key === "claude_model") return "claude-sonnet-4-20250514";
+        if (key === "claude_model") return "claude-sonnet-5-5";
         return null;
       });
 
       await getActiveProvider();
-      expect(createClaudeProvider).toHaveBeenCalledWith("sk-ant-test", "claude-sonnet-4-20250514");
+      expect(createClaudeProvider).toHaveBeenCalledWith("sk-ant-test", "claude-sonnet-5-5");
+    });
+
+    it.each([
+      ["claude", "claude-sonnet-4-20250514", createClaudeProvider, "claude-haiku-4-5-20251001"],
+      ["openai", "gpt-4o-mini", createOpenAIProvider, "gpt-6-luna"],
+      ["gemini", "gemini-2.5-flash-preview-05-20", createGeminiProvider, "gemini-3.5-flash-lite"],
+    ] as const)("moves a retired %s model (%s) to the default", async (provider, saved, create, expected) => {
+      mockGetSetting.mockImplementation(async (key: string) => {
+        if (key === "ai_provider") return provider;
+        if (key === `${provider}_api_key`) return "key";
+        if (key === `${provider}_model`) return saved;
+        return null;
+      });
+
+      await getActiveProvider();
+      expect(create).toHaveBeenCalledWith("key", expected);
     });
 
     it("invalidates cache when model changes", async () => {
       mockGetSetting.mockImplementation(async (key: string) => {
         if (key === "ai_provider") return "openai";
         if (key === "openai_api_key") return "sk-test";
-        if (key === "openai_model") return "gpt-4o-mini";
+        if (key === "openai_model") return "gpt-6-luna";
         return null;
       });
 
@@ -148,13 +164,13 @@ describe("providerManager", () => {
       mockGetSetting.mockImplementation(async (key: string) => {
         if (key === "ai_provider") return "openai";
         if (key === "openai_api_key") return "sk-test";
-        if (key === "openai_model") return "gpt-4o";
+        if (key === "openai_model") return "gpt-6.1-sol";
         return null;
       });
 
       await getActiveProvider();
       expect(createOpenAIProvider).toHaveBeenCalledTimes(2);
-      expect(createOpenAIProvider).toHaveBeenLastCalledWith("sk-test", "gpt-4o");
+      expect(createOpenAIProvider).toHaveBeenLastCalledWith("sk-test", "gpt-6.1-sol");
     });
 
     it("creates copilot provider with default model", async () => {

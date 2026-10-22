@@ -28,7 +28,7 @@ describe("claudeProvider", () => {
     expect(init.headers["anthropic-version"]).toBe("2023-06-01");
     expect(JSON.parse(init.body)).toEqual({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
+      max_tokens: 8192,
       system: "You are helpful",
       messages: [{ role: "user", content: "Hi" }],
     });
@@ -50,6 +50,18 @@ describe("claudeProvider", () => {
   it("returns an empty string when the reply has no text block", async () => {
     mockFetch.mockResolvedValue(ok({ content: [] }));
     expect(await createClaudeProvider("k", "m").complete({ systemPrompt: "s", userContent: "u" })).toBe("");
+  });
+
+  it.each(["max_tokens", "refusal"])("rejects a reply that stopped with %s", async (stop_reason) => {
+    mockFetch.mockResolvedValue(ok({ stop_reason, content: [{ type: "text", text: "Half a sen" }] }));
+    await expect(
+      createClaudeProvider("k", "m").complete({ systemPrompt: "s", userContent: "u" }),
+    ).rejects.toThrow(stop_reason);
+  });
+
+  it("still passes the connection test when the short test reply hits max_tokens", async () => {
+    mockFetch.mockResolvedValue(ok({ stop_reason: "max_tokens", content: [] }));
+    expect(await createClaudeProvider("k", "m").testConnection()).toBe(true);
   });
 
   it("aborts a request after a timeout", async () => {

@@ -2,6 +2,8 @@ import type { AiProviderClient, AiCompletionRequest } from "../types";
 
 const MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const TIMEOUT_MS = 60_000;
+// Claude 5 models always think, and max_tokens covers the thinking as well as the answer.
+const MAX_TOKENS = 8192;
 
 async function createMessage(apiKey: string, body: object): Promise<string> {
   const response = await fetch(MESSAGES_URL, {
@@ -28,7 +30,7 @@ export function createClaudeProvider(apiKey: string, model: string): AiProviderC
     complete(req: AiCompletionRequest): Promise<string> {
       return createMessage(apiKey, {
         model,
-        max_tokens: req.maxTokens ?? 1024,
+        max_tokens: req.maxTokens ?? MAX_TOKENS,
         system: req.systemPrompt,
         messages: [{ role: "user", content: req.userContent }],
       });

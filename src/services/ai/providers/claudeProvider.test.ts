@@ -28,7 +28,7 @@ describe("claudeProvider", () => {
     expect(init.headers["anthropic-version"]).toBe("2023-06-01");
     expect(JSON.parse(init.body)).toEqual({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 1024,
+      max_tokens: 8192,
       system: "You are helpful",
       messages: [{ role: "user", content: "Hi" }],
     });

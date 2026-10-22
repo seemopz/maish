@@ -322,8 +322,8 @@ For non-Gmail providers (Outlook, Yahoo, iCloud, Fastmail, etc.):
 
 To enable AI features, add your API key for one or more providers in Settings:
 
-- **Anthropic Claude** -- [Get API key](https://console.anthropic.com/) -- Haiku 4.5 (default), Sonnet 4, Opus 4
-- **OpenAI** -- [Get API key](https://platform.openai.com/) -- GPT-4o Mini (default), GPT-4o, GPT-4.1 series
-- **Google Gemini** -- [Get API key](https://aistudio.google.com/) -- 2.5 Flash (default), 2.5 Pro
+- **Anthropic Claude** -- [Get API key](https://console.anthropic.com/) -- Haiku 4.5 (default), Sonnet 5.5, Opus 5.5, Fable 5.1
+- **OpenAI** -- [Get API key](https://platform.openai.com/) -- GPT-6 Luna (default), GPT-6.1 Sol, GPT-6 Astra
+- **Google Gemini** -- [Get API key](https://aistudio.google.com/) -- 3.5 Flash-Lite (default), 3.8 Flash, 4 Argon
 
-After adding an API key, select which model to use for each provider in Settings > AI.
+After adding an API key, select which model to use for each provider in Settings > AI. A saved model that is no longer offered falls back to the provider's default.

@@ -6,7 +6,8 @@ import { mailZoomKey } from "@/utils/mailZoom";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/services/db/settings";
-import { PROVIDER_MODELS } from "@/services/ai/types";
+import { DEFAULT_MODELS, PROVIDER_MODELS, resolveModel } from "@/services/ai/types";
+import { SUMMARY_LANGUAGES, parseSummaryLanguage, type SummaryLanguage } from "@/services/ai/prompts";
 import { deleteAccount } from "@/services/db/accounts";
 import { removeClient, reauthorizeAccount } from "@/services/gmail/tokenManager";
 import { triggerSync, forceFullSync, resyncAccount, removeAccountFromSync, onSyncStatus } from "@/services/gmail/syncManager";
@@ -155,10 +156,11 @@ export function SettingsPage() {
   const [copilotApiKey, setCopilotApiKey] = useState("");
   const [ollamaServerUrl, setOllamaServerUrl] = useState("http://localhost:11434");
   const [ollamaModel, setOllamaModel] = useState("llama3.2");
-  const [claudeModel, setClaudeModel] = useState("claude-haiku-4-5-20251001");
-  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
-  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash-preview-05-20");
-  const [copilotModel, setCopilotModel] = useState("openai/gpt-4o-mini");
+  const [claudeModel, setClaudeModel] = useState(DEFAULT_MODELS.claude);
+  const [openaiModel, setOpenaiModel] = useState(DEFAULT_MODELS.openai);
+  const [geminiModel, setGeminiModel] = useState(DEFAULT_MODELS.gemini);
+  const [copilotModel, setCopilotModel] = useState(DEFAULT_MODELS.copilot);
+  const [aiSummaryLanguage, setAiSummaryLanguage] = useState<SummaryLanguage>(parseSummaryLanguage(null));
   const [aiEnabled, setAiEnabled] = useState(true);
   const [aiAutoCategorize, setAiAutoCategorize] = useState(true);
   const [aiAutoSummarize, setAiAutoSummarize] = useState(true);
@@ -215,12 +217,9 @@ export function SettingsPage() {
       if (ollamaUrl) setOllamaServerUrl(ollamaUrl);
       const ollamaModelVal = await getSetting("ollama_model");
       if (ollamaModelVal) setOllamaModel(ollamaModelVal);
-      const claudeModelVal = await getSetting("claude_model");
-      if (claudeModelVal) setClaudeModel(claudeModelVal);
-      const openaiModelVal = await getSetting("openai_model");
-      if (openaiModelVal) setOpenaiModel(openaiModelVal);
-      const geminiModelVal = await getSetting("gemini_model");
-      if (geminiModelVal) setGeminiModel(geminiModelVal);
+      setClaudeModel(resolveModel("claude", await getSetting("claude_model")));
+      setOpenaiModel(resolveModel("openai", await getSetting("openai_model")));
+      setGeminiModel(resolveModel("gemini", await getSetting("gemini_model")));
       const aiKey = await readSecureSetting("claude_api_key");
       setClaudeApiKey(aiKey ?? "");
       const oaiKey = await readSecureSetting("openai_api_key");
@@ -229,8 +228,8 @@ export function SettingsPage() {
       setGeminiApiKey(gemKey ?? "");
       const copKey = await readSecureSetting("copilot_api_key");
       setCopilotApiKey(copKey ?? "");
-      const copilotModelVal = await getSetting("copilot_model");
-      if (copilotModelVal) setCopilotModel(copilotModelVal);
+      setCopilotModel(resolveModel("copilot", await getSetting("copilot_model")));
+      setAiSummaryLanguage(parseSummaryLanguage(await getSetting("ai_summary_language")));
       const aiEn = await getSetting("ai_enabled");
       setAiEnabled(aiEn !== "false");
       const aiCat = await getSetting("ai_auto_categorize");
@@ -1344,6 +1343,25 @@ export function SettingsPage() {
                         await setSetting("ai_auto_summarize", newVal ? "true" : "false");
                       }}
                     />
+                    <SettingRow label="AI summary language">
+                      <select
+                        value={aiSummaryLanguage}
+                        onChange={async (e) => {
+                          const val = parseSummaryLanguage(e.target.value);
+                          setAiSummaryLanguage(val);
+                          await setSetting("ai_summary_language", val);
+                        }}
+                        className={selectClass}
+                      >
+                        <option value="email">Same language as the email</option>
+                        {Object.entries(SUMMARY_LANGUAGES).map(([code, name]) => (
+                          <option key={code} value={code}>{name}</option>
+                        ))}
+                      </select>
+                    </SettingRow>
+                    <p className={footerClass}>
+                      Used for summaries, Ask Inbox answers and extracted tasks. Replies and rewrites always follow the language of the email.
+                    </p>
                   </Section>
 
                   <Section title="Auto-Draft Replies">

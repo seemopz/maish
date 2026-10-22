@@ -1,7 +1,7 @@
 import { getSetting, getSecureSetting } from "@/services/db/settings";
 import { AiError } from "./errors";
 import type { AiProvider, AiProviderClient } from "./types";
-import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
+import { MODEL_SETTINGS, resolveModel } from "./types";
 import { createClaudeProvider } from "./providers/claudeProvider";
 import { createOpenAIProvider, clearOpenAIProvider } from "./providers/openaiProvider";
 import { createGeminiProvider } from "./providers/geminiProvider";
@@ -63,7 +63,7 @@ export async function getProviderForConnectionTest(): Promise<AiProviderClient> 
     throw new AiError("NOT_CONFIGURED", `${providerName} API key not configured`);
   }
 
-  const model = (await getSetting(MODEL_SETTINGS[providerName])) ?? DEFAULT_MODELS[providerName];
+  const model = resolveModel(providerName, await getSetting(MODEL_SETTINGS[providerName]));
   const cacheKey = `${apiKey}|${model}`;
 
   if (cachedProvider && cachedProvider.name === providerName && cachedProvider.key === cacheKey) {

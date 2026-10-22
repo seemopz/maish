@@ -12,7 +12,7 @@ import { useContextMenuStore } from "@/stores/contextMenuStore";
 import { useSmartFolderStore } from "@/stores/smartFolderStore";
 import { useActiveLabel, useActiveCategory } from "@/hooks/useRouteNavigation";
 import { navigateToLabel } from "@/router/navigate";
-import { CATEGORY_HUES } from "@/utils/hue";
+import { categoryHue } from "@/utils/hue";
 import {
   Inbox,
   Star,
@@ -450,7 +450,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                   {CATEGORY_ITEMS.map((cat) => {
                     const CatIcon = cat.icon;
                     const isCatActive = activeLabel === "inbox" && activeCategory === cat.id;
-                    const catHue = CATEGORY_HUES[cat.id];
+                    const catHue = categoryHue(cat.id);
                     return (
                       <button
                         key={cat.id}

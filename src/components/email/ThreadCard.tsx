@@ -5,7 +5,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useActiveLabel } from "@/hooks/useRouteNavigation";
 import { formatRelativeDate } from "@/utils/date";
-import { senderHue, CATEGORY_HUES } from "@/utils/hue";
+import { senderHue, categoryHue } from "@/utils/hue";
 import { Paperclip, Star, Check, Pin, BellRing, VolumeX, Archive, Trash2, MailOpen, Clock, Ban } from "lucide-react";
 import { useSwipeGesture, isSwipeTail, type SwipeDirection } from "@/hooks/useSwipeGesture";
 import { resolveSwipeActions, describeSwipeAction, type SwipeButtonAction } from "@/utils/swipeActions";
@@ -184,7 +184,7 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
     () => ({ "--hue": senderHue(thread.fromAddress ?? thread.fromName ?? "") }) as CSSProperties,
     [thread.fromAddress, thread.fromName],
   );
-  const categoryHue = category ? CATEGORY_HUES[category] : undefined;
+  const badgeHue = category ? categoryHue(category) : undefined;
 
   return (
     <div ref={swipeRef} style={{ touchAction: "pan-y" }} className="relative overflow-hidden">
@@ -301,9 +301,9 @@ export const ThreadCard = memo(function ThreadCard({ thread, isSelected, onClick
               <span className="text-xs text-text-tertiary truncate flex-1">
                 {thread.snippet}
               </span>
-              {showCategoryBadge && categoryHue !== undefined && (
+              {showCategoryBadge && badgeHue !== undefined && (
                 <span
-                  style={{ "--hue": categoryHue } as CSSProperties}
+                  style={{ "--hue": badgeHue } as CSSProperties}
                   className="shrink-0 font-mono text-[10px] leading-4 uppercase tracking-wide px-1.5 rounded-full border border-border-primary tint-ink"
                 >
                   {category}

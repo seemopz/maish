@@ -5,12 +5,18 @@
 export const HUES = Array.from({ length: 12 }, (_, i) => i * 30 + 15);
 
 /** Fixed hues for the inbox categories, so a badge matches its sidebar entry. */
-export const CATEGORY_HUES: Record<string, number> = {
-  Updates: 255,
-  Promotions: 135,
-  Social: 315,
-  Newsletters: 45,
-};
+export const CATEGORY_HUES = new Map<string, number>([
+  ["Updates", 255],
+  ["Promotions", 135],
+  ["Social", 315],
+  ["Newsletters", 45],
+]);
+
+/** A category's hue, or undefined for Primary and anything else without a badge. */
+export function categoryHue(category: string): number | undefined {
+  // A Map, not an object literal: "constructor" or "toString" must not find an inherited member.
+  return CATEGORY_HUES.get(category);
+}
 
 /**
  * A stable hue for a sender: FNV-1a over the lowercased address. Linear in the

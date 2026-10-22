@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { HUES, CATEGORY_HUES, senderHue } from "./hue";
+import { HUES, CATEGORY_HUES, categoryHue, senderHue } from "./hue";
 
 describe("senderHue", () => {
   it("returns the same hue for the same address, whatever the case and padding", () => {
@@ -20,8 +20,15 @@ describe("senderHue", () => {
   });
 });
 
-describe("CATEGORY_HUES", () => {
+describe("categoryHue", () => {
   it("only uses checked hues", () => {
-    for (const hue of Object.values(CATEGORY_HUES)) expect(HUES).toContain(hue);
+    for (const hue of CATEGORY_HUES.values()) expect(HUES).toContain(hue);
+  });
+
+  it("has no hue for Primary or for names inherited from Object.prototype", () => {
+    expect(categoryHue("Social")).toBe(315);
+    for (const name of ["Primary", "constructor", "toString", "__proto__"]) {
+      expect(categoryHue(name)).toBeUndefined();
+    }
   });
 });

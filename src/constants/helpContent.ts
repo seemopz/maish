@@ -138,7 +138,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           { text: "The app is fully usable during the initial sync." },
           { text: "Messages appear as they arrive; on IMAP accounts, replies join their conversation at the end of the sync." },
           { text: "Delta sync runs every 60 seconds after the first sync completes." },
-          { text: "A sync that takes longer than a second shows a pill at the bottom of the window with its progress. A failed sync shows the error there with a Retry button; afterwards the reload button next to the folder name stays red, with the error as its tooltip, until the next sync." },
+          { text: "A sync that takes longer than a second shows a pill at the bottom of the window with its progress. A failed sync shows the error there with a Retry button, once: while the background sync keeps failing the same way, the pill stays hidden. The reload button next to the folder name stays red, with the error as its tooltip, until a sync succeeds; while it is red, a click syncs all accounts." },
           { text: "Click the reload button next to the folder name to sync right away.", shortcut: "F5" },
           { text: "Gmail: if sync history expires (~30 days offline), the app auto-falls back to a full sync." },
           { text: "IMAP: if folder UIDVALIDITY changes, the app resyncs that folder automatically." },

@@ -6,7 +6,8 @@ import { triggerSync } from "@/services/gmail/syncManager";
 
 /**
  * Reload button next to the folder name: starts a sync for the active account and spins while one runs.
- * After a failed sync it turns red and carries the error as its tooltip, once the sync pill has faded out.
+ * While the last sync has failed it is red with the error as its tooltip, and a click syncs all active
+ * accounts like the pill's Retry, because the failure may belong to an account other than the active one.
  */
 export function SyncNowButton() {
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
@@ -17,7 +18,10 @@ export function SyncNowButton() {
   const handleClick = () => {
     if (!activeAccountId || isSyncing) return;
     useUIStore.getState().setSyncingFolder(activeLabel);
-    triggerSync([activeAccountId]);
+    const ids = error
+      ? useAccountStore.getState().accounts.filter((a) => a.isActive).map((a) => a.id)
+      : [activeAccountId];
+    triggerSync(ids);
   };
 
   return (

@@ -587,6 +587,21 @@ Modifications made in this fork, as required by section 4(b) of the License:
   Models, the API it called, on 2026-07-30. Migration 27 deletes the stored
   GitHub token and model, and turns AI off for a user who had Copilot
   selected instead of switching them to another provider.
+- src/components/ui/SyncIndicator.tsx, src/components/layout/Sidebar.tsx,
+  src/App.tsx, src/components/email/SyncNowButton.tsx — the sync spinner moves
+  out of the sidebar's bottom bar, which no longer keeps an empty slot for it,
+  into a pill at the bottom centre where the undo toasts appear. It shows once
+  a sync has run for a second, shows a failure for eight seconds with a retry
+  button, and sits above a visible undo toast. A failure that the background
+  sync repeats every minute is shown once, until a sync succeeds or one is
+  asked for (by the user, for a new account, on reconnect). After that the reload button next to the folder name stays red
+  with the error as its tooltip until the next sync, and a click on it syncs
+  all active accounts.
+- src/services/ai/aiService.ts, src/components/email/SmartReplySuggestions.tsx
+  — smart replies are cached under a new type, so replies cached before they
+  followed the language of the email are generated again. When the model
+  returns fewer than three replies, fewer are shown instead of padding them
+  with an English one; with none the card is hidden and nothing is cached.
 
 "Velo" is the name of the upstream project and is used here only to identify the
 work this fork derives from.

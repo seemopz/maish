@@ -108,13 +108,19 @@ export async function transformText(
   return callAi(prompts[type], text);
 }
 
+/**
+ * Cache type of smart replies. Bumped when replies started following the mail
+ * language, so replies cached before (always English) are not served again.
+ */
+export const SMART_REPLIES_CACHE = "smart_replies_v2";
+
 export async function generateSmartReplies(
   threadId: string,
   accountId: string,
   messages: DbMessage[],
 ): Promise<string[]> {
   // Check cache first
-  const cached = await getAiCache(accountId, threadId, "smart_replies");
+  const cached = await getAiCache(accountId, threadId, SMART_REPLIES_CACHE);
   if (cached) {
     try {
       return JSON.parse(cached) as string[];
@@ -146,14 +152,15 @@ export async function generateSmartReplies(
   // Validate and sanitize each reply
   replies = replies
     .filter((r): r is string => typeof r === "string")
-    .map((r) => r.replace(/<[^>]*>/g, "").slice(0, 200));
-
-  // Ensure exactly 3 replies
-  while (replies.length < 3) replies.push("Thanks for the update.");
-  replies = replies.slice(0, 3);
+    .map((r) => r.replace(/<[^>]*>/g, "").trim().slice(0, 200))
+    .filter(Boolean)
+    // Fewer suggestions rather than a filler in a language the mail may not use.
+    .slice(0, 3);
+  // Nothing usable: ask again next time instead of caching an empty card.
+  if (replies.length === 0) return [];
 
   // Cache the result
-  await setAiCache(accountId, threadId, "smart_replies", JSON.stringify(replies));
+  await setAiCache(accountId, threadId, SMART_REPLIES_CACHE, JSON.stringify(replies));
   return replies;
 }
 

@@ -10,7 +10,7 @@ vi.mock("@/hooks/useRouteNavigation", () => ({
 }));
 
 import { SyncNowButton } from "./SyncNowButton";
-import { useAccountStore } from "@/stores/accountStore";
+import { useAccountStore, type Account } from "@/stores/accountStore";
 import { useUIStore } from "@/stores/uiStore";
 
 beforeEach(() => {
@@ -47,5 +47,24 @@ describe("SyncNowButton", () => {
     useAccountStore.setState({ activeAccountId: null });
     render(<SyncNowButton />);
     expect((screen.getByRole("button", { name: "Sync now" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps a failed sync visible in red with the error as tooltip", () => {
+    useUIStore.setState({ syncState: "error", syncMessage: "Sync failed: timeout" });
+    render(<SyncNowButton />);
+    const btn = screen.getByRole("button", { name: "Sync now" }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute("title")).toBe("Sync failed: timeout – Sync now");
+    expect(btn.className).toContain("text-danger");
+  });
+
+  it("syncs all active accounts after a failure, which may belong to another account", () => {
+    const account = (id: string, isActive: boolean): Account =>
+      ({ id, email: `${id}@example.com`, displayName: null, avatarUrl: null, isActive });
+    useAccountStore.setState({ accounts: [account("a1", true), account("a2", false), account("a3", true)] });
+    useUIStore.setState({ syncState: "error", syncMessage: "Sync failed: timeout" });
+    render(<SyncNowButton />);
+    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    expect(mockTriggerSync).toHaveBeenCalledWith(["a1", "a3"]);
   });
 });

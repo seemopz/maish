@@ -5,6 +5,7 @@ import { AddAccount } from "./components/accounts/AddAccount";
 import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
 import { UndoActionToast } from "./components/ui/UndoActionToast";
+import { SyncIndicator } from "./components/ui/SyncIndicator";
 import { CommandPalette } from "./components/search/CommandPalette";
 import { ShortcutsHelp } from "./components/search/ShortcutsHelp";
 import { AskInbox } from "./components/search/AskInbox";
@@ -563,6 +564,7 @@ export default function App() {
       </ErrorBoundary>
       <UndoSendToast />
       <UndoActionToast />
+      <SyncIndicator />
       <UpdateToast />
       <ErrorBoundary name="CommandPalette">
         <CommandPalette

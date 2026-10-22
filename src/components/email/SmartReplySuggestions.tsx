@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Sparkles, RefreshCw } from "lucide-react";
 import { isAiAvailable } from "@/services/ai/providerManager";
-import { generateSmartReplies } from "@/services/ai/aiService";
+import { generateSmartReplies, SMART_REPLIES_CACHE } from "@/services/ai/aiService";
 import { deleteAiCache } from "@/services/db/aiCache";
 import { useComposerStore } from "@/stores/composerStore";
 import type { DbMessage } from "@/services/db/messages";
@@ -49,7 +49,7 @@ export function SmartReplySuggestions({ threadId, accountId, messages, noReply }
   }, [available, messages.length, replies, loadReplies]);
 
   const handleRefresh = useCallback(async () => {
-    await deleteAiCache(accountId, threadId, "smart_replies");
+    await deleteAiCache(accountId, threadId, SMART_REPLIES_CACHE);
     setReplies(null);
     setLoading(true);
     try {
@@ -77,7 +77,7 @@ export function SmartReplySuggestions({ threadId, accountId, messages, noReply }
     });
   }, [messages, openComposer]);
 
-  if (!available || messages.length === 0 || noReply) return null;
+  if (!available || messages.length === 0 || noReply || (replies?.length === 0 && !loading)) return null;
 
   return (
     <div className="mx-4 my-2 px-3 py-2.5 rounded-md border border-border-primary bg-bg-secondary">

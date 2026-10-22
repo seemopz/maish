@@ -60,6 +60,7 @@ import {
   resyncAccount,
   removeAccountFromSync,
   onSyncStatus,
+  onSyncRequested,
 } from "./syncManager";
 import { getAccount, clearAccountHistoryId } from "../db/accounts";
 import { deleteAllThreadsForAccount } from "../db/threads";
@@ -366,6 +367,56 @@ describe("syncManager", () => {
       await triggerSync(["a1", "a2"]);
 
       expect(mockDeltaSync).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("onSyncRequested", () => {
+    it("reports every sync that was asked for, but not the background timer's", async () => {
+      mockGetAccount.mockResolvedValue(makeGmailAccount("a1", "100"));
+      const requested = vi.fn();
+      const unsubscribe = onSyncRequested(requested);
+
+      startBackgroundSync(["a1"]);
+      await wait(10);
+      expect(mockDeltaSync).toHaveBeenCalled();
+      expect(requested).not.toHaveBeenCalled();
+      stopBackgroundSync();
+
+      await triggerSync(["a1"]);
+      expect(requested).toHaveBeenCalledTimes(1);
+      await syncAccount("a1");
+      expect(requested).toHaveBeenCalledTimes(2);
+      await resyncAccount("a1");
+      expect(requested).toHaveBeenCalledTimes(3);
+      await forceFullSync(["a1"]);
+      expect(requested).toHaveBeenCalledTimes(4);
+
+      unsubscribe();
+      await triggerSync(["a1"]);
+      expect(requested).toHaveBeenCalledTimes(4);
+    });
+
+    it("settles a queued request only once its own run is over", async () => {
+      mockGetAccount.mockImplementation(async (id: string) => makeGmailAccount(id, "100"));
+      let finishFirst!: () => void;
+      mockDeltaSync.mockImplementationOnce(() => new Promise<void>((resolve) => (finishFirst = resolve)));
+      const settledRuns: Promise<void>[] = [];
+      const unsubscribe = onSyncRequested((settled) => settledRuns.push(settled));
+
+      startBackgroundSync(["a1"]);
+      await wait(10);
+      const queued = syncAccount("a2");
+      let done = false;
+      void settledRuns[0]!.then(() => (done = true));
+      await wait(10);
+      expect(done).toBe(false);
+
+      finishFirst();
+      await queued;
+      await wait(0);
+      expect(done).toBe(true);
+      expect(mockDeltaSync).toHaveBeenCalledTimes(2);
+      unsubscribe();
     });
   });
 

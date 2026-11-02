@@ -231,6 +231,10 @@ that point nobody without write access sees it, and the updater, which reads
 `releases/latest/download/latest.json` (`plugins.updater.endpoints` in
 `src-tauri/tauri.conf.json`), does not either. A failed build leaves the draft
 in place: re-run the failed jobs, or run the workflow by hand for the tag.
+`.github/workflows/retry-release.yml` does that by itself when the only failed
+jobs are ones GitHub cancelled without ever assigning a runner (macOS arm64 runs
+short at times; 0.11.1's macOS build was lost that way). A build that ran and
+failed is never re-run automatically (`.github/scripts/release-retry.mjs`).
 
 Tags and release titles are plain `vX.Y.Z` (`include-component-in-tag: false`).
 Releases up to 0.4.0 were tagged `maish-vX.Y.Z` and titled `maish: vX.Y.Z`.

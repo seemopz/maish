@@ -1,0 +1,669 @@
+{
+  "runnerNotAcquired": [
+    {
+      "conclusion": "success",
+      "name": "release-please",
+      "runner_name": "GitHub Actions 1000000905",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run googleapis/release-please-action@v5"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "cancelled",
+      "name": "build-release / macOS (aarch64)",
+      "runner_name": "",
+      "status": "completed",
+      "steps": []
+    }
+  ],
+  "realFailureToday": [
+    {
+      "conclusion": "success",
+      "name": "release-please",
+      "runner_name": "GitHub Actions 1000000905",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run googleapis/release-please-action@v5"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "failure",
+      "name": "build-release / Linux (x86_64)",
+      "runner_name": "GitHub Actions 1000000912",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Resolve release"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Rust"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install Linux build dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Keep libwayland out of the AppImage"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build and upload"
+        },
+        {
+          "conclusion": "failure",
+          "name": "Verify the AppImage libraries"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Verify the bundle signature"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Post Cache Rust build"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Post Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    }
+  ],
+  "mixedToday": [
+    {
+      "conclusion": "success",
+      "name": "release-please",
+      "runner_name": "GitHub Actions 1000000905",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run googleapis/release-please-action@v5"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "cancelled",
+      "name": "build-release / macOS (aarch64)",
+      "runner_name": "",
+      "status": "completed",
+      "steps": []
+    },
+    {
+      "conclusion": "failure",
+      "name": "build-release / Linux (x86_64)",
+      "runner_name": "GitHub Actions 1000000912",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Resolve release"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Rust"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install Linux build dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Keep libwayland out of the AppImage"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build and upload"
+        },
+        {
+          "conclusion": "failure",
+          "name": "Verify the AppImage libraries"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Verify the bundle signature"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Post Cache Rust build"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Post Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    }
+  ],
+  "realFailureMacOS": [
+    {
+      "conclusion": "success",
+      "name": "Linux (x86_64)",
+      "runner_name": "GitHub Actions 1000000078",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Resolve release"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Rust"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install Linux build dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build and upload"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Verify the bundle signature"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "success",
+      "name": "Windows (x86_64)",
+      "runner_name": "GitHub Actions 1000000079",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Resolve release"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Rust"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Install Linux build dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build and upload"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Verify the bundle signature"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "failure",
+      "name": "macOS (aarch64)",
+      "runner_name": "GitHub Actions 1000000077",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Resolve release"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Rust"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Install Linux build dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build and upload"
+        },
+        {
+          "conclusion": "failure",
+          "name": "Verify the bundle signature"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Post Cache Rust build"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Post Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "skipped",
+      "name": "Verify latest.json",
+      "runner_name": null,
+      "status": "completed",
+      "steps": []
+    }
+  ],
+  "success": [
+    {
+      "conclusion": "success",
+      "name": "release-please",
+      "runner_name": "GitHub Actions 1000000873",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Run googleapis/release-please-action@v5"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "success",
+      "name": "build-release / Windows (x86_64)",
+      "runner_name": "GitHub Actions 1000000879",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Resolve release"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Rust"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Install Linux build dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build and upload"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Verify the bundle signature"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "success",
+      "name": "build-release / macOS (aarch64)",
+      "runner_name": "GitHub Actions 1000000877",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Resolve release"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Rust"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Install Linux build dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build and upload"
+        },
+        {
+          "conclusion": "success",
+          "name": "Verify the bundle signature"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "success",
+      "name": "build-release / Linux (x86_64)",
+      "runner_name": "GitHub Actions 1000000878",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Resolve release"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Set up Rust"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install Linux build dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Install dependencies"
+        },
+        {
+          "conclusion": "success",
+          "name": "Build and upload"
+        },
+        {
+          "conclusion": "skipped",
+          "name": "Verify the bundle signature"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Cache Rust build"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Set up Node"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    },
+    {
+      "conclusion": "success",
+      "name": "build-release / Verify latest.json",
+      "runner_name": "GitHub Actions 1000000880",
+      "status": "completed",
+      "steps": [
+        {
+          "conclusion": "success",
+          "name": "Set up job"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Check platforms and signing key"
+        },
+        {
+          "conclusion": "success",
+          "name": "Post Check out the released tag"
+        },
+        {
+          "conclusion": "success",
+          "name": "Complete job"
+        }
+      ]
+    }
+  ]
+}

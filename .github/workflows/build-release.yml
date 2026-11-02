@@ -112,6 +112,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Ubuntu 22.04's libwayland-client next to the host's Mesa libEGL makes
+      # the WebKit web process abort at start on current distributions ("Could
+      # not create surfaceless EGL display: EGL_BAD_ALLOC"). Tauri reuses
+      # linuxdeploy tools already in ~/.cache/tauri, so the GTK plugin it runs
+      # is replaced by a wrapper that removes libwayland-* after the upstream
+      # plugin (same URL tauri downloads it from). See the wrapper for details.
+      - name: Keep libwayland out of the AppImage
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.cache/tauri/upstream
+          curl -fsSL -o ~/.cache/tauri/upstream/linuxdeploy-plugin-gtk.sh \
+            https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          chmod +x ~/.cache/tauri/upstream/linuxdeploy-plugin-gtk.sh
+          install -m 755 .github/scripts/linuxdeploy-plugin-gtk.sh ~/.cache/tauri/linuxdeploy-plugin-gtk.sh
+
       - name: Build and upload
         uses: tauri-apps/tauri-action@v1
         env:
@@ -131,6 +147,17 @@ jobs:
           # The per-user NSIS installer updates without an admin prompt.
           updaterJsonPreferNsis: true
           retryAttempts: 2
+
+      # Guards the wrapper above, e.g. against a tauri release that stops
+      # reusing its cache. Runs after the upload, because tauri-action builds
+      # and uploads in one step; a failure marks an AppImage already attached.
+      - name: Verify the AppImage libraries
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+            node .github/scripts/verify-appimage-libs.mjs "$f"
+          done
 
       # A bundle whose signature covers only the executable is reported as
       # "damaged" by Gatekeeper and cannot be opened at all. signingIdentity "-"

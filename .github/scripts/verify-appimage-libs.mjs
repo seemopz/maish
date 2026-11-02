@@ -12,7 +12,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Libraries that must come from the host, matched against the file name. */
@@ -34,10 +34,12 @@ function listFiles(dir) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const appImage = process.argv[2];
+  // Absolute, because the AppImage runs with the temporary directory as cwd.
+  const executable = resolve(appImage);
   const work = mkdtempSync(join(tmpdir(), "appimage-"));
   try {
     // An AppImage unpacks itself into ./squashfs-root of the working directory.
-    execFileSync(appImage, ["--appimage-extract"], { cwd: work, stdio: "ignore" });
+    execFileSync(executable, ["--appimage-extract"], { cwd: work, stdio: "ignore" });
     const root = join(work, "squashfs-root");
     const files = listFiles(root).map((f) => relative(root, f));
     const found = bundledHostLibs(files);

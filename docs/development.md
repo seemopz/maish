@@ -221,12 +221,16 @@ README's. The splash screen draws the same mark inline in `splashscreen.html`.
 
 ## Release Artifacts
 
-Releases are published by merging the release-please pull request. That creates
-the tag and the GitHub release; `.github/workflows/build-release.yml` then builds
-the app and attaches the bundles, their `.sig` files and a merged `latest.json`.
-The updater reads that file from
+Releases are started by merging the release-please pull request. That creates
+the tag and the GitHub release as a **draft** (`draft` and `force-tag-creation`
+in `release-please-config.json`; without the latter GitHub creates the tag only
+on publishing and the build could not check it out).
+`.github/workflows/build-release.yml` then builds the app, attaches the bundles,
+their `.sig` files and `latest.json`, and only then publishes the release. Until
+that point nobody without write access sees it, and the updater, which reads
 `releases/latest/download/latest.json` (`plugins.updater.endpoints` in
-`src-tauri/tauri.conf.json`).
+`src-tauri/tauri.conf.json`), does not either. A failed build leaves the draft
+in place: re-run the failed jobs, or run the workflow by hand for the tag.
 
 Tags and release titles are plain `vX.Y.Z` (`include-component-in-tag: false`).
 Releases up to 0.4.0 were tagged `maish-vX.Y.Z` and titled `maish: vX.Y.Z`.
@@ -237,10 +241,13 @@ first one.
 
 The build covers macOS arm64, Linux x86_64 (built on Ubuntu 22.04, so the
 AppImage runs on any distribution with glibc 2.35 or newer) and Windows x86_64.
-The three run one after another because tauri-action merges `latest.json` by
-downloading, extending and re-uploading it — two jobs finishing together can
-drop a platform. A final job, `Verify latest.json`, fails the run unless every
-platform is in the file and signed with the key in `plugins.updater.pubkey`
+The three run in parallel with tauri-action's `uploadUpdaterJson` off: its
+merge downloads, extends and re-uploads `latest.json`, so two jobs finishing
+together could drop a platform. The `Write latest.json` job builds the file
+once from the attached assets (`.github/scripts/build-updater-json.mjs`, same
+entries and URLs tauri-action wrote; its test rebuilds 0.11.0's file from that
+release's assets) and refuses to upload it unless every platform is in it and
+signed with the key in `plugins.updater.pubkey`
 (`.github/scripts/verify-updater-json.mjs`).
 
 Linux ships an AppImage, a `.deb` and an `.rpm`; only the AppImage updates

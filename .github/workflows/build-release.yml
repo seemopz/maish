@@ -1,7 +1,17 @@
 name: Build Release Artifacts
 
-# Builds the app and attaches the bundles, their .sig files and a merged
-# latest.json to an existing GitHub release.
+# Builds the app and attaches the bundles, their .sig files and a latest.json to
+# an existing GitHub release, then publishes it.
+#
+# release-please creates the release as a draft (release-please-config.json:
+# `draft`, plus `force-tag-creation` so the tag exists for the checkout below).
+# Nobody without write access sees it and the updater, which reads
+# releases/latest/download/latest.json, ignores it until the `publish` job has
+# run, i.e. until every bundle and latest.json are attached and checked. If a
+# build fails, the release stays a draft: re-run the failed jobs.
+#
+# The three builds run in parallel. Each uploads only its bundles and .sig
+# files; latest.json is written once by the `updater-json` job afterwards.
 #
 # The release is always created first, by release-please. A release created with
 # the GITHUB_TOKEN does not fire the `release` event, so this workflow cannot
@@ -36,10 +46,6 @@ jobs:
         shell: bash
     strategy:
       fail-fast: false
-      # One platform at a time: tauri-action merges latest.json by downloading
-      # the release's copy, adding its own platform and uploading it again, so
-      # two jobs finishing together can drop a platform from the file.
-      max-parallel: 1
       matrix:
         include:
           - name: macOS (aarch64)
@@ -65,7 +71,8 @@ jobs:
 
       # tauri-action uploads to a release id. Passing the id rather than the tag
       # matters: with `tagName` the action rewrites the release title and body,
-      # which would wipe the changelog release-please wrote.
+      # which would wipe the changelog release-please wrote. `gh release view`
+      # also finds a draft by its tag (the API's /releases/tags/ does not).
       - name: Resolve release
         id: release
         env:
@@ -144,8 +151,9 @@ jobs:
           releaseId: ${{ steps.release.outputs.id }}
           releaseBody: ${{ steps.release.outputs.notes }}
           args: ${{ matrix.args }}
-          # The per-user NSIS installer updates without an admin prompt.
-          updaterJsonPreferNsis: true
+          # Merging latest.json from parallel jobs would race; the
+          # updater-json job writes it once all builds are done.
+          uploadUpdaterJson: false
           retryAttempts: 2
 
       # Guards the wrapper above, e.g. against a tauri release that stops
@@ -166,25 +174,66 @@ jobs:
         if: runner.os == 'macOS'
         run: codesign --verify --deep --strict --verbose=2 src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Maish.app
 
-  # Every platform must end up in latest.json, signed with the key the app
-  # trusts, or clients on the missing platform never see the update.
-  verify-updater-json:
-    name: Verify latest.json
+  # Writes latest.json from the attached bundles and .sig files, the way
+  # tauri-action did (see build-updater-json.mjs). Every platform must end up in
+  # it, signed with the key the app trusts, or clients on the missing platform
+  # never see the update; that is checked before the file is uploaded.
+  updater-json:
+    name: Write latest.json
     needs: build
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
     steps:
       - name: Check out the released tag
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag }}
 
-      - name: Check platforms and signing key
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag }}
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Build latest.json
         run: |
           set -euo pipefail
-          gh release download "$TAG" --pattern latest.json --dir /tmp/updater
-          node .github/scripts/verify-updater-json.mjs /tmp/updater/latest.json src-tauri/tauri.conf.json \
+          id="$(gh release view "$TAG" --json databaseId --jq .databaseId)"
+          # The API's `url` of an asset is what tauri-action put into latest.json.
+          gh api --paginate "repos/$GH_REPO/releases/$id/assets?per_page=100" --jq '.[] | {name, url}' \
+            | jq -s . > /tmp/assets.json
+          gh release download "$TAG" --pattern '*.sig' --dir /tmp/sigs
+          # -j: no trailing newline, as in the release body tauri-action was given.
+          gh release view "$TAG" --json body | jq -j .body > /tmp/notes.md
+          node .github/scripts/build-updater-json.mjs /tmp/assets.json /tmp/sigs "${TAG#v}" /tmp/notes.md > /tmp/latest.json
+
+      - name: Check platforms and signing key
+        run: |
+          node .github/scripts/verify-updater-json.mjs /tmp/latest.json src-tauri/tauri.conf.json \
             darwin-aarch64 linux-x86_64 windows-x86_64
+
+      # --clobber: a re-run replaces the file from the previous attempt.
+      - name: Upload latest.json
+        run: gh release upload "$TAG" /tmp/latest.json --clobber
+
+  # Only now does the release become visible, and with it the update.
+  publish:
+    name: Publish release
+    needs: updater-json
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      # A workflow_dispatch re-run for an already published release leaves it as it is.
+      - name: Publish the draft
+        run: |
+          set -euo pipefail
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh release edit "$TAG" --draft=false
+          else
+            echo "$TAG is already published"
+          fi

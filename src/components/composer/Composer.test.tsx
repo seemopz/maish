@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, act, fireEvent } from "@testing-library/react";
+import { render, act, fireEvent, waitFor } from "@testing-library/react";
 
 /**
  * The editor object TipTap would hand back. Only the parts Composer touches
@@ -240,6 +240,34 @@ describe("Composer send guard", () => {
 
     expect(useComposerStore.getState().undoSendTimer).not.toBe(first);
     expect(useComposerStore.getState().undoSendTimer).not.toBeNull();
+  });
+
+  it("keeps the mail for undo without the signature, which the composer adds again", async () => {
+    const { getDefaultSignature } = await import("@/services/db/signatures");
+    vi.mocked(getDefaultSignature).mockResolvedValueOnce({ body_html: "<p>-- Simon</p>" } as never);
+    const { getByText } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({ to: ["bob@example.com"] });
+    });
+    await waitFor(() => expect(useComposerStore.getState().signatureHtml).toBe("<p>-- Simon</p>"));
+    editorHtml = "<p>Hello</p>"; // what the user typed
+
+    await clickSend(getByText);
+
+    expect(useComposerStore.getState().pendingSend!.bodyHtml).toBe("<p>Hello</p>");
+  });
+
+  it("tells the toast how long the undo window is", async () => {
+    const { getSetting } = await import("@/services/db/settings");
+    vi.mocked(getSetting).mockResolvedValueOnce("10");
+    const { getByText } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({ to: ["bob@example.com"] });
+    });
+
+    await clickSend(getByText);
+
+    expect(useComposerStore.getState().pendingSend!.delaySeconds).toBe(10);
   });
 
   it("keeps the composed mail so undo can put it back", async () => {

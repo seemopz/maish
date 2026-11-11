@@ -20,6 +20,20 @@ describe("UndoSendToast", () => {
     });
   });
 
+  it("runs its progress bar for the configured undo window", () => {
+    useComposerStore.setState({
+      pendingSend: {
+        mode: "new", to: [], cc: [], bcc: [], subject: "", bodyHtml: "", threadId: null,
+        inReplyToMessageId: null, references: null, draftId: null, fromEmail: null, attachments: [],
+        delaySeconds: 10,
+      },
+    });
+
+    const { container } = render(<UndoSendToast />);
+
+    expect(container.ownerDocument.querySelector("[style*='countdownBar']")!.getAttribute("style")).toContain("10s");
+  });
+
   it("reopens the composer with the mail that was about to go out", () => {
     const timer = setTimeout(() => { throw new Error("send must not run"); }, 5000);
     useComposerStore.setState({

@@ -32,6 +32,8 @@ export interface PendingSend {
   draftId: string | null;
   fromEmail: string | null;
   attachments: ComposerAttachment[];
+  /** Length of the undo window, for the toast's progress bar. */
+  delaySeconds?: number;
 }
 
 export interface ComposerState {

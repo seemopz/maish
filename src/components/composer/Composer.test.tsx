@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, fireEvent } from "@testing-library/react";
 
 /**
  * The editor object TipTap would hand back. Only the parts Composer touches
@@ -181,6 +181,19 @@ describe("Composer send guard", () => {
       getByText("Send").click();
     });
   }
+
+  it("sends on Ctrl+Enter like the Send button", async () => {
+    const { getByText } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({ to: ["bob@example.com"] });
+    });
+
+    await act(async () => {
+      fireEvent.keyDown(getByText("Send"), { key: "Enter", ctrlKey: true });
+    });
+
+    expect(useComposerStore.getState().undoSendTimer).not.toBeNull();
+  });
 
   it("can send again once the undo window has been cancelled", async () => {
     const { getByText } = render(<Composer />);

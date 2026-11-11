@@ -101,6 +101,7 @@ export function useKeyboardShortcuts() {
       const isInputFocused =
         target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
         target.isContentEditable;
 
       const keyMap = useShortcutStore.getState().keyMap;
@@ -112,6 +113,8 @@ export function useKeyboardShortcuts() {
         if (mailZoomKey(e)) return;
         for (const [actionId, binding] of ctrlCombos) {
           if (matchesKey(binding, e)) {
+            // In a field, Ctrl+A and the like belong to the field, not to the thread list.
+            if (isInputFocused && actionId.startsWith("action.")) return;
             e.preventDefault();
             executeAction(actionId);
             return;

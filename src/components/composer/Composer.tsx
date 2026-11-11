@@ -530,6 +530,13 @@ export function Composer() {
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        onKeyDown={(e) => {
+          // The global shortcut handler leaves Ctrl+Enter to the composer.
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            void handleSend();
+          }
+        }}
       >
         {isDragging && (
           <div className="absolute inset-1 z-10 flex items-center justify-center bg-bg-secondary/90 border border-dashed border-text-tertiary rounded-md pointer-events-none">

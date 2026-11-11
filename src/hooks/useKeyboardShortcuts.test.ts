@@ -90,6 +90,28 @@ describe("useKeyboardShortcuts", () => {
     expect(undoPending).not.toHaveBeenCalled();
   });
 
+  it("leaves Ctrl combinations of thread actions to the field that has focus", () => {
+    // Ctrl+A in the search box selects its text, not every thread.
+    shortcuts.keyMap = { ...defaultKeyMap(), "action.undo": "Ctrl+9" };
+    renderHook(() => useKeyboardShortcuts());
+    const input = document.body.appendChild(document.createElement("input"));
+
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "9", ctrlKey: true, bubbles: true }));
+
+    expect(undoPending).not.toHaveBeenCalled();
+    input.remove();
+  });
+
+  it("treats a select box as a field, so its keys do not run shortcuts", () => {
+    renderHook(() => useKeyboardShortcuts());
+    const select = document.body.appendChild(document.createElement("select"));
+
+    select.dispatchEvent(new KeyboardEvent("keydown", { key: "z", bubbles: true }));
+
+    expect(undoPending).not.toHaveBeenCalled();
+    select.remove();
+  });
+
   it("still fires custom Ctrl combinations that are not reserved", () => {
     shortcuts.keyMap = { ...defaultKeyMap(), "action.undo": "Ctrl+9" };
     renderHook(() => useKeyboardShortcuts());

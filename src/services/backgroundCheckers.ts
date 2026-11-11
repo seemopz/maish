@@ -13,12 +13,18 @@ export function createBackgroundChecker(
   intervalMs: number = 60_000,
 ): BackgroundChecker {
   let interval: ReturnType<typeof setInterval> | null = null;
+  // A run slower than the interval must not overlap the next one.
+  let running = false;
 
   const run = async () => {
+    if (running) return;
+    running = true;
     try {
       await checkFn();
     } catch (err) {
       console.error(`[${name}] check failed:`, err);
+    } finally {
+      running = false;
     }
   };
 

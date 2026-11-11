@@ -20,6 +20,22 @@ describe("createBackgroundChecker", () => {
     checker.stop();
   });
 
+  it("skips a tick while the previous run is still going", async () => {
+    let finish!: () => void;
+    const checkFn = vi.fn(() => new Promise<void>((r) => { finish = r; }));
+    const checker = createBackgroundChecker("Test", checkFn, 1000);
+
+    checker.start();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(checkFn).toHaveBeenCalledTimes(1);
+
+    finish();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(checkFn).toHaveBeenCalledTimes(2);
+
+    checker.stop();
+  });
+
   it("should run the check function on each interval tick", async () => {
     const checkFn = vi.fn().mockResolvedValue(undefined);
     const checker = createBackgroundChecker("Test", checkFn, 1000);
@@ -108,6 +124,7 @@ describe("createBackgroundChecker", () => {
     expect(checkFn).toHaveBeenCalledTimes(1);
 
     checker.stop();
+    await vi.advanceTimersByTimeAsync(0); // let the first run settle
 
     checker.start();
     expect(checkFn).toHaveBeenCalledTimes(2);

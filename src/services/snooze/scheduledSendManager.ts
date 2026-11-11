@@ -1,6 +1,7 @@
 import {
   claimScheduledEmail,
   getPendingScheduledEmails,
+  requeueInterruptedScheduledEmails,
   updateScheduledEmailStatus,
 } from "../db/scheduledEmails";
 import { getEmailProvider } from "../email/providerFactory";
@@ -11,7 +12,15 @@ import { createBackgroundChecker } from "../backgroundCheckers";
 /**
  * Check for scheduled emails that are ready to be sent.
  */
+let requeued = false;
+
 async function checkScheduledEmails(): Promise<void> {
+  // First run of this app start: nothing of ours is sending yet.
+  // shortcut: a crash between the server accepting the mail and the "sent" update sends it twice; upgrade by checking Sent for its Message-ID if that shows up.
+  if (!requeued) {
+    await requeueInterruptedScheduledEmails();
+    requeued = true;
+  }
   const pending = await getPendingScheduledEmails();
 
   for (const email of pending) {

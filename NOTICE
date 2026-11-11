@@ -702,6 +702,13 @@ Modifications made in this fork, as required by section 4(b) of the License:
 - src/services/gmail/syncManager.ts — the recovery that reruns the initial
   sync of an IMAP account with no stored threads runs at most once per account
   and app start; an empty mailbox got a full initial sync every minute.
+- src/services/threading/threadBuilder.ts, src/services/imap/imapSync.ts —
+  delta sync puts new mail into the thread that already holds a message it
+  references, instead of only the thread its own root hashes to, so a reply
+  whose references differ from what the initial sync threaded on no longer
+  opens a second conversation. New thread ids combine two 32-bit hashes, so
+  unrelated conversations whose roots collide in one are no longer merged;
+  threads stored under the old ids keep them.
 
 "Velo" is the name of the upstream project and is used here only to identify the
 work this fork derives from.

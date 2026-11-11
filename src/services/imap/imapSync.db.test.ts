@@ -39,6 +39,7 @@ import { imapListFolders, imapDeltaCheck, imapFetchMessages } from "./tauriComma
 import { upsertThread, setThreadLabels } from "../db/threads";
 import { upsertMessage } from "../db/messages";
 import { upsertFolderSyncState } from "../db/folderSyncState";
+import { generateThreadId, legacyThreadId } from "../threading/threadBuilder";
 import {
   createMockImapMessage,
   createMockImapFolder,
@@ -131,8 +132,35 @@ describe("imapDeltaSync with the real schema", () => {
 
     const messages = await db.select<{ id: string }[]>("SELECT id FROM messages ORDER BY id");
     expect(messages.map((m) => m.id)).toEqual(["imap-acc-1-Sent-5"]);
-    const threads = await db.select<{ id: string }[]>("SELECT id FROM threads");
-    expect(threads.map((t) => t.id)).not.toContain("imap-sent-1");
+    // One conversation, no empty leftover (the synced copy may keep the local thread).
+    const threads = await db.select<{ id: string; n: number }[]>(
+      "SELECT t.id, (SELECT COUNT(*) FROM messages m WHERE m.thread_id = t.id) AS n FROM threads t",
+    );
+    expect(threads).toHaveLength(1);
+    expect(threads[0]!.n).toBe(1);
+  });
+
+  it("drops the local thread when the synced copy lands in another one", async () => {
+    // The synced copy answers an older stored message, so the lookup puts it
+    // into that thread and the local row's own thread is left empty.
+    await storeLocalSentCopy("imap-sent-1", "<abc@example.com>");
+    db.raw.exec("INSERT INTO threads (id, account_id, subject) VALUES ('t-other', 'acc-1', 'Hello')");
+    db.raw.exec(
+      "INSERT INTO messages (id, account_id, thread_id, date, message_id_header, imap_uid, imap_folder) VALUES ('imap-acc-1-INBOX-1', 'acc-1', 't-other', 0, 'parent@example.com', 1, 'INBOX')",
+    );
+
+    await deltaSyncSent([
+      createMockImapMessage({
+        uid: 5,
+        folder: "Sent",
+        message_id: "abc@example.com",
+        in_reply_to: "<parent@example.com>",
+        subject: "Hello",
+      }),
+    ]);
+
+    const threads = await db.select<{ id: string }[]>("SELECT id FROM threads ORDER BY id");
+    expect(threads.map((t) => t.id)).toEqual(["t-other"]);
   });
 
   it("keeps a local sent copy whose Message-ID the server has not delivered yet", async () => {
@@ -144,5 +172,78 @@ describe("imapDeltaSync with the real schema", () => {
 
     const messages = await db.select<{ id: string }[]>("SELECT id FROM messages ORDER BY id");
     expect(messages.map((m) => m.id)).toEqual(["imap-acc-1-Sent-5", "imap-sent-1"]);
+  });
+});
+
+describe("imapDeltaSync joins replies to the threads they belong to", () => {
+  async function storeMessage(threadId: string, id: string, messageIdHeader: string, references: string | null) {
+    db.raw.prepare("INSERT OR IGNORE INTO threads (id, account_id, subject) VALUES (?, 'acc-1', 'Plans')").run(threadId);
+    db.raw
+      .prepare(
+        "INSERT INTO messages (id, account_id, thread_id, subject, date, message_id_header, references_header, imap_uid, imap_folder) VALUES (?, 'acc-1', ?, 'Plans', 1, ?, ?, 1, 'INBOX')",
+      )
+      .run(id, threadId, messageIdHeader, references);
+  }
+  async function threadOf(id: string): Promise<string | undefined> {
+    const rows = await db.select<{ thread_id: string }[]>("SELECT thread_id FROM messages WHERE id = $1", [id]);
+    return rows[0]?.thread_id;
+  }
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    db = createTestDb();
+    db.raw.exec("INSERT INTO accounts (id, email) VALUES ('acc-1', 'me@example.com')");
+    await upsertFolderSyncState({
+      account_id: "acc-1",
+      folder_path: "Sent",
+      uidvalidity: 1,
+      last_uid: 4,
+      modseq: null,
+      last_sync_at: 0,
+    });
+  });
+
+  it("puts a reply into the thread that already holds the message it answers", async () => {
+    // Stored under an id the reply's own root does not hash to (the initial
+    // sync threaded it under an older root, or merged it by subject).
+    await storeMessage("t-existing", "imap-acc-1-INBOX-1", "parent@example.com", "older@example.com");
+
+    await deltaSyncSent([
+      createMockImapMessage({
+        uid: 5,
+        folder: "Sent",
+        message_id: "reply@example.com",
+        in_reply_to: "<parent@example.com>",
+        references: null,
+        subject: "Re: Plans",
+      }),
+    ]);
+
+    expect(await threadOf("imap-acc-1-Sent-5")).toBe("t-existing");
+  });
+
+  it("keeps using a thread stored under the old 32-bit id when nothing it holds is referenced", async () => {
+    // Root never stored, only a sibling reply: the lookup by Message-ID finds nothing.
+    const old = legacyThreadId("root@example.com");
+    await storeMessage(old, "imap-acc-1-INBOX-1", "sibling@example.com", "<root@example.com>");
+
+    await deltaSyncSent([
+      createMockImapMessage({
+        uid: 5,
+        folder: "Sent",
+        message_id: "reply@example.com",
+        in_reply_to: "<root@example.com>",
+        references: "<root@example.com>",
+        subject: "Re: Plans",
+      }),
+    ]);
+
+    expect(await threadOf("imap-acc-1-Sent-5")).toBe(old);
+  });
+
+  it("does not merge new conversations whose roots collide in 32 bits", () => {
+    // "hetairas" and "mentioner" share a djb2 hash.
+    expect(legacyThreadId("hetairas")).toBe(legacyThreadId("mentioner"));
+    expect(generateThreadId("hetairas")).not.toBe(generateThreadId("mentioner"));
   });
 });

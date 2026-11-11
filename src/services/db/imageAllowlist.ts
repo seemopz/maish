@@ -16,7 +16,9 @@ export async function getAllowlistedSenders(
     `SELECT sender_address FROM image_allowlist WHERE account_id = $1 AND sender_address IN (${placeholders})`,
     [accountId, ...normalized],
   );
-  return new Set(rows.map((r) => r.sender_address));
+  // Keyed by the caller's spelling: the stored form is lower-case, a message's From is not.
+  const allowed = new Set(rows.map((r) => r.sender_address));
+  return new Set(senderAddresses.filter((address) => allowed.has(normalizeEmail(address))));
 }
 
 export async function addToAllowlist(

@@ -27,10 +27,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use sha2::{Digest, Sha256};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::client as imap_client;
 use super::types::ImapConfig;
 
+/// Sessions checked out at once per account; further commands wait for one.
+const MAX_ACTIVE_PER_ACCOUNT: usize = 5;
 /// Idle sessions kept per account.
 const MAX_IDLE_PER_ACCOUNT: usize = 2;
 /// Idle time after which a session is probed with `NOOP` before reuse.
@@ -144,6 +147,9 @@ struct AccountSlot<S> {
 struct Shared<B: Backend> {
     backend: B,
     accounts: Mutex<HashMap<AccountId, AccountSlot<B::Session>>>,
+    /// Per account, not in `AccountSlot`: `prune` drops slots while leases are out.
+    active: Mutex<HashMap<AccountId, Arc<Semaphore>>>,
+    max_active_per_account: usize,
     max_idle_per_account: usize,
     validate_after: Duration,
     max_idle: Duration,
@@ -158,6 +164,7 @@ impl<B: Backend> Pool<B> {
     pub fn with_backend(backend: B) -> Self {
         Self::with_limits(
             backend,
+            MAX_ACTIVE_PER_ACCOUNT,
             MAX_IDLE_PER_ACCOUNT,
             VALIDATE_AFTER,
             MAX_IDLE,
@@ -167,6 +174,7 @@ impl<B: Backend> Pool<B> {
 
     fn with_limits(
         backend: B,
+        max_active_per_account: usize,
         max_idle_per_account: usize,
         validate_after: Duration,
         max_idle: Duration,
@@ -176,6 +184,8 @@ impl<B: Backend> Pool<B> {
             shared: Arc::new(Shared {
                 backend,
                 accounts: Mutex::new(HashMap::new()),
+                active: Mutex::new(HashMap::new()),
+                max_active_per_account,
                 max_idle_per_account,
                 validate_after,
                 max_idle,
@@ -187,15 +197,30 @@ impl<B: Backend> Pool<B> {
     /// Hand out an idle session for the account or connect a new one.
     ///
     /// No lock is held while a command runs, so a slow fetch never blocks
-    /// another command for the same account; it just uses a second session.
+    /// another command for the same account; it just uses a second session,
+    /// up to `max_active_per_account`. Beyond that a command waits for a lease
+    /// to end (every command holds one lease at a time, so this cannot
+    /// deadlock).
     pub async fn acquire(&self, config: &ImapConfig) -> Result<Lease<B>, String> {
         let id = AccountId::of(config);
         let secret = hash_secret(&config.password);
+        let semaphore = Arc::clone(
+            self.shared
+                .active
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(id.clone())
+                .or_insert_with(|| Arc::new(Semaphore::new(self.shared.max_active_per_account))),
+        );
+        let permit = semaphore
+            .acquire_owned()
+            .await
+            .map_err(|_| "IMAP connection limit closed".to_string())?;
 
         loop {
             let Some((mut session, idle_since)) = self.take_idle(&id, secret) else {
                 let session = self.shared.backend.connect(config).await?;
-                return Ok(self.lease(id, secret, session));
+                return Ok(self.lease(id, secret, session, permit));
             };
 
             if idle_age(idle_since) > self.shared.validate_after {
@@ -209,7 +234,7 @@ impl<B: Backend> Pool<B> {
                     continue;
                 }
             }
-            return Ok(self.lease(id, secret, session));
+            return Ok(self.lease(id, secret, session, permit));
         }
     }
 
@@ -231,8 +256,15 @@ impl<B: Backend> Pool<B> {
         slot.idle.pop()
     }
 
-    fn lease(&self, id: AccountId, secret: SecretHash, session: B::Session) -> Lease<B> {
+    fn lease(
+        &self,
+        id: AccountId,
+        secret: SecretHash,
+        session: B::Session,
+        permit: OwnedSemaphorePermit,
+    ) -> Lease<B> {
         Lease {
+            _permit: permit,
             shared: Arc::clone(&self.shared),
             id,
             secret,
@@ -260,6 +292,8 @@ pub(crate) struct Lease<B: Backend> {
     id: AccountId,
     secret: SecretHash,
     session: Option<B::Session>,
+    /// Freed when the lease ends, after `release` has parked the session.
+    _permit: OwnedSemaphorePermit,
 }
 
 impl<B: Backend> Lease<B> {
@@ -378,6 +412,7 @@ mod tests {
         let backend = Arc::new(FakeBackend::default());
         let pool = Pool::with_limits(
             backend.clone(),
+            MAX_ACTIVE_PER_ACCOUNT,
             MAX_IDLE_PER_ACCOUNT,
             validate_after,
             max_idle,
@@ -511,6 +546,38 @@ mod tests {
         second.release();
         third.release();
         assert_eq!(pool.idle_count(&cfg), 2);
+    }
+
+    /// A quick step over 50 threads issues 50 commands at once; without a
+    /// limit each one logs in on its own connection.
+    #[tokio::test]
+    async fn commands_beyond_the_per_account_limit_wait_for_a_session() {
+        let backend = Arc::new(FakeBackend::default());
+        let pool = Pool::with_limits(
+            backend.clone(),
+            2,
+            MAX_IDLE_PER_ACCOUNT,
+            VALIDATE_AFTER,
+            MAX_IDLE,
+            NOOP_TIMEOUT,
+        );
+        let cfg = config("pw");
+        let first = pool.acquire(&cfg).await.unwrap();
+        let _second = pool.acquire(&cfg).await.unwrap();
+
+        let third = tokio::time::timeout(Duration::from_millis(50), pool.acquire(&cfg)).await;
+        assert!(third.is_err(), "a third session must wait for a free slot");
+
+        // Another account has slots of its own.
+        let mut other = config("pw");
+        other.username = "other@example.test".to_string();
+        pool.acquire(&other).await.unwrap().release();
+
+        // A dropped lease (every error path) frees its slot too.
+        drop(first);
+        let third = tokio::time::timeout(Duration::from_secs(1), pool.acquire(&cfg)).await;
+        assert!(matches!(third, Ok(Ok(_))));
+        assert_eq!(backend.connects.load(Ordering::SeqCst), 4);
     }
 
     #[tokio::test]

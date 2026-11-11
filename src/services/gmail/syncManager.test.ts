@@ -457,6 +457,42 @@ describe("syncManager", () => {
       expect(errors[0]).toBe("Unknown error");
     });
   });
+  describe("background calendar sync", () => {
+    it("stores the rule and series end of a recurring event, like the calendar page does", async () => {
+      const { hasCalendarSupport, getCalendarProvider } = await import("../calendar/providerFactory");
+      const { getVisibleCalendars } = await import("../db/calendars");
+      const { upsertCalendarEvent } = await import("../db/calendarEvents");
+      const ical = [
+        "BEGIN:VCALENDAR",
+        "BEGIN:VEVENT",
+        "UID:weekly",
+        "DTSTART:20260105T090000Z",
+        "DTEND:20260105T100000Z",
+        "RRULE:FREQ=WEEKLY;UNTIL=20260330T090000Z",
+        "END:VEVENT",
+        "END:VCALENDAR",
+      ].join("\r\n");
+      mockGetAccount.mockResolvedValue({ ...makeGmailAccount("c1"), provider: "caldav" } as never);
+      vi.mocked(hasCalendarSupport).mockResolvedValueOnce(true);
+      vi.mocked(getVisibleCalendars).mockResolvedValueOnce([{ id: "cal-1", remote_id: "/cal/", sync_token: null } as never]);
+      vi.mocked(getCalendarProvider).mockResolvedValueOnce({
+        type: "caldav",
+        listCalendars: async () => [],
+        syncEvents: async () => ({
+          created: [{ remoteEventId: "/cal/weekly.ics", startTime: 1767603600, endTime: 1767607200, icalData: ical } as never],
+          updated: [],
+          deletedRemoteIds: [],
+        }),
+      } as never);
+
+      await syncAccount("c1");
+
+      expect(vi.mocked(upsertCalendarEvent)).toHaveBeenCalledWith(
+        expect.objectContaining({ rrule: "FREQ=WEEKLY;UNTIL=20260330T090000Z", recurrenceEnd: expect.any(Number) }),
+      );
+    });
+  });
+
   describe("empty IMAP account", () => {
     it("forces a full resync at most once, not on every delta of an empty mailbox", async () => {
       const { imapDeltaSync, imapInitialSync } = await import("../imap/imapSync");

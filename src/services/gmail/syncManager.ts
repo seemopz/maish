@@ -8,7 +8,8 @@ import { imapInitialSync, imapDeltaSync } from "../imap/imapSync";
 import { clearAllFolderSyncStates } from "../db/folderSyncState";
 import { hasCalendarSupport, getCalendarProvider } from "../calendar/providerFactory";
 import { getVisibleCalendars, upsertCalendar, updateCalendarSyncToken } from "../db/calendars";
-import { upsertCalendarEvent, deleteEventByRemoteId } from "../db/calendarEvents";
+import { deleteEventByRemoteId } from "../db/calendarEvents";
+import { storeProviderEvent } from "../calendar/occurrences";
 import { syncContactsForAccount } from "../contacts/contactSync";
 import { logToFile } from "../logFile";
 
@@ -228,25 +229,7 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
 
         // Upsert created/updated events
         for (const event of [...syncResult.created, ...syncResult.updated]) {
-          await upsertCalendarEvent({
-            accountId,
-            googleEventId: event.remoteEventId,
-            summary: event.summary,
-            description: event.description,
-            location: event.location,
-            startTime: event.startTime,
-            endTime: event.endTime,
-            isAllDay: event.isAllDay,
-            status: event.status,
-            organizerEmail: event.organizerEmail,
-            attendeesJson: event.attendeesJson,
-            htmlLink: event.htmlLink,
-            calendarId: cal.id,
-            remoteEventId: event.remoteEventId,
-            etag: event.etag,
-            icalData: event.icalData,
-            uid: event.uid,
-          });
+          await storeProviderEvent(accountId, cal.id, event);
         }
 
         // Delete removed events

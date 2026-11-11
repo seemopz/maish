@@ -276,8 +276,10 @@ export class ImapSmtpProvider implements EmailProvider {
     const archiveFolder =
       (await findSpecialFolder(this.accountId, "\\Archive")) ?? "Archive";
 
+    // Archiving takes the thread out of the inbox; the copies in Sent or another
+    // folder (the user's own replies) are not part of that.
     for (const [folder, uids] of grouped) {
-      if (folder === archiveFolder) continue;
+      if (folder.toUpperCase() !== "INBOX") continue;
       await imapMoveMessages(config, folder, uids, archiveFolder);
       reconcileSoon(this.accountId, folder);
     }
@@ -350,6 +352,8 @@ export class ImapSmtpProvider implements EmailProvider {
 
     for (const [folder, uids] of grouped) {
       if (folder === destination) continue;
+      // "Not spam" returns what sits in Junk, not the replies in Sent.
+      if (!isSpam && folder !== junkFolder) continue;
       await imapMoveMessages(config, folder, uids, destination);
       reconcileSoon(this.accountId, folder);
     }

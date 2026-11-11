@@ -15,8 +15,17 @@ export async function getAiCache(
   type: string,
 ): Promise<string | null> {
   const db = await getDb();
+  // An answer older than the thread's newest message describes a conversation
+  // that has since grown. A Date header from the future is not counted, or the
+  // answer would be regenerated (and billed) on every view until then.
   const rows = await db.select<AiCacheEntry[]>(
-    "SELECT content FROM ai_cache WHERE account_id = $1 AND thread_id = $2 AND type = $3",
+    `SELECT content FROM ai_cache c
+      WHERE c.account_id = $1 AND c.thread_id = $2 AND c.type = $3
+        AND NOT EXISTS (
+          SELECT 1 FROM messages m
+           WHERE m.account_id = c.account_id AND m.thread_id = c.thread_id
+             AND m.date > c.created_at * 1000 AND m.date <= unixepoch() * 1000
+        )`,
     [accountId, threadId, type],
   );
   return rows[0]?.content ?? null;

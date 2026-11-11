@@ -204,3 +204,34 @@ describe("classifyThreadsBySmartLabels", () => {
     expect(callArgs.userContent).toContain("recruiter@company.com");
   });
 });
+
+describe("long threads", () => {
+  const thread = [
+    { subject: "Plan", from_name: "Anna", from_address: "a@example.de", date: 0, body_text: "x".repeat(9000) },
+    { subject: "Re: Plan", from_name: "Bert", from_address: "b@example.de", date: 1, body_text: "NEWEST REPLY" },
+  ] as unknown as DbMessage[];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockComplete.mockResolvedValue('["ok"]');
+    mockGetSetting.mockImplementation(async () => null);
+  });
+
+  const sent = () => mockComplete.mock.calls[0][0].userContent as string;
+
+  it("keeps the newest message when a thread is cut to fit", async () => {
+    await summarizeThread("t1", "a1", thread);
+    expect(sent()).toContain("NEWEST REPLY");
+    expect(sent().length).toBeLessThanOrEqual(6000);
+  });
+
+  it("does the same for smart replies and task extraction, and closes the wrapper", async () => {
+    await generateSmartReplies("t1", "a1", thread);
+    expect(sent()).toContain("NEWEST REPLY");
+
+    mockComplete.mockClear();
+    await extractTaskFromThread("t1", "a1", thread);
+    expect(sent()).toContain("NEWEST REPLY");
+    expect(sent().endsWith("</email_content>")).toBe(true);
+  });
+});

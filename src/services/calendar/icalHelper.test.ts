@@ -158,11 +158,17 @@ describe("generateVEvent", () => {
       expect(data).toContain(`PRODID:-//Maish//CalDAV Client//EN\r\n${zone}\r\nBEGIN:VEVENT`);
     });
 
-    it("stays in UTC where the zone cannot be stated as a VTIMEZONE", () => {
+    it("keeps a zone whose changes follow no yearly rule, with its changes listed", () => {
       const data = generateVEvent(weekly, "uid-1", "Africa/Casablanca");
 
+      expect(data).toContain("DTSTART;TZID=Africa/Casablanca:");
+      expect(data).toContain("BEGIN:VTIMEZONE");
+    });
+
+    it("stays in UTC where the runtime does not know the zone", () => {
+      const data = generateVEvent(weekly, "uid-1", "W. Europe Standard Time");
+
       expect(data).toContain("DTSTART:20260302T170000Z");
-      expect(data).not.toContain("TZID");
       expect(data).not.toContain("VTIMEZONE");
     });
 

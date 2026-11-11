@@ -80,9 +80,20 @@ describe("buildVTimezone", () => {
     ]);
   });
 
-  it("refuses a zone whose changes follow no yearly weekday rule", () => {
-    // Morocco suspends its offset for Ramadan, which moves through the year.
-    expect(buildVTimezone("Africa/Casablanca", 2025)).toBeNull();
+  it("lists the changes year by year for a zone that follows no yearly weekday rule", () => {
+    // Morocco suspends its offset for Ramadan, which moves through the year;
+    // Jerusalem changes on the Friday before the last Sunday of March.
+    for (const zone of ["Africa/Casablanca", "Asia/Jerusalem", "Africa/Cairo", "America/Santiago"]) {
+      const lines = buildVTimezone(zone, 2025);
+      expect(lines, zone).not.toBeNull();
+      expect(lines!.some((l) => l.startsWith("RRULE")), zone).toBe(false);
+    }
+    const jerusalem = buildVTimezone("Asia/Jerusalem", 2025)!;
+    // 2027-03-26 02:00 local, +0200 -> +0300.
+    const at = jerusalem.indexOf("DTSTART:20270326T020000");
+    expect(at).toBeGreaterThan(0);
+    expect(jerusalem[at - 1]).toBe("BEGIN:DAYLIGHT");
+    expect(jerusalem.slice(at, at + 3)).toEqual(["DTSTART:20270326T020000", "TZOFFSETFROM:+0200", "TZOFFSETTO:+0300"]);
   });
 
   it("refuses a zone the runtime does not know", () => {

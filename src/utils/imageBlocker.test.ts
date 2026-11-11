@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripRemoteImages, restoreRemoteImages, hasBlockedImages } from "./imageBlocker";
+import { stripRemoteImages, hasBlockedImages } from "./imageBlocker";
 
 describe("stripRemoteImages", () => {
   it("blocks remote http images", () => {
@@ -51,7 +51,18 @@ describe("stripRemoteImages", () => {
   it("handles single-quoted src", () => {
     const html = "<img src='https://cdn.example.com/img.jpg' />";
     const result = stripRemoteImages(html);
-    expect(result).toContain("data-blocked-src='https://cdn.example.com/img.jpg'");
+    expect(result).toContain('data-blocked-src="https://cdn.example.com/img.jpg"');
+  });
+
+  // Browsers read a backslash as a slash in an http(s) URL and drop tabs
+  // inside it, and a serialised attribute value may hold a raw ">".
+  it.each([
+    [String.raw`<img src="https:\\t.example\p.gif">`, "backslashes"],
+    ['<img src="ht	tps://t.example/p.gif">', "a tab in the scheme"],
+    ['<img alt="a>b" src="https://t.example/p.gif">', "a > in an earlier attribute"],
+  ])("blocks %s (%s)", (html) => {
+    const img = new DOMParser().parseFromString(stripRemoteImages(html), "text/html").querySelector("img");
+    expect(img?.getAttribute("src")).toBe("");
   });
 
   it("handles HTML with no images", () => {
@@ -75,29 +86,6 @@ describe("stripRemoteImages", () => {
   it("leaves a document-relative url() alone", () => {
     const html = '<div style="background-image: url(/local/bg.png)">text</div>';
     expect(stripRemoteImages(html)).toBe(html);
-  });
-});
-
-describe("restoreRemoteImages", () => {
-  it("restores blocked images", () => {
-    const original = '<img src="https://cdn.example.com/image.png" alt="photo" />';
-    const blocked = stripRemoteImages(original);
-    const restored = restoreRemoteImages(blocked);
-    expect(restored).toContain('src="https://cdn.example.com/image.png"');
-    expect(restored).not.toContain("data-blocked-src");
-  });
-
-  it("restores a blocked protocol-relative image", () => {
-    const original = '<img src="//cdn.example.com/image.png" alt="photo" />';
-    const restored = restoreRemoteImages(stripRemoteImages(original));
-    expect(restored).toContain('src="//cdn.example.com/image.png"');
-    expect(restored).not.toContain("data-blocked-src");
-  });
-
-  it("handles HTML with no blocked images", () => {
-    const html = '<img src="data:image/png;base64,abc" />';
-    const result = restoreRemoteImages(html);
-    expect(result).toBe(html);
   });
 });
 

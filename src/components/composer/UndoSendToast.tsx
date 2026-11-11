@@ -36,6 +36,7 @@ export function UndoSendToast() {
         bodyHtml: pendingSend.bodyHtml,
         threadId: pendingSend.threadId,
         inReplyToMessageId: pendingSend.inReplyToMessageId,
+        references: pendingSend.references,
         draftId: pendingSend.draftId,
         fromEmail: pendingSend.fromEmail,
         attachments: pendingSend.attachments,

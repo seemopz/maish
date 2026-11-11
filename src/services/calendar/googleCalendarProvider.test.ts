@@ -377,32 +377,35 @@ describe("GoogleCalendarProvider", () => {
       expect(result.newSyncToken).toBe("initial-token");
     });
 
-    it("handles 410 error (expired sync token) gracefully", async () => {
-      mockClient.request.mockRejectedValue(new Error("410 Gone: sync token expired"));
+    it("falls back to a full sync that returns a fresh token when the sync token expired", async () => {
+      mockClient.request
+        .mockRejectedValueOnce(new Error("Gmail API error: 410 Gone"))
+        .mockResolvedValueOnce({ items: [], nextSyncToken: "fresh-token" });
 
       const result = await provider.syncEvents("cal-1", "expired-token");
 
-      expect(result).toEqual({
-        created: [],
-        updated: [],
-        deletedRemoteIds: [],
-        newSyncToken: null,
-        newCtag: null,
-      });
+      expect(mockClient.request).toHaveBeenCalledTimes(2);
+      const retryUrl = mockClient.request.mock.calls[1][0] as string;
+      expect(retryUrl).not.toContain("syncToken");
+      expect(retryUrl).toContain("timeMin=");
+      expect(result.newSyncToken).toBe("fresh-token");
     });
 
-    it("handles 'sync token' message in error gracefully", async () => {
-      mockClient.request.mockRejectedValue(new Error("Invalid sync token"));
+    it("falls back to a full sync on an 'invalid sync token' error too", async () => {
+      mockClient.request
+        .mockRejectedValueOnce(new Error("Invalid sync token"))
+        .mockResolvedValueOnce({ items: [], nextSyncToken: "fresh-token" });
 
       const result = await provider.syncEvents("cal-1", "bad-token");
 
-      expect(result).toEqual({
-        created: [],
-        updated: [],
-        deletedRemoteIds: [],
-        newSyncToken: null,
-        newCtag: null,
-      });
+      expect(result.newSyncToken).toBe("fresh-token");
+    });
+
+    it("gives up after one full-sync retry when the error persists", async () => {
+      mockClient.request.mockRejectedValue(new Error("Gmail API error: 410 Gone"));
+
+      await expect(provider.syncEvents("cal-1", "expired-token")).rejects.toThrow("410");
+      expect(mockClient.request).toHaveBeenCalledTimes(2);
     });
 
     it("rethrows non-sync-token errors", async () => {

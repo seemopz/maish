@@ -1,4 +1,4 @@
-import { getDb, selectFirstBy } from "./connection";
+import { getDb } from "./connection";
 
 export interface FolderSyncState {
   account_id: string;
@@ -7,16 +7,6 @@ export interface FolderSyncState {
   last_uid: number;
   modseq: number | null;
   last_sync_at: number | null;
-}
-
-export async function getFolderSyncState(
-  accountId: string,
-  folderPath: string,
-): Promise<FolderSyncState | null> {
-  return selectFirstBy<FolderSyncState>(
-    "SELECT * FROM folder_sync_state WHERE account_id = $1 AND folder_path = $2",
-    [accountId, folderPath],
-  );
 }
 
 export async function upsertFolderSyncState(
@@ -36,17 +26,6 @@ export async function upsertFolderSyncState(
       state.modseq,
       state.last_sync_at,
     ],
-  );
-}
-
-export async function deleteFolderSyncState(
-  accountId: string,
-  folderPath: string,
-): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "DELETE FROM folder_sync_state WHERE account_id = $1 AND folder_path = $2",
-    [accountId, folderPath],
   );
 }
 

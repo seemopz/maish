@@ -29,6 +29,7 @@ vi.mock("@/services/db/pendingOperations", () => ({
   releaseOperation: vi.fn(() => Promise.resolve()),
   deleteUnclaimedOperation: vi.fn(() => Promise.resolve(true)),
   incrementRetry: vi.fn(() => Promise.resolve()),
+  updateOperationStatus: vi.fn(() => Promise.resolve()),
 }));
 
 const { mockDbExecute, mockDbSelect } = vi.hoisted(() => ({
@@ -60,6 +61,7 @@ import {
   releaseOperation,
   deleteUnclaimedOperation,
   incrementRetry,
+  updateOperationStatus,
 } from "@/services/db/pendingOperations";
 import {
   archiveThread,
@@ -483,6 +485,16 @@ describe("emailActions undo", () => {
 
     expect(releaseOperation).not.toHaveBeenCalled();
     expect(incrementRetry).toHaveBeenCalledWith("op-1");
+    expect(deleteOperation).not.toHaveBeenCalled();
+  });
+
+  it("marks the queued copy failed on a permanent error, so local and server divergence shows up for retry", async () => {
+    mockProvider.archive.mockRejectedValueOnce(new Error("Bad request"));
+    await archiveThread("acct-1", "t1", ["m1"]);
+
+    await flushPendingUndo();
+
+    expect(updateOperationStatus).toHaveBeenCalledWith("op-1", "failed", expect.any(String));
     expect(deleteOperation).not.toHaveBeenCalled();
   });
 

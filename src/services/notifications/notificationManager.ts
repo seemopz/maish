@@ -22,7 +22,6 @@ interface NotificationContext {
 }
 
 let lastNotificationContext: NotificationContext | null = null;
-const recentContexts = new Map<string, NotificationContext>();
 
 async function showAndFocusMainWindow(): Promise<void> {
   const mainWindow = await WebviewWindow.getByLabel("main");
@@ -121,9 +120,7 @@ export function queueNewEmailNotification(
   pendingCount++;
 
   // Store context for action handling
-  const ctx = { threadId, accountId, fromAddress, subject };
-  lastNotificationContext = ctx;
-  if (threadId) recentContexts.set(threadId, ctx);
+  lastNotificationContext = { threadId, accountId, fromAddress, subject };
 
   // Debounce: wait 2s before showing, to batch during sync
   if (notifyTimer) clearTimeout(notifyTimer);
@@ -172,9 +169,7 @@ export function notifyFollowUpDue(
   accountId?: string,
 ): void {
   if (!notificationsEnabled) return;
-  const ctx = { threadId, accountId, subject };
-  lastNotificationContext = ctx;
-  if (threadId) recentContexts.set(threadId, ctx);
+  lastNotificationContext = { threadId, accountId, subject };
   sendNotification({
     title: "Follow up needed",
     body: subject || "(No subject)",

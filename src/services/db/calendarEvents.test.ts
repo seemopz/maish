@@ -14,8 +14,6 @@ import {
   upsertCalendarEvent,
   getCalendarEventsInRange,
   getCalendarEventsInRangeMulti,
-  deleteEventsForCalendar,
-  getEventByRemoteId,
   deleteEventByRemoteId,
   deleteCalendarEvent,
   type DbCalendarEvent,
@@ -249,40 +247,6 @@ describe("calendarEvents service", () => {
       expect(sql).toContain("account_id = $1");
       expect(sql).toContain("start_time < $3");
       expect(params).toEqual(["acc-1", 500, 2500]);
-    });
-  });
-
-  describe("deleteEventsForCalendar", () => {
-    it("removes all events for a given calendar_id", async () => {
-      await deleteEventsForCalendar("cal-1");
-
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockDb.execute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toBe("DELETE FROM calendar_events WHERE calendar_id = $1");
-      expect(params).toEqual(["cal-1"]);
-    });
-  });
-
-  describe("getEventByRemoteId", () => {
-    it("returns event matching calendar_id and remote_event_id", async () => {
-      const event = makeEvent({ calendar_id: "cal-1", remote_event_id: "remote-1" });
-      vi.mocked(selectFirstBy).mockResolvedValueOnce(event);
-
-      const result = await getEventByRemoteId("cal-1", "remote-1");
-
-      expect(result).toEqual(event);
-      expect(selectFirstBy).toHaveBeenCalledTimes(1);
-      const [sql, params] = vi.mocked(selectFirstBy).mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("WHERE calendar_id = $1 AND remote_event_id = $2");
-      expect(params).toEqual(["cal-1", "remote-1"]);
-    });
-
-    it("returns null when no event matches", async () => {
-      vi.mocked(selectFirstBy).mockResolvedValueOnce(null);
-
-      const result = await getEventByRemoteId("cal-1", "nonexistent");
-
-      expect(result).toBeNull();
     });
   });
 

@@ -7,6 +7,7 @@ const { mockGetDb } = vi.hoisted(() => ({
 
 vi.mock("@/services/db/connection", () => ({
   getDb: mockGetDb,
+  withTransaction: vi.fn(),
 }));
 
 vi.mock("./smartLabelService", () => ({
@@ -20,6 +21,7 @@ vi.mock("@/services/emailActions", () => ({
 import { matchSmartLabels } from "./smartLabelService";
 import { addThreadLabel } from "@/services/emailActions";
 import { backfillSmartLabels } from "./backfillService";
+import { MIGRATIONS, splitStatements } from "@/services/db/migrations";
 
 describe("backfillSmartLabels", () => {
   beforeEach(() => {
@@ -97,5 +99,19 @@ describe("backfillSmartLabels", () => {
 
     // Should only call select once (batch was < 50)
     expect(mockSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects only columns the migrated schema has", async () => {
+    mockSelect.mockResolvedValueOnce([]);
+    await backfillSmartLabels("acc-1");
+    const sql = mockSelect.mock.calls[0]![0] as string;
+
+    // process.getBuiltinModule keeps node:sqlite away from Vite (see migrations.test.ts).
+    const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    for (const migration of MIGRATIONS) {
+      for (const statement of splitStatements(migration.sql)) db.exec(statement);
+    }
+    expect(() => db.prepare(sql)).not.toThrow();
   });
 });

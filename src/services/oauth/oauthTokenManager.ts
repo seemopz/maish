@@ -1,5 +1,5 @@
 import type { DbAccount } from "../db/accounts";
-import { updateAccountTokens } from "../db/accounts";
+import { updateAccountTokens, updateAccountAllTokens } from "../db/accounts";
 import { getOAuthProvider } from "./providers";
 import { refreshProviderToken } from "./oauthFlow";
 
@@ -54,7 +54,13 @@ export async function ensureFreshToken(account: DbAccount): Promise<string> {
 
   const newExpiresAt = Math.floor(Date.now() / 1000) + tokens.expires_in;
 
-  await updateAccountTokens(account.id, tokens.access_token, newExpiresAt);
+  // Providers that rotate refresh tokens (Microsoft) invalidate the old one, so keep the new one.
+  if (tokens.refresh_token) {
+    await updateAccountAllTokens(account.id, tokens.access_token, tokens.refresh_token, newExpiresAt);
+    account.refresh_token = tokens.refresh_token;
+  } else {
+    await updateAccountTokens(account.id, tokens.access_token, newExpiresAt);
+  }
 
   // Update the in-memory account object so callers get the fresh token
   account.access_token = tokens.access_token;

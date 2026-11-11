@@ -87,30 +87,50 @@ function generateMessageId(from: string): string {
   return `<${timestamp}.${random}@${domain}>`;
 }
 
+/** In-Reply-To and References for a reply to `msg`, from its RFC 5322 Message-ID. */
+export function replyHeaders(msg: {
+  message_id_header: string | null;
+  references_header: string | null;
+}): { inReplyToMessageId: string | null; references: string | null } {
+  const id = msg.message_id_header?.trim();
+  if (!id) return { inReplyToMessageId: null, references: null };
+  const refs = msg.references_header?.trim();
+  return { inReplyToMessageId: id, references: refs ? `${refs} ${id}` : id };
+}
+
+/**
+ * A header value on one line. Subjects and addresses arrive from mailto: links
+ * and List-Unsubscribe headers, so a CR/LF would otherwise start a header of
+ * the sender's choosing (a hidden Bcc, or a body).
+ */
+function oneLine(value: string): string {
+  return value.replace(/[\r\n]+/g, " ");
+}
+
 export function buildRawEmail(draft: EmailDraft): string {
   const messageId = generateMessageId(draft.from);
   const lines: string[] = [
-    `From: ${draft.from}`,
-    `To: ${draft.to.join(", ")}`,
+    `From: ${oneLine(draft.from)}`,
+    `To: ${oneLine(draft.to.join(", "))}`,
   ];
 
   if (draft.cc && draft.cc.length > 0) {
-    lines.push(`Cc: ${draft.cc.join(", ")}`);
+    lines.push(`Cc: ${oneLine(draft.cc.join(", "))}`);
   }
   if (draft.bcc && draft.bcc.length > 0) {
-    lines.push(`Bcc: ${draft.bcc.join(", ")}`);
+    lines.push(`Bcc: ${oneLine(draft.bcc.join(", "))}`);
   }
 
   lines.push(`Date: ${new Date().toUTCString()}`);
   lines.push(`Message-ID: ${messageId}`);
-  lines.push(`Subject: ${draft.subject}`);
+  lines.push(`Subject: ${oneLine(draft.subject)}`);
   lines.push(`MIME-Version: 1.0`);
 
   if (draft.inReplyTo) {
-    lines.push(`In-Reply-To: ${draft.inReplyTo}`);
+    lines.push(`In-Reply-To: ${oneLine(draft.inReplyTo)}`);
   }
   if (draft.references) {
-    lines.push(`References: ${draft.references}`);
+    lines.push(`References: ${oneLine(draft.references)}`);
   }
 
   const { html: processedHtml, images: inlineImages } = extractInlineImages(draft.htmlBody);

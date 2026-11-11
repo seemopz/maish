@@ -19,6 +19,7 @@ import {
   type SmtpConfig,
 } from "../imap/tauriCommands";
 import { getAccount, type DbAccount } from "../db/accounts";
+import { getDb } from "../db/connection";
 import { findSpecialFolder } from "../imap/messageHelper";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { upsertMessage } from "../db/messages";
@@ -353,8 +354,15 @@ export class ImapSmtpProvider implements EmailProvider {
   async moveToFolder(
     _threadId: string,
     _messageIds: string[],
-    folderPath: string,
+    destination: string,
   ): Promise<void> {
+    // Callers pass a label id ("folder-Projects", "archive"); the server needs the mailbox path.
+    const db = await getDb();
+    const rows = await db.select<{ imap_folder_path: string | null }[]>(
+      "SELECT imap_folder_path FROM labels WHERE account_id = $1 AND id = $2",
+      [this.accountId, destination],
+    );
+    const folderPath = rows[0]?.imap_folder_path ?? destination;
     const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
 
@@ -518,9 +526,10 @@ export class ImapSmtpProvider implements EmailProvider {
     const draftsFolder =
       (await findSpecialFolder(this.accountId, "\\Drafts")) ?? "Drafts";
 
-    await imapAppendMessage(config, draftsFolder, rawBase64Url, "(\\Draft)");
+    const uid = await imapAppendMessage(config, draftsFolder, rawBase64Url, "(\\Draft)");
+    if (uid != null) return { draftId: `imap-${this.accountId}-${draftsFolder}-${uid}` };
 
-    // IMAP APPEND does not return the new UID, so generate a pseudo draft ID
+    // shortcut: without APPENDUID the copy cannot be found again, so the next update leaves it behind; upgrade by searching the Message-ID if that matters
     const draftId = `imap-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     return { draftId };
   }
@@ -530,14 +539,14 @@ export class ImapSmtpProvider implements EmailProvider {
     rawBase64Url: string,
     _threadId?: string,
   ): Promise<{ draftId: string }> {
-    // Delete the old draft first, then create a new one
+    // Append first: deleting first lost the only copy whenever the append failed.
+    const created = await this.createDraft(rawBase64Url, _threadId);
     try {
       await this.deleteDraft(draftId);
     } catch {
-      // Old draft may already be gone; continue with creating the new one
+      // Old draft may already be gone
     }
-
-    return this.createDraft(rawBase64Url, _threadId);
+    return created;
   }
 
   async deleteDraft(draftId: string): Promise<void> {

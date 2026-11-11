@@ -8,6 +8,7 @@ import {
   deleteOperation,
   deleteUnclaimedOperation,
   incrementRetry,
+  updateOperationStatus,
 } from "@/services/db/pendingOperations";
 import { classifyError } from "@/utils/networkErrors";
 import { getDb } from "@/services/db/connection";
@@ -459,7 +460,8 @@ async function sendQueued(
       await incrementRetry(opId);
       return { success: true, queued: true };
     }
-    await deleteOperation(opId);
+    // Kept as failed, not deleted: the local change cannot be reverted, so it must stay retryable from Settings.
+    await updateOperationStatus(opId, "failed", classified.message);
     revertOptimisticUpdate(action);
     console.error(`Email action ${action.type} failed permanently:`, err);
     return { success: false, error: classified.message };

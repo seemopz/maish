@@ -28,6 +28,7 @@ export interface PendingSend {
   bodyHtml: string;
   threadId: string | null;
   inReplyToMessageId: string | null;
+  references: string | null;
   draftId: string | null;
   fromEmail: string | null;
   attachments: ComposerAttachment[];
@@ -51,7 +52,9 @@ export interface ComposerState {
   subject: string;
   bodyHtml: string;
   threadId: string | null;
+  /** The RFC 5322 Message-ID (`<…@…>`) of the mail answered, not Maish's row id. */
   inReplyToMessageId: string | null;
+  references: string | null;
   showCcBcc: boolean;
   draftId: string | null;
   undoSendTimer: ReturnType<typeof setTimeout> | null;
@@ -74,6 +77,7 @@ export interface ComposerState {
     bodyHtml?: string;
     threadId?: string | null;
     inReplyToMessageId?: string | null;
+    references?: string | null;
     draftId?: string | null;
     fromEmail?: string | null;
     attachments?: ComposerAttachment[];
@@ -111,6 +115,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
   bodyHtml: "",
   threadId: null,
   inReplyToMessageId: null,
+  references: null,
   showCcBcc: false,
   draftId: null,
   undoSendTimer: null,
@@ -136,6 +141,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
       bodyHtml: opts?.bodyHtml ?? "",
       threadId: opts?.threadId ?? null,
       inReplyToMessageId: opts?.inReplyToMessageId ?? null,
+      references: opts?.references ?? null,
       showCcBcc: (opts?.cc?.length ?? 0) > 0 || (opts?.bcc?.length ?? 0) > 0,
       draftId: opts?.draftId ?? null,
       viewMode: "modal",
@@ -157,6 +163,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
       bodyHtml: "",
       threadId: null,
       inReplyToMessageId: null,
+      references: null,
       showCcBcc: false,
       draftId: null,
       viewMode: "modal",

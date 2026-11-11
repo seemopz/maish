@@ -8,11 +8,7 @@ import {
   deleteTask,
   completeTask,
   uncompleteTask,
-  reorderTasks,
   getIncompleteTaskCount,
-  getTaskTags,
-  upsertTaskTag,
-  deleteTaskTag,
 } from "./tasks";
 import { getDb } from "./connection";
 
@@ -144,50 +140,11 @@ describe("tasks DB service", () => {
     });
   });
 
-  describe("reorderTasks", () => {
-    it("updates sort_order for each task", async () => {
-      await reorderTasks(["t1", "t2", "t3"]);
-      expect(mockDb.execute).toHaveBeenCalledTimes(3);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("sort_order = $1"),
-        [0, "t1"],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("sort_order = $1"),
-        [2, "t3"],
-      );
-    });
-  });
-
   describe("getIncompleteTaskCount", () => {
     it("returns count", async () => {
       mockDb.select.mockResolvedValue([{ count: 5 }]);
       const result = await getIncompleteTaskCount("acc1");
       expect(result).toBe(5);
-    });
-  });
-
-  describe("task tags", () => {
-    it("getTaskTags queries correctly", async () => {
-      mockDb.select.mockResolvedValue([]);
-      await getTaskTags("acc1");
-      expect(mockDb.select).toHaveBeenCalled();
-    });
-
-    it("upsertTaskTag inserts with color", async () => {
-      await upsertTaskTag("urgent", "acc1", "#ff0000");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("INSERT INTO task_tags"),
-        ["urgent", "acc1", "#ff0000"],
-      );
-    });
-
-    it("deleteTaskTag removes tag", async () => {
-      await deleteTaskTag("urgent", "acc1");
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE FROM task_tags"),
-        ["urgent", "acc1"],
-      );
     });
   });
 });

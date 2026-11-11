@@ -42,7 +42,3 @@ const providers: Record<string, OAuthProviderConfig> = {
 export function getOAuthProvider(id: string): OAuthProviderConfig | null {
   return providers[id] ?? null;
 }
-
-export function getAllOAuthProviders(): OAuthProviderConfig[] {
-  return Object.values(providers);
-}

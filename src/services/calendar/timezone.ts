@@ -165,3 +165,153 @@ export function wallClockKey(wall: WallClock): number {
     wall.second
   );
 }
+
+const DAY_CODES = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+/** Years after the first one over which a derived rule must match Intl. */
+const RULE_CHECK_YEARS = 10;
+
+interface Transition {
+  /** Instant of the change, epoch seconds. */
+  at: number;
+  /** Offsets before and after, in seconds east of UTC. */
+  from: number;
+  to: number;
+}
+
+/**
+ * A VTIMEZONE for `zone` (RFC 5545 §3.6.5) whose observances begin in
+ * `fromYear`, derived from the zone data Intl carries. Each offset change is
+ * written as a yearly nth-weekday rule (BYMONTH + BYDAY) taken from that
+ * year's transitions and checked against Intl for the following years.
+ * Returns null for a zone Intl does not know or whose changes follow no such
+ * rule (e.g. Morocco's Ramadan suspension), so the caller can fall back to UTC
+ * instead of writing a TZID with a wrong definition.
+ */
+export function buildVTimezone(zone: string, fromYear: number): string[] | null {
+  if (!getFormatter(zone)) return null;
+
+  const first = transitionsIn(zone, fromYear);
+  if (first.length > 2) return null;
+  const rules = first.map(weekdayRule);
+
+  // Checked up to a decade past now too: a back-dated open series still runs today.
+  const lastYear = Math.max(fromYear, new Date().getUTCFullYear()) + RULE_CHECK_YEARS;
+  for (let year = fromYear + 1; year <= lastYear; year++) {
+    const actual = transitionsIn(zone, year);
+    if (actual.length !== rules.length) return null;
+    const matches = rules.every((rule, i) => {
+      const t = actual[i]!;
+      return t.from === rule.from && t.to === rule.to && t.at === ruleInstant(rule, year);
+    });
+    if (!matches) return null;
+  }
+
+  const lines = ["BEGIN:VTIMEZONE", `TZID:${zone}`];
+  if (rules.length === 0) {
+    const offset = formatOffset(offsetSeconds(Date.UTC(fromYear, 0, 1) / 1000, zone));
+    lines.push(
+      "BEGIN:STANDARD",
+      `DTSTART:${fromYear}0101T000000`,
+      `TZOFFSETFROM:${offset}`,
+      `TZOFFSETTO:${offset}`,
+      "END:STANDARD",
+    );
+  }
+  for (const rule of rules) {
+    const kind = rule.to > rule.from ? "DAYLIGHT" : "STANDARD";
+    const p = (n: number) => String(n).padStart(2, "0");
+    lines.push(
+      `BEGIN:${kind}`,
+      `DTSTART:${fromYear}${p(rule.month)}${p(rule.day)}T${p(rule.hour)}${p(rule.minute)}${p(rule.second)}`,
+      `RRULE:FREQ=YEARLY;BYMONTH=${rule.month};BYDAY=${rule.nth}${DAY_CODES[rule.weekday]}`,
+      `TZOFFSETFROM:${formatOffset(rule.from)}`,
+      `TZOFFSETTO:${formatOffset(rule.to)}`,
+      `END:${kind}`,
+    );
+  }
+  lines.push("END:VTIMEZONE");
+  return lines;
+}
+
+function offsetSeconds(epochSeconds: number, zone: string): number {
+  return Math.round(zoneOffsetMs(epochSeconds * 1000, zone) / 1000);
+}
+
+/** Offset changes within a calendar year (UTC), found day by day and narrowed to the second. */
+function transitionsIn(zone: string, year: number): Transition[] {
+  const found: Transition[] = [];
+  const end = Date.UTC(year + 1, 0, 1) / 1000;
+  let t = Date.UTC(year, 0, 1) / 1000;
+  let offset = offsetSeconds(t, zone);
+
+  while (t < end) {
+    const next = Math.min(t + 86400, end);
+    const nextOffset = offsetSeconds(next, zone);
+    if (nextOffset !== offset) {
+      let lo = t;
+      let hi = next;
+      while (hi - lo > 1) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (offsetSeconds(mid, zone) === offset) lo = mid;
+        else hi = mid;
+      }
+      found.push({ at: hi, from: offset, to: nextOffset });
+    }
+    t = next;
+    offset = nextOffset;
+  }
+  return found;
+}
+
+interface WeekdayRule extends Transition {
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  weekday: number;
+  /** 1-4 for the nth weekday of the month, -1 for the last one. */
+  nth: number;
+}
+
+/** The transition as "nth weekday of the month" in the wall time before it. */
+function weekdayRule(t: Transition): WeekdayRule {
+  const wall = new Date((t.at + t.from) * 1000);
+  const year = wall.getUTCFullYear();
+  const month = wall.getUTCMonth() + 1;
+  const day = wall.getUTCDate();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return {
+    ...t,
+    month,
+    day,
+    hour: wall.getUTCHours(),
+    minute: wall.getUTCMinutes(),
+    second: wall.getUTCSeconds(),
+    weekday: wall.getUTCDay(),
+    nth: day + 7 > daysInMonth ? -1 : Math.ceil(day / 7),
+  };
+}
+
+/** Where the rule puts the transition in `year`, epoch seconds. */
+function ruleInstant(rule: WeekdayRule, year: number): number {
+  const m = rule.month - 1;
+  let day: number;
+  if (rule.nth > 0) {
+    const firstWeekday = new Date(Date.UTC(year, m, 1)).getUTCDay();
+    day = 1 + ((rule.weekday - firstWeekday + 7) % 7) + 7 * (rule.nth - 1);
+  } else {
+    const last = new Date(Date.UTC(year, m + 1, 0));
+    day = last.getUTCDate() - ((last.getUTCDay() - rule.weekday + 7) % 7);
+  }
+  return Date.UTC(year, m, day, rule.hour, rule.minute, rule.second) / 1000 - rule.from;
+}
+
+/** ±HHMM, or ±HHMMSS for the odd historical offset with seconds. */
+function formatOffset(seconds: number): string {
+  const sign = seconds < 0 ? "-" : "+";
+  const abs = Math.abs(seconds);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const hhmm = `${p(Math.floor(abs / 3600))}${p(Math.floor((abs % 3600) / 60))}`;
+  return `${sign}${hhmm}${abs % 60 ? p(abs % 60) : ""}`;
+}

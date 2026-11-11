@@ -1,5 +1,5 @@
 import type { CalendarEventData, CreateEventInput, UpdateEventInput } from "./types";
-import { wallClockToEpoch, type WallClock } from "./timezone";
+import { buildVTimezone, formatDateTimeInZone, wallClockToEpoch, type WallClock } from "./timezone";
 // iCalendar and vCard share a line format, so they share its parser.
 import {
   escapeText,
@@ -7,19 +7,34 @@ import {
   unescapeText,
   unfoldLines,
 } from "@/services/dav/contentLine";
-import { buildRRule, type RuleDateStyle } from "./recurrenceForm";
+import { buildRRule, localZone, type RuleDateStyle } from "./recurrenceForm";
 
 /**
  * Generate a VEVENT iCalendar string from event input.
  */
-export function generateVEvent(event: CreateEventInput | UpdateEventInput, uid?: string): string {
+export function generateVEvent(
+  event: CreateEventInput | UpdateEventInput,
+  uid?: string,
+  zone: string | null = localZone(),
+): string {
   const eventUid = uid ?? crypto.randomUUID();
   const now = formatDateTimeUTC(new Date());
+
+  // A timed series is written in local wall time with its zone, so the rule is
+  // evaluated there and keeps its time of day across DST (as UTC stamps it
+  // drifts by an hour). A TZID needs a VTIMEZONE; without one, stay in UTC.
+  // shortcut: zones whose changes follow no nth-weekday rule (buildVTimezone
+  // returns null) still drift; upgrade with per-year observances if users hit it.
+  const vtimezone = event.recurrence && !event.isAllDay && event.startTime && zone
+    ? buildVTimezone(zone, new Date(event.startTime).getUTCFullYear() - 1)
+    : null;
+  const seriesZone = vtimezone ? zone : null;
 
   const lines: string[] = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//Maish//CalDAV Client//EN",
+    ...(vtimezone ?? []),
     "BEGIN:VEVENT",
     `UID:${eventUid}`,
     `DTSTAMP:${now}`,
@@ -33,6 +48,9 @@ export function generateVEvent(event: CreateEventInput | UpdateEventInput, uid?:
     if (event.isAllDay) {
       lines.push(`DTSTART;VALUE=DATE:${formatDateOnly(new Date(event.startTime))}`);
       lines.push(`DTEND;VALUE=DATE:${formatDateOnly(new Date(event.endTime))}`);
+    } else if (seriesZone) {
+      lines.push(`DTSTART;TZID=${seriesZone}:${zonedValue(event.startTime, seriesZone)}`);
+      lines.push(`DTEND;TZID=${seriesZone}:${zonedValue(event.endTime, seriesZone)}`);
     } else {
       lines.push(`DTSTART:${formatDateTimeUTC(new Date(event.startTime))}`);
       lines.push(`DTEND:${formatDateTimeUTC(new Date(event.endTime))}`);
@@ -40,7 +58,8 @@ export function generateVEvent(event: CreateEventInput | UpdateEventInput, uid?:
   }
 
   if (event.recurrence) {
-    lines.push(`RRULE:${buildRRule(event.recurrence, styleFor(event.isAllDay))}`);
+    const style = seriesZone ? { zone: seriesZone, isDate: false } : styleFor(event.isAllDay);
+    lines.push(`RRULE:${buildRRule(event.recurrence, style)}`);
   }
 
   if (event.description) {
@@ -65,7 +84,7 @@ export function generateVEvent(event: CreateEventInput | UpdateEventInput, uid?:
 
 /**
  * How a freshly generated event writes its dates, which is what UNTIL has to
- * match: an all-day event gets bare DATE values, everything else a UTC stamp.
+ * match: an all-day event gets bare DATE values, a timed one without a zone a UTC stamp.
  */
 function styleFor(isAllDay: boolean | undefined): RuleDateStyle {
   return isAllDay ? { zone: null, isDate: true } : { zone: "UTC", isDate: false };
@@ -404,6 +423,10 @@ export function parseDuration(value: string): number | null {
 
 function formatDateTimeUTC(date: Date): string {
   return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+}
+
+function zonedValue(iso: string, zone: string): string {
+  return formatDateTimeInZone(Math.floor(new Date(iso).getTime() / 1000), zone, false);
 }
 
 function formatDateOnly(date: Date): string {

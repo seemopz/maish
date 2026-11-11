@@ -1,4 +1,6 @@
 import { generateVEvent, parseVEvent } from "./icalHelper";
+import { expandOccurrences } from "./recurrence";
+import { buildVTimezone } from "./timezone";
 import type { CreateEventInput } from "./types";
 
 beforeEach(() => {
@@ -120,18 +122,56 @@ describe("generateVEvent", () => {
       },
     };
 
-    // UNTIL covers the whole of the day that was picked, and that day is the
-    // one the dialog showed — a day in the viewer's zone, not in UTC. Its UTC
-    // rendering therefore depends on where this runs, so it is computed here
-    // rather than written out.
-    const endOfChosenDay = new Date(2025, 6, 31, 23, 59, 59);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const expected =
-      `${endOfChosenDay.getUTCFullYear()}${pad(endOfChosenDay.getUTCMonth() + 1)}` +
-      `${pad(endOfChosenDay.getUTCDate())}T${pad(endOfChosenDay.getUTCHours())}` +
-      `${pad(endOfChosenDay.getUTCMinutes())}${pad(endOfChosenDay.getUTCSeconds())}Z`;
+    // UNTIL covers the whole of the picked day in the series' zone:
+    // 23:59:59 CEST is 21:59:59 UTC.
+    expect(generateVEvent(event, undefined, "Europe/Berlin"))
+      .toContain("RRULE:FREQ=DAILY;UNTIL=20250731T215959Z");
+  });
 
-    expect(generateVEvent(event)).toContain(`RRULE:FREQ=DAILY;UNTIL=${expected}`);
+  describe("a timed series", () => {
+    // Monday 2 March 2026, 18:00 in Berlin.
+    const weekly: CreateEventInput = {
+      summary: "Choir",
+      startTime: "2026-03-02T17:00:00Z",
+      endTime: "2026-03-02T18:30:00Z",
+      recurrence: { frequency: "weekly", interval: 1, byDay: [], end: { kind: "never" } },
+    };
+
+    it("is written in the zone's wall time, so its rule follows daylight saving", () => {
+      // As UTC stamps the rule is evaluated in UTC, and every client showed the
+      // instances after the change to summer time an hour early.
+      const data = generateVEvent(weekly, "uid-1", "Europe/Berlin");
+
+      expect(data).toContain("DTSTART;TZID=Europe/Berlin:20260302T180000");
+      expect(data).toContain("DTEND;TZID=Europe/Berlin:20260302T193000");
+
+      const MAR_30 = Date.parse("2026-03-30T00:00:00Z") / 1000;
+      const [after] = expandOccurrences(data, MAR_30, MAR_30 + 86400);
+      expect(after?.startTime).toBe(Date.parse("2026-03-30T16:00:00Z") / 1000);
+    });
+
+    it("carries a VTIMEZONE for its TZID ahead of the event", () => {
+      // RFC 5545 §3.6.5 requires one for every TZID the object uses.
+      const data = generateVEvent(weekly, "uid-1", "Europe/Berlin");
+
+      const zone = buildVTimezone("Europe/Berlin", 2025)!.join("\r\n");
+      expect(data).toContain(`PRODID:-//Maish//CalDAV Client//EN\r\n${zone}\r\nBEGIN:VEVENT`);
+    });
+
+    it("stays in UTC where the zone cannot be stated as a VTIMEZONE", () => {
+      const data = generateVEvent(weekly, "uid-1", "Africa/Casablanca");
+
+      expect(data).toContain("DTSTART:20260302T170000Z");
+      expect(data).not.toContain("TZID");
+      expect(data).not.toContain("VTIMEZONE");
+    });
+
+    it("leaves a one-off event in UTC", () => {
+      const data = generateVEvent({ ...weekly, recurrence: undefined }, "uid-1", "Europe/Berlin");
+
+      expect(data).toContain("DTSTART:20260302T170000Z");
+      expect(data).not.toContain("VTIMEZONE");
+    });
   });
 
   it("includes description when provided", () => {

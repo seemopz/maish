@@ -1,4 +1,4 @@
-import { getDb, selectFirstBy, boolToInt } from "./connection";
+import { getDb, boolToInt } from "./connection";
 
 export interface DbSendAsAlias {
   id: string;
@@ -93,23 +93,6 @@ export async function upsertAlias(alias: {
   return id;
 }
 
-export async function getDefaultAlias(
-  accountId: string,
-): Promise<DbSendAsAlias | null> {
-  // Try to get the explicitly set default
-  const defaultAlias = await selectFirstBy<DbSendAsAlias>(
-    "SELECT * FROM send_as_aliases WHERE account_id = $1 AND is_default = 1 LIMIT 1",
-    [accountId],
-  );
-  if (defaultAlias) return defaultAlias;
-
-  // Fall back to the primary alias
-  return selectFirstBy<DbSendAsAlias>(
-    "SELECT * FROM send_as_aliases WHERE account_id = $1 AND is_primary = 1 LIMIT 1",
-    [accountId],
-  );
-}
-
 export async function setDefaultAlias(
   accountId: string,
   aliasId: string,
@@ -125,9 +108,4 @@ export async function setDefaultAlias(
     "UPDATE send_as_aliases SET is_default = 1 WHERE id = $1 AND account_id = $2",
     [aliasId, accountId],
   );
-}
-
-export async function deleteAlias(id: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM send_as_aliases WHERE id = $1", [id]);
 }

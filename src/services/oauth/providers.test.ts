@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getOAuthProvider, getAllOAuthProviders } from "./providers";
+import { getOAuthProvider } from "./providers";
 
 describe("getOAuthProvider", () => {
   it("returns microsoft provider config", () => {
@@ -36,15 +36,5 @@ describe("getOAuthProvider", () => {
 
   it("returns null for empty string", () => {
     expect(getOAuthProvider("")).toBeNull();
-  });
-});
-
-describe("getAllOAuthProviders", () => {
-  it("returns all registered providers", () => {
-    const providers = getAllOAuthProviders();
-    expect(providers.length).toBeGreaterThanOrEqual(2);
-    const ids = providers.map((p) => p.id);
-    expect(ids).toContain("microsoft");
-    expect(ids).toContain("yahoo");
   });
 });

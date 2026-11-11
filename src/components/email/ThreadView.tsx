@@ -12,6 +12,9 @@ import { getSetting } from "@/services/db/settings";
 import { getAllowlistedSenders } from "@/services/db/imageAllowlist";
 import { VolumeX } from "lucide-react";
 import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
+import { replyHeaders } from "@/utils/emailBuilder";
+import { buildQuote, buildForwardQuote } from "@/utils/quote";
+import { REMOTE_IMAGE_BLOCK } from "@/utils/imageBlocker";
 import { isNoReplyAddress } from "@/utils/noReply";
 import { ThreadSummary } from "./ThreadSummary";
 import { SmartReplySuggestions } from "./SmartReplySuggestions";
@@ -130,6 +133,11 @@ export function ThreadView({ thread }: ThreadViewProps) {
   const openMenu = useContextMenuStore((s) => s.openMenu);
   const defaultReplyMode = useUIStore((s) => s.defaultReplyMode);
   const lastMessage = messages[messages.length - 1];
+  // Same rule as EmailRenderer; `null` (setting not loaded yet) blocks.
+  const imagesAllowed = useCallback(
+    (msg: DbMessage) => blockImages === false || (!!msg.from_address && allowlistedSenders.has(msg.from_address)),
+    [blockImages, allowlistedSenders],
+  );
 
   const handleReply = useCallback(() => {
     if (!lastMessage) return;
@@ -138,11 +146,11 @@ export function ThreadView({ thread }: ThreadViewProps) {
       mode: "reply",
       to: replyTo ? [replyTo] : [],
       subject: `Re: ${lastMessage.subject ?? ""}`,
-      bodyHtml: buildQuote(lastMessage),
+      bodyHtml: buildQuote(lastMessage, imagesAllowed(lastMessage)),
       threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
+      ...replyHeaders(lastMessage),
     });
-  }, [lastMessage, openComposer]);
+  }, [lastMessage, openComposer, imagesAllowed]);
 
   const handleReplyAll = useCallback(() => {
     if (!lastMessage) return;
@@ -161,11 +169,11 @@ export function ThreadView({ thread }: ThreadViewProps) {
       to: Array.from(allRecipients),
       cc: ccList,
       subject: `Re: ${lastMessage.subject ?? ""}`,
-      bodyHtml: buildQuote(lastMessage),
+      bodyHtml: buildQuote(lastMessage, imagesAllowed(lastMessage)),
       threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
+      ...replyHeaders(lastMessage),
     });
-  }, [lastMessage, openComposer]);
+  }, [lastMessage, openComposer, imagesAllowed]);
 
   const handleForward = useCallback(() => {
     if (!lastMessage) return;
@@ -173,11 +181,11 @@ export function ThreadView({ thread }: ThreadViewProps) {
       mode: "forward",
       to: [],
       subject: `Fwd: ${lastMessage.subject ?? ""}`,
-      bodyHtml: buildForwardQuote(lastMessage),
+      bodyHtml: buildForwardQuote(lastMessage, imagesAllowed(lastMessage)),
       threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
+      ...replyHeaders(lastMessage),
     });
-  }, [lastMessage, openComposer]);
+  }, [lastMessage, openComposer, imagesAllowed]);
 
   const handlePrint = useCallback(() => {
     if (messages.length === 0) return;
@@ -212,7 +220,9 @@ export function ThreadView({ thread }: ThreadViewProps) {
 
     const safeSubject = escapeHtml(thread.subject ?? "");
     doc.open();
-    doc.write(`<!DOCTYPE html><html><head><title>${safeSubject || "Email"}</title>
+    // Unsandboxed and under the app policy, so remote images need the same block as the reading pane.
+    const imagePolicy = messages.every(imagesAllowed) ? "" : REMOTE_IMAGE_BLOCK;
+    doc.write(`<!DOCTYPE html><html><head>${imagePolicy}<title>${safeSubject || "Email"}</title>
       <style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:800px;margin:20px auto;color:#333;font-size:14px}
       h1{font-size:18px;margin-bottom:8px}img{max-width:100%}</style></head>
       <body><h1>${safeSubject || "(No subject)"}</h1>${messagesHtml}</body></html>`);
@@ -221,7 +231,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
     iframe.contentWindow?.focus();
     iframe.contentWindow?.print();
     setTimeout(() => document.body.removeChild(iframe), 1000);
-  }, [messages, thread.subject]);
+  }, [messages, thread.subject, imagesAllowed]);
 
   // Message-level keyboard navigation (ArrowUp / ArrowDown)
   const [focusedMsgIdx, setFocusedMsgIdx] = useState(-1);
@@ -305,6 +315,8 @@ export function ThreadView({ thread }: ThreadViewProps) {
     e.preventDefault();
     openMenu("message", { x: e.clientX, y: e.clientY }, {
       messageId: msg.id,
+      messageIdHeader: msg.message_id_header,
+      referencesHeader: msg.references_header,
       threadId: msg.thread_id,
       accountId: msg.account_id,
       fromAddress: msg.from_address,
@@ -513,19 +525,4 @@ export function ThreadView({ thread }: ThreadViewProps) {
       )}
     </div>
   );
-}
-
-function buildQuote(msg: DbMessage): string {
-  const date = new Date(msg.date).toLocaleString();
-  const from = msg.from_name
-    ? `${escapeHtml(msg.from_name)} &lt;${escapeHtml(msg.from_address ?? "")}&gt;`
-    : escapeHtml(msg.from_address ?? "Unknown");
-  const body = msg.body_html ? sanitizeHtml(msg.body_html) : escapeHtml(msg.body_text ?? "");
-  return `<br><br><div style="border-left:2px solid #ccc;padding-left:12px;margin-left:0;color:#666">On ${date}, ${from} wrote:<br>${body}</div>`;
-}
-
-function buildForwardQuote(msg: DbMessage): string {
-  const date = new Date(msg.date).toLocaleString();
-  const body = msg.body_html ? sanitizeHtml(msg.body_html) : escapeHtml(msg.body_text ?? "");
-  return `<br><br>---------- Forwarded message ---------<br>From: ${escapeHtml(msg.from_name ?? "")} &lt;${escapeHtml(msg.from_address ?? "")}&gt;<br>Date: ${date}<br>Subject: ${escapeHtml(msg.subject ?? "")}<br>To: ${escapeHtml(msg.to_addresses ?? "")}<br><br>${body}`;
 }

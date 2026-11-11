@@ -96,16 +96,3 @@ export async function deleteQuickStep(id: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM quick_steps WHERE id = $1", [id]);
 }
-
-export async function reorderQuickSteps(
-  accountId: string,
-  orderedIds: string[],
-): Promise<void> {
-  const db = await getDb();
-  for (let i = 0; i < orderedIds.length; i++) {
-    await db.execute(
-      "UPDATE quick_steps SET sort_order = $1 WHERE id = $2 AND account_id = $3",
-      [i, orderedIds[i], accountId],
-    );
-  }
-}

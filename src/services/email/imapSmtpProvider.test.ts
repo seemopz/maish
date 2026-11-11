@@ -44,6 +44,13 @@ vi.mock("../db/messages", () => ({
   upsertMessage: vi.fn(),
 }));
 
+const { mockDbSelect } = vi.hoisted(() => ({
+  mockDbSelect: vi.fn(() => Promise.resolve([] as unknown[])),
+}));
+vi.mock("../db/connection", () => ({
+  getDb: vi.fn(() => Promise.resolve({ select: mockDbSelect })),
+}));
+
 vi.mock("../db/threads", () => ({
   upsertThread: vi.fn(),
   setThreadLabels: vi.fn(),
@@ -397,6 +404,19 @@ describe("ImapSmtpProvider", () => {
 
       expect(imapMoveMessages).not.toHaveBeenCalled();
     });
+
+    it("moves to the folder path stored for a label id, not to the id itself", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      mockDbSelect.mockResolvedValueOnce([{ imap_folder_path: "Projects/2026" }]);
+
+      await provider.moveToFolder("thread-1", ["imap-acc-1-INBOX-100"], "folder-Projects/2026");
+
+      expect(mockDbSelect).toHaveBeenCalledWith(
+        expect.stringContaining("imap_folder_path"),
+        ["acc-1", "folder-Projects/2026"],
+      );
+      expect(imapMoveMessages).toHaveBeenCalledWith(mockImapConfig, "INBOX", [100], "Projects/2026");
+    });
   });
 
   describe("addLabel / removeLabel", () => {
@@ -520,7 +540,7 @@ describe("ImapSmtpProvider", () => {
   describe("createDraft", () => {
     it("appends to Drafts folder with Draft flag", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("INBOX.Drafts");
-      vi.mocked(imapAppendMessage).mockResolvedValue(undefined);
+      vi.mocked(imapAppendMessage).mockResolvedValue(null);
 
       const result = await provider.createDraft("base64data");
 
@@ -533,9 +553,19 @@ describe("ImapSmtpProvider", () => {
       expect(result.draftId).toMatch(/^imap-draft-/);
     });
 
+    // A pseudo id cannot be deleted, so every autosave used to leave one more copy behind.
+    it("returns the real message id when the server reports the UID", async () => {
+      vi.mocked(findSpecialFolder).mockResolvedValue("INBOX.Drafts");
+      vi.mocked(imapAppendMessage).mockResolvedValue(42);
+
+      const result = await provider.createDraft("base64data");
+
+      expect(result.draftId).toBe("imap-acc-1-INBOX.Drafts-42");
+    });
+
     it("falls back to 'Drafts' when special folder not found", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue(null);
-      vi.mocked(imapAppendMessage).mockResolvedValue(undefined);
+      vi.mocked(imapAppendMessage).mockResolvedValue(null);
 
       await provider.createDraft("base64data");
 
@@ -552,7 +582,7 @@ describe("ImapSmtpProvider", () => {
     it("deletes old draft and creates new one", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("Drafts");
       vi.mocked(imapDeleteMessages).mockResolvedValue(undefined);
-      vi.mocked(imapAppendMessage).mockResolvedValue(undefined);
+      vi.mocked(imapAppendMessage).mockResolvedValue(501);
 
       const result = await provider.updateDraft(
         "imap-acc-1-Drafts-500",
@@ -572,7 +602,19 @@ describe("ImapSmtpProvider", () => {
         "newBase64data",
         "(\\Draft)",
       );
-      expect(result.draftId).toMatch(/^imap-draft-/);
+      expect(result.draftId).toBe("imap-acc-1-Drafts-501");
+    });
+
+    // Deleting first lost the only copy whenever the append then failed.
+    it("keeps the old copy when appending the new one fails", async () => {
+      vi.mocked(findSpecialFolder).mockResolvedValue("Drafts");
+      vi.mocked(imapAppendMessage).mockRejectedValue(new Error("connection lost"));
+
+      await expect(
+        provider.updateDraft("imap-acc-1-Drafts-500", "newBase64data"),
+      ).rejects.toThrow("connection lost");
+
+      expect(imapDeleteMessages).not.toHaveBeenCalled();
     });
   });
 

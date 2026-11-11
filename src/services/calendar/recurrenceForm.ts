@@ -122,7 +122,7 @@ export function formatUntil(epochSeconds: number, style: RuleDateStyle): string 
  *
  * A series carrying a TZID is expanded in that zone, so its own last day is
  * the one to bound. A DTSTART written as a UTC stamp has no zone of its own —
- * every event this app generates writes one, and so do plenty of servers — and
+ * one-off events this app generates write one, and so do plenty of servers — and
  * the day the user picked was the day they were shown, which is the day in
  * their own zone. Taking those UTC stamps literally put UNTIL at 23:59:59 UTC,
  * and for anyone west of UTC an evening instance on the chosen day falls after
@@ -135,7 +135,7 @@ export function untilZone(style: RuleDateStyle, viewerZone: string | null): stri
 }
 
 /** The zone the machine is in, which is the zone the dialog showed. */
-function localZone(): string | null {
+export function localZone(): string | null {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
   } catch {

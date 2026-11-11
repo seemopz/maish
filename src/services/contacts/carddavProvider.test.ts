@@ -85,6 +85,16 @@ describe("CardDAVProvider", () => {
     expect(mockLogin).toHaveBeenCalledTimes(1);
   });
 
+  it("logs in again after a failed login instead of keeping the half-built client", async () => {
+    mockLogin.mockRejectedValueOnce(new Error("offline"));
+    mockFetchAddressBooks.mockResolvedValue([]);
+
+    await expect(provider.listAddressBooks()).rejects.toThrow("offline");
+    await provider.listAddressBooks();
+
+    expect(mockLogin).toHaveBeenCalledTimes(2);
+  });
+
   describe("listAddressBooks", () => {
     it("reads name, ctag and sync token", async () => {
       mockFetchAddressBooks.mockResolvedValue([

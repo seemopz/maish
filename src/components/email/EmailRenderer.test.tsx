@@ -470,4 +470,37 @@ describe("EmailRenderer", () => {
 
     expect(mockFetchAttachment).not.toHaveBeenCalled();
   });
+
+  describe("remote image policy", () => {
+    const CSP = '<meta http-equiv="Content-Security-Policy" content="img-src data:">';
+    const srcDocOf = (container: HTMLElement) =>
+      container.querySelector("iframe")?.getAttribute("srcdoc") ?? "";
+
+    it("adds an image policy to the frame while images are blocked", () => {
+      const { container } = render(
+        <EmailRenderer html='<img src="https://t.example/p.gif">' text={null} blockImages />,
+      );
+      expect(srcDocOf(container)).toContain(CSP);
+    });
+
+    it("leaves the policy out when images are not blocked", () => {
+      const { container } = render(<EmailRenderer html="<p>x</p>" text={null} />);
+      expect(srcDocOf(container)).not.toContain("Content-Security-Policy");
+    });
+
+    it("leaves the policy out for an allowlisted sender", () => {
+      const { container } = render(
+        <EmailRenderer html="<p>x</p>" text={null} blockImages senderAllowlisted />,
+      );
+      expect(srcDocOf(container)).not.toContain("Content-Security-Policy");
+    });
+
+    it("drops the policy once the user loads the images", () => {
+      const { container } = render(
+        <EmailRenderer html='<img src="https://t.example/p.gif">' text={null} blockImages />,
+      );
+      fireEvent.click(screen.getByText("Load images"));
+      expect(srcDocOf(container)).not.toContain("Content-Security-Policy");
+    });
+  });
 });

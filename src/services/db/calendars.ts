@@ -75,15 +75,3 @@ export async function updateCalendarSyncToken(
     [syncToken, ctag ?? null, calendarId],
   );
 }
-
-export async function deleteCalendarsForAccount(accountId: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM calendars WHERE account_id = $1", [accountId]);
-}
-
-export async function getCalendarById(calendarId: string): Promise<DbCalendar | null> {
-  return selectFirstBy<DbCalendar>(
-    "SELECT * FROM calendars WHERE id = $1",
-    [calendarId],
-  );
-}

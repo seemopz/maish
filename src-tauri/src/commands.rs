@@ -240,16 +240,16 @@ pub async fn imap_append_message(
     folder: String,
     flags: Option<String>,
     raw_message: String,
-) -> Result<(), String> {
+) -> Result<Option<u32>, String> {
     let mut session = pool.acquire(&config).await?;
 
     // raw_message is base64url-encoded; decode it
     let raw_bytes = base64url_decode(&raw_message)?;
 
     let flags_ref = flags.as_deref();
-    imap_client::append_message(&mut session, &folder, flags_ref, &raw_bytes).await?;
+    let uid = imap_client::append_message(&mut session, &folder, flags_ref, &raw_bytes).await?;
     session.release();
-    Ok(())
+    Ok(uid)
 }
 
 fn base64url_decode(input: &str) -> Result<Vec<u8>, String> {

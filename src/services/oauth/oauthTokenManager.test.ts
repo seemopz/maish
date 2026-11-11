@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../db/accounts", () => ({
   updateAccountTokens: vi.fn(),
+  updateAccountAllTokens: vi.fn(),
 }));
 
 vi.mock("./providers", () => ({
@@ -13,7 +14,7 @@ vi.mock("./oauthFlow", () => ({
 }));
 
 import { ensureFreshToken } from "./oauthTokenManager";
-import { updateAccountTokens } from "../db/accounts";
+import { updateAccountTokens, updateAccountAllTokens } from "../db/accounts";
 import { getOAuthProvider } from "./providers";
 import { refreshProviderToken } from "./oauthFlow";
 import { createMockDbAccount } from "@/test/mocks";
@@ -84,6 +85,26 @@ describe("ensureFreshToken", () => {
       "new-token",
       expect.any(Number),
     );
+  });
+
+  it("stores a rotated refresh token together with the new access token", async () => {
+    const account = createMockDbAccount({
+      ...oauthOverrides,
+      token_expires_at: Math.floor(Date.now() / 1000) - 60,
+    });
+    vi.mocked(getOAuthProvider).mockReturnValue({ id: "microsoft" } as ReturnType<typeof getOAuthProvider>);
+    vi.mocked(refreshProviderToken).mockResolvedValue({
+      access_token: "new-token",
+      refresh_token: "rotated-refresh",
+      expires_in: 3600,
+      token_type: "Bearer",
+    });
+
+    await ensureFreshToken(account);
+
+    expect(updateAccountAllTokens).toHaveBeenCalledWith("acc-1", "new-token", "rotated-refresh", expect.any(Number));
+    expect(updateAccountTokens).not.toHaveBeenCalled();
+    expect(account.refresh_token).toBe("rotated-refresh");
   });
 
   it("refreshes token within 5-minute buffer", async () => {

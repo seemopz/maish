@@ -66,6 +66,16 @@ describe("CalDAVProvider", () => {
     });
   });
 
+  it("logs in again after a failed login instead of keeping the half-built client", async () => {
+    mockLogin.mockRejectedValueOnce(new Error("offline"));
+    mockFetchCalendars.mockResolvedValue([]);
+
+    await expect(provider.listCalendars()).rejects.toThrow("offline");
+    await provider.listCalendars();
+
+    expect(mockLogin).toHaveBeenCalledTimes(2);
+  });
+
   describe("listCalendars", () => {
     it("maps tsdav calendars to CalendarInfo array", async () => {
       mockFetchCalendars.mockResolvedValue([
@@ -334,6 +344,84 @@ describe("CalDAVProvider", () => {
       // The master keeps its own title and rule.
       expect(data).toContain("SUMMARY:Weekly");
       expect(data).toContain("RRULE:FREQ=WEEKLY;COUNT=6");
+    });
+
+    describe("when all events are edited from a later instance", () => {
+      const JAN_19 = Math.floor(Date.parse("2026-01-19T09:00:00Z") / 1000);
+      const iso = (epoch: number) => new Date(epoch * 1000).toISOString();
+      const editAll = (start: number, end: number) =>
+        provider.updateEvent(
+          "/cal/personal/",
+          "/cal/personal/series-uid.ics",
+          { summary: "Renamed", startTime: iso(start), endTime: iso(end) },
+          '"old-etag"',
+          { recurrenceId: JAN_19, scope: "all" },
+        );
+
+      it("keeps the series start when the instance's own times come along", async () => {
+        // Writing the third instance's times as DTSTART dropped the first two.
+        await editAll(JAN_19, JAN_19 + 3600);
+
+        const data = written();
+        expect(data).toContain("DTSTART:20260105T090000Z");
+        expect(data).toContain("DTEND:20260105T100000Z");
+        expect(data).toContain("SUMMARY:Renamed");
+      });
+
+      it("moves the series start by the change made to the instance", async () => {
+        await editAll(JAN_19 + 3600, JAN_19 + 3 * 3600);
+
+        const data = written();
+        expect(data).toContain("DTSTART:20260105T100000Z");
+        expect(data).toContain("DTEND:20260105T120000Z");
+      });
+
+      it("measures the change from a moved instance's own time", async () => {
+        // The third instance was moved to 14:00; the dialog shows that, so
+        // 15:00 means one hour later, not six.
+        const MOVED = RECURRING.replace("END:VCALENDAR", [
+          "BEGIN:VEVENT",
+          "UID:series-uid",
+          "RECURRENCE-ID:20260119T090000Z",
+          "DTSTART:20260119T140000Z",
+          "DTEND:20260119T150000Z",
+          "END:VEVENT",
+          "END:VCALENDAR",
+        ].join("\r\n"));
+        mockFetchCalendarObjects.mockResolvedValue([
+          { data: MOVED, url: "/cal/personal/series-uid.ics", etag: '"old-etag"' },
+        ]);
+        const AT_15 = JAN_19 + 6 * 3600;
+
+        await editAll(AT_15, AT_15 + 3600);
+
+        expect(written()).toContain("DTSTART:20260105T100000Z");
+      });
+
+      it("shifts in wall-clock time when the move crosses a DST change", async () => {
+        const BERLIN = RECURRING
+          .replace("DTSTART:20260105T090000Z", "DTSTART;TZID=Europe/Berlin:20260323T180000")
+          .replace("DTEND:20260105T100000Z", "DTEND;TZID=Europe/Berlin:20260323T190000");
+        mockFetchCalendarObjects.mockResolvedValue([
+          { data: BERLIN, url: "/cal/personal/series-uid.ics", etag: '"old-etag"' },
+        ]);
+        // 30 March 18:00 CEST moved to 28 March 18:00 CET: two days on the clock,
+        // two days and one hour in absolute time.
+        const MAR_30 = Math.floor(Date.parse("2026-03-30T16:00:00Z") / 1000);
+        const MAR_28 = Math.floor(Date.parse("2026-03-28T17:00:00Z") / 1000);
+
+        await provider.updateEvent(
+          "/cal/personal/",
+          "/cal/personal/series-uid.ics",
+          { startTime: iso(MAR_28), endTime: iso(MAR_28 + 3600) },
+          '"old-etag"',
+          { recurrenceId: MAR_30, scope: "all" },
+        );
+
+        const data = written();
+        expect(data).toContain("DTSTART;TZID=Europe/Berlin:20260321T180000");
+        expect(data).toContain("DTEND;TZID=Europe/Berlin:20260321T190000");
+      });
     });
 
     it("sends the etag so a concurrent change is not overwritten", async () => {

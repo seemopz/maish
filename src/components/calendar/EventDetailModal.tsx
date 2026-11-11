@@ -38,12 +38,12 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
   const [summary, setSummary] = useState(event.summary ?? "");
   const [description, setDescription] = useState(event.description ?? "");
   const [location, setLocation] = useState(event.location ?? "");
-  const [startTime, setStartTime] = useState(toLocalISOString(new Date(event.start_time * 1000)));
-  const [endTime, setEndTime] = useState(
-    allDay
-      ? `${localDay(lastInstant)}T00:00`
-      : toLocalISOString(new Date(event.end_time * 1000)),
-  );
+  const initialStart = toLocalISOString(new Date(event.start_time * 1000));
+  const initialEnd = allDay
+    ? `${localDay(lastInstant)}T00:00`
+    : toLocalISOString(new Date(event.end_time * 1000));
+  const [startTime, setStartTime] = useState(initialStart);
+  const [endTime, setEndTime] = useState(initialEnd);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -115,13 +115,20 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
       // The dialog holds the day the event ends on; a provider is handed the
       // day after it.
       const range = dayRange(allDay, startTime, endTime);
+      // The fields hold the clicked instance's times: for the whole series they
+      // go out only when changed (the provider shifts the series by the change),
+      // since sent untouched they would move the series start onto this instance.
+      const sendTimes = !(isSeries && scope === "all")
+        || startTime !== initialStart || endTime !== initialEnd;
 
       await provider.updateEvent(calendarRemoteId, remoteEventId, {
         summary,
         description: description || undefined,
         location: location || undefined,
-        startTime: new Date(range.startTime).toISOString(),
-        endTime: new Date(range.endTime).toISOString(),
+        ...(sendTimes ? {
+          startTime: new Date(range.startTime).toISOString(),
+          endTime: new Date(range.endTime).toISOString(),
+        } : {}),
         // Stated on every save: without it the Google provider writes
         // start.dateTime, which turns an all-day event into a timed one behind
         // the user's back.
@@ -138,7 +145,7 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
     } finally {
       setSaving(false);
     }
-  }, [accountId, calendar, event, summary, description, location, startTime, endTime, allDay, scope, recurrence, repeatChanged, repeatLocked, targetFor, onUpdated]);
+  }, [accountId, calendar, event, summary, description, location, startTime, endTime, initialStart, initialEnd, allDay, isSeries, scope, recurrence, repeatChanged, repeatLocked, targetFor, onUpdated]);
 
   const handleDelete = useCallback(async (chosen: RecurrenceScope) => {
     setDeleting(true);

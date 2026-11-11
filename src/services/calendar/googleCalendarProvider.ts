@@ -203,9 +203,10 @@ export class GoogleCalendarProvider implements CalendarProvider {
         response = await client.request<GoogleEventListResponse>(url);
       } catch (err) {
         const message = err instanceof Error ? err.message : "";
-        if (message.includes("410") || message.includes("sync token")) {
-          // Sync token expired — caller should do full sync
-          return { created: [], updated: [], deletedRemoteIds: [], newSyncToken: null, newCtag: null };
+        // Expired token: the caller keeps the old one on a null result, so only a
+        // full sync (no token, hence no second retry) gets past it.
+        if (syncToken && (message.includes("410") || message.includes("sync token"))) {
+          return this.syncEvents(calendarRemoteId);
         }
         throw err;
       }

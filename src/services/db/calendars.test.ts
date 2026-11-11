@@ -24,8 +24,6 @@ import {
   getVisibleCalendars,
   setCalendarVisibility,
   updateCalendarSyncToken,
-  deleteCalendarsForAccount,
-  getCalendarById,
 } from "./calendars";
 import type { DbCalendar } from "./calendars";
 import { createMockDb } from "@/test/mocks";
@@ -191,40 +189,6 @@ describe("calendars service", () => {
         expect.stringContaining("SET sync_token = $1"),
         [null, "ctag-xyz", "cal-1"],
       );
-    });
-  });
-
-  describe("deleteCalendarsForAccount", () => {
-    it("deletes all calendars for the given account", async () => {
-      await deleteCalendarsForAccount("acc-1");
-
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE FROM calendars WHERE account_id = $1"),
-        ["acc-1"],
-      );
-    });
-  });
-
-  describe("getCalendarById", () => {
-    it("returns the calendar when found", async () => {
-      const cal = makeCal({ id: "cal-1" });
-      mockDb.select.mockResolvedValueOnce([cal]);
-
-      const result = await getCalendarById("cal-1");
-
-      expect(result).toEqual(cal);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("WHERE id = $1"),
-        ["cal-1"],
-      );
-    });
-
-    it("returns null when calendar not found", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
-
-      const result = await getCalendarById("nonexistent");
-
-      expect(result).toBeNull();
     });
   });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Composer } from "./components/composer/Composer";
 import { UndoSendToast } from "./components/composer/UndoSendToast";
 import { useAccountStore } from "./stores/accountStore";
@@ -45,7 +46,7 @@ export default function ComposerWindow() {
           isActive: a.is_active === 1,
           provider: a.provider,
         }));
-        setAccounts(mapped);
+        setAccounts(mapped, params.get("accountId"));
 
         // Initialize Gmail clients
         await initializeClients();
@@ -58,6 +59,7 @@ export default function ComposerWindow() {
         const subject = params.get("subject") ?? "";
         const threadId = params.get("threadId") ?? null;
         const inReplyToMessageId = params.get("inReplyToMessageId") ?? null;
+        const references = params.get("references") ?? null;
         const draftId = params.get("draftId") ?? null;
         const fromEmail = params.get("fromEmail");
 
@@ -82,6 +84,7 @@ export default function ComposerWindow() {
           bodyHtml,
           threadId,
           inReplyToMessageId,
+          references,
           draftId,
         });
 
@@ -100,6 +103,34 @@ export default function ComposerWindow() {
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- store setters are stable references
   }, []);
+
+  // Send closes the composer at once, but the mail leaves only when the undo
+  // timer runs out; closing the window before that would kill the timer. So
+  // closing is blocked while a send is pending, and the window closes itself
+  // once the composer is closed and nothing is left to send.
+  useEffect(() => {
+    if (loading || error) return;
+    const win = getCurrentWindow();
+    let closeGuard: Promise<() => void> | null = null;
+    const unsubscribe = useComposerStore.subscribe((state) => {
+      if (state.pendingSend) {
+        closeGuard ??= win.onCloseRequested((e) => e.preventDefault());
+        return;
+      }
+      if (state.isOpen && !closeGuard) return;
+      const guard = closeGuard;
+      closeGuard = null;
+      void (async () => {
+        // UnlistenFn is typed void but is an IPC round trip; a close sent before it lands is still blocked.
+        if (guard) await (await guard)();
+        if (!useComposerStore.getState().isOpen) await win.close();
+      })();
+    });
+    return () => {
+      unsubscribe();
+      void closeGuard?.then((unlisten) => unlisten());
+    };
+  }, [loading, error]);
 
   // Sync theme class to <html>
   const theme = useUIStore((s) => s.theme);

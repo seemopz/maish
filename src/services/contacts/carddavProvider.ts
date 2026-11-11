@@ -43,7 +43,7 @@ export class CardDAVProvider implements ContactsProvider {
       throw new Error("CardDAV credentials not configured");
     }
 
-    this.client = new DAVClient({
+    const client = new DAVClient({
       serverUrl,
       credentials: { username, password },
       authMethod: "Basic",
@@ -55,8 +55,11 @@ export class CardDAVProvider implements ContactsProvider {
       fetch: davFetch,
     });
 
-    await this.client.login();
-    return this.client;
+    // Cached only once logged in: a client whose login failed (app started
+    // offline) would otherwise be reused and fail every later sync.
+    await client.login();
+    this.client = client;
+    return client;
   }
 
   async listAddressBooks(): Promise<AddressBookInfo[]> {

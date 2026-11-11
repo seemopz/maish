@@ -21,11 +21,9 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 import { getDb, buildDynamicUpdate } from "@/services/db/connection";
 import {
   getSmartFolders,
-  getSmartFolderById,
   insertSmartFolder,
   updateSmartFolder,
   deleteSmartFolder,
-  updateSmartFolderSortOrder,
 } from "./smartFolders";
 import { createMockDb } from "@/test/mocks";
 
@@ -64,39 +62,6 @@ describe("smartFolders service", () => {
         expect.stringContaining("ORDER BY sort_order"),
         expect.anything(),
       );
-    });
-  });
-
-  describe("getSmartFolderById", () => {
-    it("returns the folder when found", async () => {
-      const mockFolder = {
-        id: "sf-1",
-        account_id: null,
-        name: "Unread",
-        query: "is:unread",
-        icon: "MailOpen",
-        color: null,
-        sort_order: 0,
-        is_default: 1,
-        created_at: 1234567890,
-      };
-      mockDb.select.mockResolvedValueOnce([mockFolder]);
-
-      const result = await getSmartFolderById("sf-1");
-
-      expect(result).toEqual(mockFolder);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        "SELECT * FROM smart_folders WHERE id = $1",
-        ["sf-1"],
-      );
-    });
-
-    it("returns null when not found", async () => {
-      mockDb.select.mockResolvedValueOnce([]);
-
-      const result = await getSmartFolderById("nonexistent");
-
-      expect(result).toBeNull();
     });
   });
 
@@ -167,25 +132,6 @@ describe("smartFolders service", () => {
       expect(mockDb.execute).toHaveBeenCalledWith(
         "DELETE FROM smart_folders WHERE id = $1",
         ["sf-1"],
-      );
-    });
-  });
-
-  describe("updateSmartFolderSortOrder", () => {
-    it("updates sort_order for each item", async () => {
-      await updateSmartFolderSortOrder([
-        { id: "sf-1", sortOrder: 2 },
-        { id: "sf-2", sortOrder: 0 },
-      ]);
-
-      expect(mockDb.execute).toHaveBeenCalledTimes(2);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "UPDATE smart_folders SET sort_order = $1 WHERE id = $2",
-        [2, "sf-1"],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "UPDATE smart_folders SET sort_order = $1 WHERE id = $2",
-        [0, "sf-2"],
       );
     });
   });

@@ -1,0 +1,111 @@
+{
+  "assets": [
+    {
+      "name": "latest.json",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668410704"
+    },
+    {
+      "name": "Maish-0.11.0-1.x86_64.rpm",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394509"
+    },
+    {
+      "name": "Maish-0.11.0-1.x86_64.rpm.sig",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394541"
+    },
+    {
+      "name": "Maish_0.11.0_aarch64.app.tar.gz",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668380722"
+    },
+    {
+      "name": "Maish_0.11.0_aarch64.app.tar.gz.sig",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668380775"
+    },
+    {
+      "name": "Maish_0.11.0_aarch64.dmg",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668380682"
+    },
+    {
+      "name": "Maish_0.11.0_amd64.AppImage",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394569"
+    },
+    {
+      "name": "Maish_0.11.0_amd64.AppImage.sig",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394675"
+    },
+    {
+      "name": "Maish_0.11.0_amd64.deb",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394440"
+    },
+    {
+      "name": "Maish_0.11.0_amd64.deb.sig",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394480"
+    },
+    {
+      "name": "Maish_0.11.0_x64-setup.exe",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668410595"
+    },
+    {
+      "name": "Maish_0.11.0_x64-setup.exe.sig",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668410642"
+    },
+    {
+      "name": "Maish_0.11.0_x64_en-US.msi",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668410520"
+    },
+    {
+      "name": "Maish_0.11.0_x64_en-US.msi.sig",
+      "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668410581"
+    }
+  ],
+  "signatures": {
+    "Maish-0.11.0-1.x86_64.rpm.sig": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxckZUNUdUTndzbTY5a1hPU3IwTDdLNjBjOSs3SnhKaTdadGljS00yOW0wWUNTdWtjcURjcWNyNXVsdU0wNU5kVFgxNERzV0Nxc2lWUW5hQnVtUGJPdndBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxOTYzCWZpbGU6TWFpc2gtMC4xMS4wLTEueDg2XzY0LnJwbQpPNGRXRUt3REEvTEpLazJIekI4Y052M2tMbXppd3p2Slk2QmNIanhKWjF5NDVyVG50NFMxUVdrV0loa0JFaVV2a3V1ZUhkeDZXakw5QWdvaGpPYmNDQT09Cg==",
+    "Maish_0.11.0_aarch64.app.tar.gz.sig": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxckRBeUhtaVpDNkFFWk9BTm12dFh2MEMrZ1dxaTcvR0dXemV3TFJKQ1RZdm1uTktXd01IVkFqdjA4UU0wS0t3VHJMTUdpS0tIUmVJWVRiZmNOT1BjZWdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxNjE5CWZpbGU6TWFpc2guYXBwLnRhci5negpVR3VHc2VkWUMzWjBrY2RCQm5PQzFQLzAvWkZWbHhOZWYvclZSRlI4UzZQeTEwNFIxNGx3ODBEdGxMa01FcEwzTUlYWHIzNzV3RFQ5WHRrS09yWTBEdz09Cg==",
+    "Maish_0.11.0_amd64.AppImage.sig": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxcklZSU9zU2ZwWTFqRC91Um9kcW94MDNqMXJiZDR6Qm9QSTdBb3A4YjI0Y0pac3Q4c2huTDhxRnJmeE9ZbGEvdjFmUndqQjJHS2tNL0xPMnpVR3ZRRVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxOTYzCWZpbGU6TWFpc2hfMC4xMS4wX2FtZDY0LkFwcEltYWdlCkdwMk4rZjVpOVRPU05LWjI2VlJoUDBHQlRHU28rdGhkY0grc1MxY2V5ZXFLaUtvSHZBaFdWVWFJVGlNdmtONklsQ3FBNDVhQjlaM0JPRERFRktBbEN3PT0K",
+    "Maish_0.11.0_amd64.deb.sig": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxclBEemo3ZWIwR0IvZ3o4NlhPRWZabWVSL01KMVNIUDF4YmlRVC9YRlp2bDZMakFkSWVoMDlYV0crb2Z6VlBnTThmMVVjRHVzMEdlQTN2WUZNUVBpcFFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxOTYzCWZpbGU6TWFpc2hfMC4xMS4wX2FtZDY0LmRlYgpPVXV3S21sZ3RiK2dwOEh0T1ArSmZHUWI0bThubWFxUE1LeWcwcG8rb3Vja3BIcEdBSkppaFE1cGdFbzhQbVlwRi9pR0N3WEJYbTJIb2hBeFk0VitCZz09Cg==",
+    "Maish_0.11.0_x64-setup.exe.sig": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxckVmS0ZpRXNWYUZQMmF2bmhmVzhqTFNpMWdpUWZKRlp5dU9ORGwwcUpIbWhGZXkvQ0gzVjQ2cDR5WHMxYXpsdkpDd3I1eWFFcHo3VzFaLzJ1YU1rL2c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQyMzMzCWZpbGU6TWFpc2hfMC4xMS4wX3g2NC1zZXR1cC5leGUKYkk4cGo1N1ZQdUtCMmcrbHB1SGlqQU5WV2FoY2tpd1NkY2tKQW1PR2kvaGk4M3RmS2QzYzh1MFZJeWlsSjdPc3MzcDBIRy96ek51M0sveXg4dFY3Q0E9PQo=",
+    "Maish_0.11.0_x64_en-US.msi.sig": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxck9lSndDYWtuUmkvVlZQaUd0REw1NHozWVczUXZGN3Zhb055alhna2VvTVJmK2NZOVZpR3FXWHpyVWpMU3lqcnlpa0l6SWNLMFBzUjl0S1NKbEdtOHdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQyMzMzCWZpbGU6TWFpc2hfMC4xMS4wX3g2NF9lbi1VUy5tc2kKa3k4aVVTdUR5Q0ZiL0kwZEJPblpnM3ppTEV1bTdlcEZjc21tcTh0b2twbEpNRzlzaGg1d1I0a0VLbzFWNng5bmordlFVRnFSYzVxZkE4WFNDQUczQXc9PQo="
+  },
+  "latest": {
+    "version": "0.11.0",
+    "notes": "## [0.11.0](https://github.com/seemopz/maish/compare/v0.10.0...v0.11.0) (2026-10-22)\n\n\n### Features\n\n* **ui:** sync progress as a pill instead of a sidebar slot; drop stale smart replies ([#85](https://github.com/seemopz/maish/issues/85)) ([8d885a6](https://github.com/seemopz/maish/commit/8d885a68d17f23192361e9905a3fc77714d99ab8))",
+    "pub_date": "2026-10-23T07:58:56.894Z",
+    "platforms": {
+      "darwin-aarch64": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxckRBeUhtaVpDNkFFWk9BTm12dFh2MEMrZ1dxaTcvR0dXemV3TFJKQ1RZdm1uTktXd01IVkFqdjA4UU0wS0t3VHJMTUdpS0tIUmVJWVRiZmNOT1BjZWdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxNjE5CWZpbGU6TWFpc2guYXBwLnRhci5negpVR3VHc2VkWUMzWjBrY2RCQm5PQzFQLzAvWkZWbHhOZWYvclZSRlI4UzZQeTEwNFIxNGx3ODBEdGxMa01FcEwzTUlYWHIzNzV3RFQ5WHRrS09yWTBEdz09Cg==",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668380722"
+      },
+      "darwin-aarch64-app": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxckRBeUhtaVpDNkFFWk9BTm12dFh2MEMrZ1dxaTcvR0dXemV3TFJKQ1RZdm1uTktXd01IVkFqdjA4UU0wS0t3VHJMTUdpS0tIUmVJWVRiZmNOT1BjZWdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxNjE5CWZpbGU6TWFpc2guYXBwLnRhci5negpVR3VHc2VkWUMzWjBrY2RCQm5PQzFQLzAvWkZWbHhOZWYvclZSRlI4UzZQeTEwNFIxNGx3ODBEdGxMa01FcEwzTUlYWHIzNzV3RFQ5WHRrS09yWTBEdz09Cg==",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668380722"
+      },
+      "linux-x86_64": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxcklZSU9zU2ZwWTFqRC91Um9kcW94MDNqMXJiZDR6Qm9QSTdBb3A4YjI0Y0pac3Q4c2huTDhxRnJmeE9ZbGEvdjFmUndqQjJHS2tNL0xPMnpVR3ZRRVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxOTYzCWZpbGU6TWFpc2hfMC4xMS4wX2FtZDY0LkFwcEltYWdlCkdwMk4rZjVpOVRPU05LWjI2VlJoUDBHQlRHU28rdGhkY0grc1MxY2V5ZXFLaUtvSHZBaFdWVWFJVGlNdmtONklsQ3FBNDVhQjlaM0JPRERFRktBbEN3PT0K",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394569"
+      },
+      "linux-x86_64-appimage": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxcklZSU9zU2ZwWTFqRC91Um9kcW94MDNqMXJiZDR6Qm9QSTdBb3A4YjI0Y0pac3Q4c2huTDhxRnJmeE9ZbGEvdjFmUndqQjJHS2tNL0xPMnpVR3ZRRVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxOTYzCWZpbGU6TWFpc2hfMC4xMS4wX2FtZDY0LkFwcEltYWdlCkdwMk4rZjVpOVRPU05LWjI2VlJoUDBHQlRHU28rdGhkY0grc1MxY2V5ZXFLaUtvSHZBaFdWVWFJVGlNdmtONklsQ3FBNDVhQjlaM0JPRERFRktBbEN3PT0K",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394569"
+      },
+      "linux-x86_64-deb": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxclBEemo3ZWIwR0IvZ3o4NlhPRWZabWVSL01KMVNIUDF4YmlRVC9YRlp2bDZMakFkSWVoMDlYV0crb2Z6VlBnTThmMVVjRHVzMEdlQTN2WUZNUVBpcFFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxOTYzCWZpbGU6TWFpc2hfMC4xMS4wX2FtZDY0LmRlYgpPVXV3S21sZ3RiK2dwOEh0T1ArSmZHUWI0bThubWFxUE1LeWcwcG8rb3Vja3BIcEdBSkppaFE1cGdFbzhQbVlwRi9pR0N3WEJYbTJIb2hBeFk0VitCZz09Cg==",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394440"
+      },
+      "linux-x86_64-rpm": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxckZUNUdUTndzbTY5a1hPU3IwTDdLNjBjOSs3SnhKaTdadGljS00yOW0wWUNTdWtjcURjcWNyNXVsdU0wNU5kVFgxNERzV0Nxc2lWUW5hQnVtUGJPdndBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQxOTYzCWZpbGU6TWFpc2gtMC4xMS4wLTEueDg2XzY0LnJwbQpPNGRXRUt3REEvTEpLazJIekI4Y052M2tMbXppd3p2Slk2QmNIanhKWjF5NDVyVG50NFMxUVdrV0loa0JFaVV2a3V1ZUhkeDZXakw5QWdvaGpPYmNDQT09Cg==",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668394509"
+      },
+      "windows-x86_64": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxckVmS0ZpRXNWYUZQMmF2bmhmVzhqTFNpMWdpUWZKRlp5dU9ORGwwcUpIbWhGZXkvQ0gzVjQ2cDR5WHMxYXpsdkpDd3I1eWFFcHo3VzFaLzJ1YU1rL2c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQyMzMzCWZpbGU6TWFpc2hfMC4xMS4wX3g2NC1zZXR1cC5leGUKYkk4cGo1N1ZQdUtCMmcrbHB1SGlqQU5WV2FoY2tpd1NkY2tKQW1PR2kvaGk4M3RmS2QzYzh1MFZJeWlsSjdPc3MzcDBIRy96ek51M0sveXg4dFY3Q0E9PQo=",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668410595"
+      },
+      "windows-x86_64-nsis": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxckVmS0ZpRXNWYUZQMmF2bmhmVzhqTFNpMWdpUWZKRlp5dU9ORGwwcUpIbWhGZXkvQ0gzVjQ2cDR5WHMxYXpsdkpDd3I1eWFFcHo3VzFaLzJ1YU1rL2c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQyMzMzCWZpbGU6TWFpc2hfMC4xMS4wX3g2NC1zZXR1cC5leGUKYkk4cGo1N1ZQdUtCMmcrbHB1SGlqQU5WV2FoY2tpd1NkY2tKQW1PR2kvaGk4M3RmS2QzYzh1MFZJeWlsSjdPc3MzcDBIRy96ek51M0sveXg4dFY3Q0E9PQo=",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668410595"
+      },
+      "windows-x86_64-msi": {
+        "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUaGVmUThyRVkxck9lSndDYWtuUmkvVlZQaUd0REw1NHozWVczUXZGN3Zhb055alhna2VvTVJmK2NZOVZpR3FXWHpyVWpMU3lqcnlpa0l6SWNLMFBzUjl0S1NKbEdtOHdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyNzQyMzMzCWZpbGU6TWFpc2hfMC4xMS4wX3g2NF9lbi1VUy5tc2kKa3k4aVVTdUR5Q0ZiL0kwZEJPblpnM3ppTEV1bTdlcEZjc21tcTh0b2twbEpNRzlzaGg1d1I0a0VLbzFWNng5bmordlFVRnFSYzVxZkE4WFNDQUczQXc9PQo=",
+        "url": "https://api.github.com/repos/seemopz/maish/releases/assets/668410520"
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+name: Retry Release Build
+
+# Re-runs a failed release run when its only problem was a job that never got a
+# runner. GitHub cancels such a job after ~15 minutes in the queue ("The job was
+# not acquired by Runner of type hosted even after multiple attempts"); 0.11.1's
+# macOS build was lost that way. Builds that ran and failed are left alone, see
+# .github/scripts/release-retry.mjs.
+#
+# A run cannot re-run itself (only a completed run can be re-run), hence a
+# separate workflow on `workflow_run`. It runs from the default branch.
+# A re-run started with the GITHUB_TOKEN may not fire `workflow_run` again when
+# it completes, so in practice expect one automatic re-run; the attempt limit in
+# the script is the upper bound.
+
+on:
+  workflow_run:
+    # Build Release Artifacts is listed for its workflow_dispatch runs; when
+    # release-please calls it, its jobs belong to the Release Please run.
+    workflows: [Release Please, Build Release Artifacts]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  retry:
+    name: Re-run jobs that never got a runner
+    if: github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Decide and re-run
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs?per_page=100" --jq '.jobs[]' \
+            | jq -s . > /tmp/jobs.json
+          if node .github/scripts/release-retry.mjs /tmp/jobs.json "$ATTEMPT"; then
+            gh run rerun "$RUN_ID" --failed
+          fi

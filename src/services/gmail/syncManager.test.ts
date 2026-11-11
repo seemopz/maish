@@ -457,6 +457,22 @@ describe("syncManager", () => {
       expect(errors[0]).toBe("Unknown error");
     });
   });
+  describe("empty IMAP account", () => {
+    it("forces a full resync at most once, not on every delta of an empty mailbox", async () => {
+      const { imapDeltaSync, imapInitialSync } = await import("../imap/imapSync");
+      const { getThreadCountForAccount } = await import("../db/threads");
+      mockGetAccount.mockResolvedValue({ ...makeGmailAccount("e1", "imap-synced-1"), provider: "imap" } as never);
+      vi.mocked(imapDeltaSync).mockResolvedValue({ messages: [] });
+      vi.mocked(getThreadCountForAccount).mockResolvedValue(0);
+
+      await syncAccount("e1");
+      await syncAccount("e1");
+      await syncAccount("e1");
+
+      expect(vi.mocked(imapInitialSync)).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("resync outcome", () => {
     it("resyncAccount rejects with the sync error instead of resolving as done", async () => {
       mockGetAccount.mockResolvedValue(makeGmailAccount("r1"));

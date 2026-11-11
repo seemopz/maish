@@ -143,6 +143,9 @@ async function syncGmailAccount(accountId: string): Promise<void> {
   }
 }
 
+/** IMAP accounts that already had their empty-database recovery this run. */
+const recoveredImapAccounts = new Set<string>();
+
 /**
  * Run a sync for a single IMAP account (initial or delta).
  */
@@ -163,9 +166,12 @@ async function syncImapAccount(accountId: string): Promise<void> {
     // Recovery: if delta sync found nothing new but the DB has no threads,
     // the previous initial sync likely failed or stored data incorrectly.
     // Force a full re-sync to recover.
-    if (result.messages.length === 0) {
+    // Once per account and run: a mailbox that is simply empty would otherwise
+    // get a full initial sync on every tick.
+    if (result.messages.length === 0 && !recoveredImapAccounts.has(accountId)) {
       const threadCount = await getThreadCountForAccount(accountId);
       if (threadCount === 0) {
+        recoveredImapAccounts.add(accountId);
         console.warn(`[syncManager] IMAP delta sync returned 0 new messages and DB has 0 threads for ${accountId} — forcing full re-sync`);
         await clearAccountHistoryId(accountId);
         await clearAllFolderSyncStates(accountId);

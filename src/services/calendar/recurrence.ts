@@ -63,8 +63,13 @@ const WEEKDAYS: Record<string, number> = {
 
 const ALL_MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
-/** Safety nets: a malformed rule must not spin forever. */
-const MAX_PERIODS = 20_000;
+/**
+ * Safety nets: a malformed rule must not spin forever. Instances are capped by
+ * how many land in the window, not how many were counted from DTSTART: a daily
+ * series older than the cap would otherwise show nothing at all. The period
+ * cap covers a daily series of ~270 years.
+ */
+const MAX_PERIODS = 100_000;
 const MAX_INSTANCES = 5_000;
 
 // ---------------------------------------------------------------------------
@@ -316,7 +321,7 @@ function collectStarts(
   let periods = 0;
   let cursor = periodStart(startWall, spec);
 
-  while (periods < MAX_PERIODS && emitted < MAX_INSTANCES) {
+  while (periods < MAX_PERIODS && kept.length < MAX_INSTANCES) {
     periods++;
     const candidates = candidatesForPeriod(cursor, spec, startWall);
 
@@ -338,7 +343,7 @@ function collectStarts(
       if (key >= lowerKey && key <= upperKey) {
         kept.push(wallClockToEpoch(candidate, zone));
       }
-      if (emitted >= MAX_INSTANCES) break;
+      if (kept.length >= MAX_INSTANCES) break;
     }
 
     if (exhausted) break;

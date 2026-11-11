@@ -714,6 +714,9 @@ Modifications made in this fork, as required by section 4(b) of the License:
   longer than its interval is not started a second time on top of itself, and
   a scheduled mail left in "sending" by a quit or crash is queued again on the
   next start instead of never being sent.
+- src/services/calendar/recurrence.ts — recurrence expansion caps the
+  instances inside the viewed range, not the instances counted from the
+  series start; a daily series older than about 14 years showed nothing.
 
 "Velo" is the name of the upstream project and is used here only to identify the
 work this fork derives from.

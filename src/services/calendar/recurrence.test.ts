@@ -551,3 +551,25 @@ describe("expandOccurrences — a yearly series on 29 February", () => {
     ]);
   });
 });
+
+describe("long-running series", () => {
+  it("still shows a daily series that started more than 5 000 days ago", () => {
+    const ical = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "BEGIN:VEVENT",
+      "UID:daily-since-2000",
+      "DTSTART:20000101T090000Z",
+      "DTEND:20000101T093000Z",
+      "RRULE:FREQ=DAILY",
+      "SUMMARY:Standup",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const weekStart = Date.UTC(2026, 10, 9) / 1000;
+
+    const occurrences = expandOccurrences(ical, weekStart, weekStart + 7 * 86400);
+
+    expect(occurrences).toHaveLength(7);
+  });
+});

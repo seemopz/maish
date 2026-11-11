@@ -772,6 +772,21 @@ describe("CalDAVProvider", () => {
     });
   });
 
+  describe("syncEvents and incomplete listings", () => {
+    it("claims no complete listing when an object came back without its data", async () => {
+      // Its stored row would otherwise be taken for deleted on the server.
+      mockFetchCalendarObjects.mockResolvedValue([
+        { data: MOCK_ICAL_DATA, url: "/cal/personal/test-uid.ics", etag: '"a"' },
+        { data: undefined, url: "/cal/personal/other.ics", etag: '"b"' },
+      ]);
+
+      const result = await provider.syncEvents("/cal/personal/");
+
+      expect(result.created).toHaveLength(1);
+      expect(result.window).toBeUndefined();
+    });
+  });
+
   describe("testConnection", () => {
     it("returns success with calendar count on successful connection", async () => {
       mockFetchCalendars.mockResolvedValue([

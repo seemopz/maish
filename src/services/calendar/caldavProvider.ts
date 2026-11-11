@@ -300,7 +300,11 @@ export class CalDAVProvider implements CalendarProvider {
       deletedRemoteIds: [],
       newSyncToken: null,
       newCtag: null,
-      window: { start: Math.floor(timeMin.getTime() / 1000), end: Math.floor(timeMax.getTime() / 1000) },
+      // Complete only if every listed object came with its data: a missing row
+      // is taken for deleted on the server (a failed REPORT throws in tsdav).
+      window: objects.every((obj) => obj.data)
+        ? { start: Math.floor(timeMin.getTime() / 1000), end: Math.floor(timeMax.getTime() / 1000) }
+        : undefined,
     };
   }
 

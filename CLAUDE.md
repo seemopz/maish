@@ -90,8 +90,9 @@ Stalwart server.
   (`src/services/imap/imapReconcile.ts`, `imap_fetch_flags` in
   `src-tauri/src/imap/client.rs`). `UID > last_uid` never revisits a message
   once stored, so a read/star change or an expunge/move done in another client
-  stayed wrong for good. Per folder, at most every 10 minutes and on the first
-  sync after start, `FETCH 1:EXISTS (UID FLAGS)` is compared with the stored
+  stayed wrong for good. Per folder, at most every 10 minutes, on the first
+  sync after start and on the next sync after a move out of it
+  (`reconcileSoon()`), `FETCH 1:EXISTS (UID FLAGS)` is compared with the stored
   rows: flags are taken over, rows the server no longer lists are deleted. The
   list must be complete, and that is checked against the `EXISTS` count of
   SELECT: async-imap ends a FETCH stream at the tagged reply without looking at
@@ -112,6 +113,7 @@ Stalwart server.
 - **StrictMode runs the startup effect twice in a development build**: `init()` in `App.tsx` runs concurrently with itself under `tauri dev`, never in a release build. How to reproduce startup races: `docs/development.md` → Startup races
 - **Minimize-to-tray**: Use `.on_window_event()` on the Builder, not `window.on_window_event()`
 - **IMAP message IDs**: Format is `imap-{accountId}-{folder}-{uid}` — not the RFC Message-ID header
+- **IMAP sessions per account are capped at 5** (`MAX_ACTIVE_PER_ACCOUNT`, `src-tauri/src/imap/pool.rs`): further commands wait for a lease to end. A command must never hold two leases at once, or it can deadlock
 - **IMAP UIDVALIDITY**: If UIDVALIDITY changes on a folder, all cached UIDs are invalid — triggers full resync of that folder
 - **Provider abstraction**: All sync/send operations go through `EmailProvider` interface — use `getEmailProvider(account)` from `providerFactory.ts`, never call Gmail or IMAP APIs directly from components
 - **Offline mode**: All email modify operations (archive, trash, star, read, send, labels, drafts) go through `emailActions.ts` which applies optimistic UI updates, local DB changes, and queues operations when offline. Never call `getGmailClient()` directly for modify operations — use the convenience wrappers (`archiveThread`, `trashThread`, `starThread`, etc.). Queue processor runs every 30s, compacts redundant ops, uses exponential backoff retries. Conflict detection in delta sync skips threads with pending local ops

@@ -3051,7 +3051,7 @@ dependencies = [
 
 [[package]]
 name = "maish"
-version = "0.11.1"
+version = "0.11.2"
 dependencies = [
  "async-imap",
  "base64 0.22.1",

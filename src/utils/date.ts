@@ -22,8 +22,8 @@ export function formatRelativeDate(timestamp: number): string {
     return "Yesterday";
   }
 
-  // Within last 7 days: show day name
-  if (diffDays < 7) {
+  // Within last 7 days: show day name (a future date gets month and day)
+  if (diffDays >= 0 && diffDays < 7) {
     return date.toLocaleDateString(undefined, { weekday: "short" });
   }
 

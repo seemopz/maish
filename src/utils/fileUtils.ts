@@ -14,3 +14,13 @@ export function readFileAsBase64(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+/**
+ * The name a save dialog is opened with for a file a sender named. The MIME
+ * filename is the sender's choice, so a path in it would preselect a folder
+ * of their choosing; only its last segment is kept.
+ */
+export function saveDialogName(filename: string | null | undefined): string {
+  const base = (filename ?? "").split(/[\\/]/).pop()?.trim() ?? "";
+  return base && base !== "." && base !== ".." ? base : "attachment";
+}

@@ -137,3 +137,26 @@ export async function deleteCalendarEvent(eventId: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM calendar_events WHERE id = $1", [eventId]);
 }
+
+/**
+ * Delete the events of a calendar starting in [start, end) that a complete
+ * listing of that range did not return: they were deleted on the server.
+ */
+export async function deleteEventsMissingFromWindow(
+  calendarId: string,
+  start: number,
+  end: number,
+  listedRemoteIds: string[],
+): Promise<void> {
+  const db = await getDb();
+  const rows = await db.select<{ remote_event_id: string | null }[]>(
+    "SELECT remote_event_id FROM calendar_events WHERE calendar_id = $1 AND start_time >= $2 AND start_time < $3",
+    [calendarId, start, end],
+  );
+  const listed = new Set(listedRemoteIds);
+  for (const row of rows) {
+    if (row.remote_event_id && !listed.has(row.remote_event_id)) {
+      await deleteEventByRemoteId(calendarId, row.remote_event_id);
+    }
+  }
+}

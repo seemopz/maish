@@ -69,6 +69,7 @@ export class CalDAVProvider implements CalendarProvider {
       displayName: typeof cal.displayName === "string" ? cal.displayName : `Calendar ${index + 1}`,
       color: extractCalendarColor(cal) ?? null,
       isPrimary: index === 0,
+      ctag: cal.ctag,
     }));
   }
 
@@ -207,6 +208,8 @@ export class CalDAVProvider implements CalendarProvider {
         etag: etag ?? undefined,
       } as DAVObject,
     });
+    // Already deleted, by another client or an earlier attempt: the goal is met.
+    if (response.status === 404) return { objectRemoved: true };
     assertWritten(response, "Deleting the event");
     return { objectRemoved: true };
   }
@@ -291,7 +294,14 @@ export class CalDAVProvider implements CalendarProvider {
       }
     }
 
-    return { created, updated: [], deletedRemoteIds: [], newSyncToken: null, newCtag: null };
+    return {
+      created,
+      updated: [],
+      deletedRemoteIds: [],
+      newSyncToken: null,
+      newCtag: null,
+      window: { start: Math.floor(timeMin.getTime() / 1000), end: Math.floor(timeMax.getTime() / 1000) },
+    };
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {

@@ -8,7 +8,7 @@ import { imapInitialSync, imapDeltaSync } from "../imap/imapSync";
 import { clearAllFolderSyncStates } from "../db/folderSyncState";
 import { hasCalendarSupport, getCalendarProvider } from "../calendar/providerFactory";
 import { getVisibleCalendars, upsertCalendar, updateCalendarSyncToken } from "../db/calendars";
-import { deleteEventByRemoteId } from "../db/calendarEvents";
+import { deleteEventByRemoteId, deleteEventsMissingFromWindow } from "../db/calendarEvents";
 import { storeProviderEvent } from "../calendar/occurrences";
 import { syncContactsForAccount } from "../contacts/contactSync";
 import { logToFile } from "../logFile";
@@ -197,6 +197,10 @@ async function syncImapAccount(accountId: string): Promise<void> {
   }
 }
 
+/** When each calendar's events were last downloaded this run, for the ctag skip. */
+const lastFullCalendarFetch = new Map<string, number>();
+const CTAG_REFETCH_MS = 6 * 60 * 60_000;
+
 /**
  * Sync calendars for a single account via the CalendarProvider abstraction.
  * Discovers calendars, syncs events for each visible calendar, stores results in DB.
@@ -223,8 +227,17 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
 
     // Sync events for each visible calendar
     const visibleCals = await getVisibleCalendars(accountId);
+    const listedCtag = new Map(calendarInfos.map((c) => [c.remoteId, c.ctag ?? null]));
     for (const cal of visibleCals) {
       try {
+        // An unchanged CalDAV ctag means no event changed. The full fetch still
+        // runs every few hours, since its date window moves with time.
+        const ctag = listedCtag.get(cal.remote_id) ?? null;
+        const lastFetch = lastFullCalendarFetch.get(cal.id);
+        if (ctag !== null && ctag === cal.ctag && lastFetch !== undefined && Date.now() - lastFetch < CTAG_REFETCH_MS) {
+          continue;
+        }
+
         const syncResult = await provider.syncEvents(cal.remote_id, cal.sync_token ?? undefined);
 
         // Upsert created/updated events
@@ -236,10 +249,22 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
         for (const remoteId of syncResult.deletedRemoteIds) {
           await deleteEventByRemoteId(cal.id, remoteId);
         }
+        // A complete listing also tells which stored events are gone.
+        // shortcut: a deleted series whose master starts before the window stays; upgrade with a sync-collection REPORT.
+        if (syncResult.window) {
+          await deleteEventsMissingFromWindow(
+            cal.id,
+            syncResult.window.start,
+            syncResult.window.end,
+            [...syncResult.created, ...syncResult.updated].map((e) => e.remoteEventId),
+          );
+        }
+        lastFullCalendarFetch.set(cal.id, Date.now());
 
         // Update sync token
-        if (syncResult.newSyncToken || syncResult.newCtag) {
-          await updateCalendarSyncToken(cal.id, syncResult.newSyncToken, syncResult.newCtag);
+        const newCtag = syncResult.newCtag ?? ctag;
+        if (syncResult.newSyncToken || newCtag) {
+          await updateCalendarSyncToken(cal.id, syncResult.newSyncToken, newCtag);
         }
       } catch (err) {
         console.warn(`[syncManager] Calendar sync failed for ${cal.display_name ?? cal.remote_id}:`, err);

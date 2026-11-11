@@ -180,19 +180,22 @@ export class GoogleCalendarProvider implements CalendarProvider {
     let pageToken: string | undefined;
     let nextSyncToken: string | null = null;
 
+    // Initial sync: fetch last 90 days to 365 days forward
+    const timeMin = new Date();
+    timeMin.setDate(timeMin.getDate() - 90);
+    const timeMax = new Date();
+    timeMax.setFullYear(timeMax.getFullYear() + 1);
+
     do {
-      const params = new URLSearchParams({ maxResults: "250" });
+      // singleEvents on every request: Google wants the initial query's
+      // parameters repeated with the sync token, and without it a changed
+      // series arrives as one master instead of its instances.
+      const params = new URLSearchParams({ maxResults: "250", singleEvents: "true" });
       if (syncToken) {
         params.set("syncToken", syncToken);
       } else {
-        // Initial sync: fetch last 90 days to 365 days forward
-        const timeMin = new Date();
-        timeMin.setDate(timeMin.getDate() - 90);
         params.set("timeMin", timeMin.toISOString());
-        const timeMax = new Date();
-        timeMax.setFullYear(timeMax.getFullYear() + 1);
         params.set("timeMax", timeMax.toISOString());
-        params.set("singleEvents", "true");
       }
       if (pageToken) params.set("pageToken", pageToken);
 
@@ -227,7 +230,16 @@ export class GoogleCalendarProvider implements CalendarProvider {
       }
     } while (pageToken);
 
-    return { created, updated, deletedRemoteIds, newSyncToken: nextSyncToken, newCtag: null };
+    return {
+      created,
+      updated,
+      deletedRemoteIds,
+      newSyncToken: nextSyncToken,
+      newCtag: null,
+      window: syncToken
+        ? undefined
+        : { start: Math.floor(timeMin.getTime() / 1000), end: Math.floor(timeMax.getTime() / 1000) },
+    };
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {

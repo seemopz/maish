@@ -351,7 +351,11 @@ describe("GoogleCalendarProvider", () => {
       const calledUrl = mockClient.request.mock.calls[0][0] as string;
       expect(calledUrl).toContain("syncToken=old-sync-token");
       expect(calledUrl).not.toContain("timeMin");
-      expect(calledUrl).not.toContain("singleEvents");
+      // Google requires the initial query's parameters on every incremental
+      // request; without it a series comes back as one master, not its instances.
+      expect(calledUrl).toContain("singleEvents=true");
+      // An incremental result says nothing about events it does not list.
+      expect(result.window).toBeUndefined();
 
       expect(result.created).toHaveLength(1);
       expect(result.created[0].remoteEventId).toBe("evt-updated");
@@ -389,6 +393,8 @@ describe("GoogleCalendarProvider", () => {
       expect(retryUrl).not.toContain("syncToken");
       expect(retryUrl).toContain("timeMin=");
       expect(result.newSyncToken).toBe("fresh-token");
+      // The full listing replaces what is stored, so deletions missed while the token was stale go too.
+      expect(result.window).toEqual({ start: expect.any(Number), end: expect.any(Number) });
     });
 
     it("falls back to a full sync on an 'invalid sync token' error too", async () => {

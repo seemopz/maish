@@ -91,6 +91,14 @@ describe("CalDAVProvider", () => {
       ]);
     });
 
+    it("passes the collection's ctag on, so an unchanged calendar is not downloaded again", async () => {
+      mockFetchCalendars.mockResolvedValue([{ url: "/cal/personal/", displayName: "Personal", ctag: "42" }]);
+
+      const [calendar] = await provider.listCalendars();
+
+      expect(calendar!.ctag).toBe("42");
+    });
+
     it("handles non-string displayName by falling back to indexed name", async () => {
       mockFetchCalendars.mockResolvedValue([
         { url: "/cal/unnamed/", displayName: undefined },
@@ -598,6 +606,14 @@ describe("CalDAVProvider", () => {
       });
     });
 
+    it("counts an event the server no longer has as removed", async () => {
+      mockDeleteCalendarObject.mockResolvedValueOnce(davResponse(404, "Not Found"));
+
+      await expect(
+        provider.deleteEvent("/cal/personal/", "/cal/personal/test-uid.ics", '"e"'),
+      ).resolves.toEqual({ objectRemoved: true });
+    });
+
     it("calls deleteCalendarObject without etag when not provided", async () => {
       await provider.deleteEvent("/cal/personal/", "/cal/personal/test-uid.ics");
 
@@ -751,6 +767,8 @@ describe("CalDAVProvider", () => {
       expect(result.deletedRemoteIds).toEqual([]);
       expect(result.newSyncToken).toBeNull();
       expect(result.newCtag).toBeNull();
+      // A time-range fetch lists everything in the range, so it can tell deletions.
+      expect(result.window).toEqual({ start: expect.any(Number), end: expect.any(Number) });
     });
   });
 

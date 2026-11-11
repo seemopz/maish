@@ -44,6 +44,7 @@ vi.mock("../db/calendars", () => ({
 vi.mock("../db/calendarEvents", () => ({
   upsertCalendarEvent: vi.fn(),
   deleteEventByRemoteId: vi.fn(),
+  deleteEventsMissingFromWindow: vi.fn(),
 }));
 
 vi.mock("../logFile", () => ({
@@ -490,6 +491,54 @@ describe("syncManager", () => {
       expect(vi.mocked(upsertCalendarEvent)).toHaveBeenCalledWith(
         expect.objectContaining({ rrule: "FREQ=WEEKLY;UNTIL=20260330T090000Z", recurrenceEnd: expect.any(Number) }),
       );
+    });
+  });
+
+  describe("calendar deletions and ctag", () => {
+    async function setup(listed: { ctag: string | null }, stored: { ctag: string | null }, result: object, id = "cal-1") {
+      const { hasCalendarSupport, getCalendarProvider } = await import("../calendar/providerFactory");
+      const { getVisibleCalendars } = await import("../db/calendars");
+      mockGetAccount.mockResolvedValue({ ...makeGmailAccount("c2"), provider: "caldav" } as never);
+      vi.mocked(hasCalendarSupport).mockResolvedValueOnce(true);
+      vi.mocked(getVisibleCalendars).mockResolvedValueOnce([
+        { id, remote_id: "/cal/", sync_token: null, ...stored } as never,
+      ]);
+      const syncEvents = vi.fn(async () => ({ created: [], updated: [], deletedRemoteIds: [], newSyncToken: null, newCtag: null, ...result }));
+      vi.mocked(getCalendarProvider).mockResolvedValueOnce({
+        type: "caldav",
+        listCalendars: async () => [{ remoteId: "/cal/", displayName: "Cal", color: null, isPrimary: true, ...listed }],
+        syncEvents,
+      } as never);
+      return syncEvents;
+    }
+
+    it("deletes stored events of a complete listing's range that the server no longer returns", async () => {
+      const { deleteEventsMissingFromWindow } = await import("../db/calendarEvents");
+      await setup({ ctag: "2" }, { ctag: "1" }, {
+        created: [{ remoteEventId: "/cal/a.ics", startTime: 150, endTime: 160, icalData: null }],
+        window: { start: 100, end: 200 },
+      });
+
+      await syncAccount("c2");
+
+      expect(vi.mocked(deleteEventsMissingFromWindow)).toHaveBeenCalledWith("cal-1", 100, 200, ["/cal/a.ics"]);
+    });
+
+    it("skips the download while the calendar's ctag is unchanged, and stores a new one", async () => {
+      const { updateCalendarSyncToken } = await import("../db/calendars");
+      // The first sync of a run always fetches: the window has moved since the last one.
+      const first = await setup({ ctag: "7" }, { ctag: "7" }, {}, "cal-ctag");
+      await syncAccount("c2");
+      expect(first).toHaveBeenCalled();
+
+      const unchanged = await setup({ ctag: "7" }, { ctag: "7" }, {}, "cal-ctag");
+      await syncAccount("c2");
+      expect(unchanged).not.toHaveBeenCalled();
+
+      const changed = await setup({ ctag: "8" }, { ctag: "7" }, {}, "cal-ctag");
+      await syncAccount("c2");
+      expect(changed).toHaveBeenCalled();
+      expect(vi.mocked(updateCalendarSyncToken)).toHaveBeenCalledWith("cal-ctag", null, "8");
     });
   });
 

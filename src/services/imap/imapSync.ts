@@ -24,6 +24,7 @@ import {
   updateMessageThreadIds,
   getMessagesForThread,
   deleteMessagesInFolder,
+  deleteLocalSentCopies,
 } from "../db/messages";
 import {
   upsertThread,
@@ -267,6 +268,7 @@ async function storeThreadsAndMessages(
   for (let i = 0; i < threadGroups.length; i += THREAD_BATCH_SIZE) {
     const batch = threadGroups.slice(i, i + THREAD_BATCH_SIZE);
 
+    const sentCopyThreadIds = new Set<string>();
     await withTransaction(async () => {
       for (const group of batch) {
         if (skippedThreadIds.has(group.threadId)) continue;
@@ -360,6 +362,12 @@ async function storeThreadsAndMessages(
             imapUid: imapMsg?.uid ?? null,
             imapFolder: imapMsg?.folder ?? null,
           });
+          // The send stored its own row before the server's Sent copy existed.
+          if (imapMsg?.message_id) {
+            for (const t of await deleteLocalSentCopies(accountId, imapMsg.message_id)) {
+              sentCopyThreadIds.add(t);
+            }
+          }
 
           for (const att of parsed.attachments) {
             await upsertAttachment({
@@ -419,6 +427,7 @@ async function storeThreadsAndMessages(
         }
         await setThreadLabels(accountId, group.threadId, [...allLabelIds]);
       }
+      await deleteEmptyThreads(accountId, [...sentCopyThreadIds]);
     });
   }
 

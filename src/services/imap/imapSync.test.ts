@@ -46,6 +46,7 @@ vi.mock("../db/messages", () => ({
   updateMessageThreadIds: vi.fn(),
   getMessagesForThread: vi.fn(() => []),
   deleteMessagesInFolder: vi.fn(() => []),
+  deleteLocalSentCopies: vi.fn(async () => []),
 }));
 vi.mock("../db/threads", () => ({
   upsertThread: vi.fn(),

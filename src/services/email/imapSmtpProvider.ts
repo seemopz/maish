@@ -21,6 +21,7 @@ import {
 import { getAccount, type DbAccount } from "../db/accounts";
 import { getDb } from "../db/connection";
 import { findSpecialFolder } from "../imap/messageHelper";
+import { reconcileSoon } from "../imap/imapReconcile";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { upsertMessage } from "../db/messages";
 import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
@@ -278,6 +279,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === archiveFolder) continue;
       await imapMoveMessages(config, folder, uids, archiveFolder);
+      reconcileSoon(this.accountId, folder);
     }
   }
 
@@ -293,6 +295,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === trashFolder) continue;
       await imapMoveMessages(config, folder, uids, trashFolder);
+      reconcileSoon(this.accountId, folder);
     }
   }
 
@@ -348,6 +351,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === destination) continue;
       await imapMoveMessages(config, folder, uids, destination);
+      reconcileSoon(this.accountId, folder);
     }
   }
 
@@ -369,6 +373,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === folderPath) continue;
       await imapMoveMessages(config, folder, uids, folderPath);
+      reconcileSoon(this.accountId, folder);
     }
   }
 

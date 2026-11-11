@@ -922,6 +922,21 @@ export const MIGRATIONS = [
       DELETE FROM settings WHERE key IN ('copilot_api_key', 'copilot_model');
     `,
   },
+  {
+    version: 28,
+    description: "Re-index messages in FTS only when a searched column changes",
+    sql: `
+      -- The update trigger fired on every UPDATE, so marking a message read,
+      -- starring it or moving it rewrote its search entry each time.
+      DROP TRIGGER IF EXISTS messages_au;
+      CREATE TRIGGER messages_au AFTER UPDATE OF subject, from_name, from_address, body_text, snippet ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, subject, from_name, from_address, body_text, snippet)
+        VALUES ('delete', old.rowid, old.subject, old.from_name, old.from_address, old.body_text, old.snippet);
+        INSERT INTO messages_fts(rowid, subject, from_name, from_address, body_text, snippet)
+        VALUES (new.rowid, new.subject, new.from_name, new.from_address, new.body_text, new.snippet);
+      END;
+    `,
+  },
 ];
 
 /**

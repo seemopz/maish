@@ -68,6 +68,28 @@ describe("ContactsPage", () => {
     vi.mocked(getAddressBooksForAccount).mockResolvedValue([book()] as never);
   });
 
+  it("finds a contact beyond the first thousand", async () => {
+    const many = Array.from({ length: 1500 }, (_, i) =>
+      contact({ id: `c-${i}`, display_name: `Person ${i}`, email: `p${i}@example.org` }));
+    vi.mocked(getAllContacts).mockImplementation(async (limit?: number | null) =>
+      limit === null ? many : many.slice(0, limit ?? 500));
+    render(<ContactsPage />);
+    await screen.findByText("Person 0");
+
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "Person 1499" } });
+
+    expect(await screen.findByText("Person 1499")).toBeInTheDocument();
+  });
+
+  it("draws a large list only in part and says so", async () => {
+    const many = Array.from({ length: 1500 }, (_, i) => contact({ id: `c-${i}`, display_name: `Person ${i}` }));
+    vi.mocked(getAllContacts).mockResolvedValue(many);
+    render(<ContactsPage />);
+
+    expect(await screen.findByText(/showing 500 of 1,500/i)).toBeInTheDocument();
+    expect(screen.queryByText("Person 1499")).not.toBeInTheDocument();
+  });
+
   it("lists the contacts it loaded", async () => {
     render(<ContactsPage />);
 

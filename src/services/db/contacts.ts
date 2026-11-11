@@ -72,7 +72,8 @@ export async function searchContacts(
  * Get all contacts, ordered by frequency descending.
  */
 export async function getAllContacts(
-  limit = 500,
+  /** null loads every contact (SQLite reads LIMIT -1 as no limit). */
+  limit: number | null = 500,
   offset = 0,
 ): Promise<DbContact[]> {
   const db = await getDb();
@@ -80,7 +81,7 @@ export async function getAllContacts(
     `SELECT * FROM contacts
      ORDER BY frequency DESC, display_name ASC
      LIMIT $1 OFFSET $2`,
-    [limit, offset],
+    [limit ?? -1, offset],
   );
 }
 

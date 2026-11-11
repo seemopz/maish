@@ -377,6 +377,19 @@ describe("scanLinksInHtml", () => {
     expect(mismatchLink!.triggeredRules.some((r) => r.ruleId === "display-mismatch")).toBe(true);
   });
 
+  it("checks absolute links written without slashes or in capitals", () => {
+    // Browsers open https:evil.com as https://evil.com/.
+    const results = scanLinksInHtml(`
+      <a href="https:evil.com/login">https://paypal.com</a>
+      <a href="JavaScript:alert(1)">Open</a>
+      <a href="/relative/path">Relative</a>
+    `);
+
+    expect(results.map((r) => r.url)).toEqual(["https:evil.com/login", "JavaScript:alert(1)"]);
+    expect(results[0]!.triggeredRules.some((r) => r.ruleId === "display-mismatch")).toBe(true);
+    expect(results[1]!.riskLevel).toBe("high");
+  });
+
   it("skips mailto: links", () => {
     const html = `
       <a href="mailto:user@example.com">Email</a>

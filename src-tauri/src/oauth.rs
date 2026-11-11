@@ -224,10 +224,7 @@ pub async fn oauth_exchange_token(
         params.push(("scope", s));
     }
 
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&token_url)
-        .form(&params)
+    let response = token_request(&token_url, &params, TOKEN_REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(|e| format!("Token exchange request failed: {}", e))?;
@@ -244,6 +241,20 @@ pub async fn oauth_exchange_token(
         .json::<TokenExchangeResult>()
         .await
         .map_err(|e| format!("Failed to parse token response: {}", e))
+}
+
+const TOKEN_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn token_request(
+    token_url: &str,
+    params: &[(&str, String)],
+    timeout: Duration,
+) -> reqwest::RequestBuilder {
+    // Without a timeout a stalled token endpoint hangs the refresh for good.
+    reqwest::Client::new()
+        .post(token_url)
+        .form(params)
+        .timeout(timeout)
 }
 
 /// Refresh an OAuth token via Rust HTTP client (avoids CORS).
@@ -269,10 +280,7 @@ pub async fn oauth_refresh_token(
         params.push(("scope", s));
     }
 
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&token_url)
-        .form(&params)
+    let response = token_request(&token_url, &params, TOKEN_REQUEST_TIMEOUT)
         .send()
         .await
         .map_err(|e| format!("Token refresh request failed: {}", e))?;
@@ -294,6 +302,23 @@ pub async fn oauth_refresh_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A token endpoint that accepts the connection and never answers must not
+    // hang the refresh for good.
+    #[tokio::test]
+    async fn token_request_gives_up_on_a_silent_server() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/token", listener.local_addr().unwrap());
+
+        let sent = tokio::time::timeout(
+            Duration::from_secs(5),
+            token_request(&url, &[], Duration::from_millis(200)).send(),
+        )
+        .await;
+
+        assert!(matches!(sent, Ok(Err(e)) if e.is_timeout()));
+        drop(listener);
+    }
 
     /// The redirect URI the provider is given names one fixed port. A server
     /// on any other port is never called: the browser delivers the code where

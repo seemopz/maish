@@ -11,7 +11,7 @@ import type {
   UpdateEventInput,
 } from "./types";
 import { davFetch } from "./davFetch";
-import { generateVEvent, parseVEvent } from "./icalHelper";
+import { generateVEvent, parseVEvent, splitCalendarObject } from "./icalHelper";
 import {
   editMaster,
   editOccurrence,
@@ -21,7 +21,8 @@ import {
   type EventEdits,
 } from "./icalEdit";
 import { CalendarWriteError } from "./errors";
-import { countInstancesBefore } from "./recurrence";
+import { countInstancesBefore, seriesTimeZone } from "./recurrence";
+import { epochToWallClock, wallClockToEpoch } from "./timezone";
 import { getAccount } from "@/services/db/accounts";
 
 export class CalDAVProvider implements CalendarProvider {
@@ -44,7 +45,7 @@ export class CalDAVProvider implements CalendarProvider {
       throw new Error("CalDAV credentials not configured");
     }
 
-    this.client = new DAVClient({
+    const client = new DAVClient({
       serverUrl,
       credentials: { username, password },
       authMethod: "Basic",
@@ -52,8 +53,11 @@ export class CalDAVProvider implements CalendarProvider {
       fetch: davFetch,
     });
 
-    await this.client.login();
-    return this.client;
+    // Cached only once logged in: a client whose login failed (app started
+    // offline) would otherwise be reused and fail every later sync.
+    await client.login();
+    this.client = client;
+    return client;
   }
 
   async listCalendars(): Promise<CalendarInfo[]> {
@@ -163,7 +167,7 @@ export class CalDAVProvider implements CalendarProvider {
 
     const updated = occurrence?.scope === "this"
       ? editOccurrence(existing.data, occurrence.recurrenceId, edits)
-      : editMaster(existing.data, edits);
+      : editMaster(existing.data, occurrence ? onSeriesStart(existing.data, occurrence.recurrenceId, edits) : edits);
 
     await this.putObject(client, remoteEventId, updated, etag ?? existing.etag);
     return parseVEvent(updated, remoteEventId);
@@ -347,6 +351,44 @@ function toEdits(event: UpdateEventInput): EventEdits {
   // stays one.
   if (event.recurrence !== undefined) edits.recurrence = event.recurrence;
   return edits;
+}
+
+/**
+ * The dialog edits one instance, but the master carries the series start, so
+ * only the change made to the instance is applied to it — in wall-clock time,
+ * so a move across a DST change keeps the time of day — with the dialog's
+ * duration. Written verbatim, a later instance's times would move the series
+ * start onto it and every earlier instance would vanish.
+ */
+function onSeriesStart(icalData: string, recurrenceId: number, edits: EventEdits): EventEdits {
+  const { master, overrides } = splitCalendarObject(icalData);
+  const start = master?.start;
+  if (!start || (edits.startTime === undefined && edits.endTime === undefined)) return edits;
+
+  // A moved instance is shown at its override's time, so the change is measured from there.
+  const shown = overrides.find((o) => o.recurrenceId?.epoch === recurrenceId)?.start?.epoch
+    ?? recurrenceId;
+  const zone = seriesTimeZone(icalData);
+  const naive = (epoch: number) => {
+    const w = epochToWallClock(epoch, zone);
+    return Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second) / 1000;
+  };
+  const from = edits.startTime ?? shown;
+  const moved = new Date((naive(start.epoch) + naive(from) - naive(shown)) * 1000);
+  const startTime = wallClockToEpoch({
+    year: moved.getUTCFullYear(),
+    month: moved.getUTCMonth() + 1,
+    day: moved.getUTCDate(),
+    hour: moved.getUTCHours(),
+    minute: moved.getUTCMinutes(),
+    second: moved.getUTCSeconds(),
+  }, zone);
+
+  return {
+    ...edits,
+    ...(edits.startTime !== undefined ? { startTime } : {}),
+    ...(edits.endTime !== undefined ? { endTime: startTime + edits.endTime - from } : {}),
+  };
 }
 
 function extractCalendarColor(cal: DAVCalendar): string | null {

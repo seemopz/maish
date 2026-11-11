@@ -61,6 +61,16 @@ export async function insertScheduledEmail(email: {
   return id;
 }
 
+/** Take a pending row for sending. Only one checker run wins, so a mail is never sent twice. */
+export async function claimScheduledEmail(id: string): Promise<boolean> {
+  const db = await getDb();
+  const result = await db.execute(
+    "UPDATE scheduled_emails SET status = 'sending' WHERE id = $1 AND status = 'pending'",
+    [id],
+  );
+  return result.rowsAffected > 0;
+}
+
 export async function updateScheduledEmailStatus(
   id: string,
   status: "pending" | "sending" | "sent" | "failed" | "cancelled",

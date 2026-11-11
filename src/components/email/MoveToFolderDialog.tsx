@@ -104,7 +104,7 @@ export function MoveToFolderDialog({
           }
         } else if (dest.type === "label") {
           if (isImap) {
-            // IMAP: move to folder. The label's id is the folder path for IMAP accounts.
+            // IMAP: move to folder. dest.id is a label id ("folder-<path>"); the provider resolves the mailbox path.
             await moveThread(activeAccountId, threadId, [], dest.id);
           } else {
             // Gmail: add destination label + remove from current location (archive)

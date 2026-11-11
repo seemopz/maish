@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useComposerStore } from "@/stores/composerStore";
+import { flushAutoSave } from "@/services/composer/draftAutoSave";
 import { useAccountStore } from "@/stores/accountStore";
 import { useShortcutStore } from "@/stores/shortcutStore";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
@@ -274,7 +275,8 @@ async function executeAction(actionId: string): Promise<void> {
       break;
     case "nav.escape": {
       if (useComposerStore.getState().isOpen) {
-        useComposerStore.getState().closeComposer();
+        // Save the last edits first: the autosave debounce would otherwise be dropped.
+        void flushAutoSave().then(() => useComposerStore.getState().closeComposer());
       } else if (useThreadStore.getState().selectedThreadIds.size > 0) {
         useThreadStore.getState().clearMultiSelect();
       } else if (selectedId) {

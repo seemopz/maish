@@ -1,4 +1,4 @@
-import { getDb, buildDynamicUpdate, selectFirstBy } from "./connection";
+import { getDb, buildDynamicUpdate } from "./connection";
 
 export interface DbSmartFolder {
   id: string;
@@ -27,15 +27,6 @@ export async function getSmartFolders(
   }
   return db.select<DbSmartFolder[]>(
     "SELECT * FROM smart_folders WHERE account_id IS NULL ORDER BY sort_order, created_at",
-  );
-}
-
-export async function getSmartFolderById(
-  id: string,
-): Promise<DbSmartFolder | null> {
-  return selectFirstBy<DbSmartFolder>(
-    "SELECT * FROM smart_folders WHERE id = $1",
-    [id],
   );
 }
 
@@ -82,16 +73,4 @@ export async function updateSmartFolder(
 export async function deleteSmartFolder(id: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM smart_folders WHERE id = $1", [id]);
-}
-
-export async function updateSmartFolderSortOrder(
-  orders: { id: string; sortOrder: number }[],
-): Promise<void> {
-  const db = await getDb();
-  for (const { id, sortOrder } of orders) {
-    await db.execute(
-      "UPDATE smart_folders SET sort_order = $1 WHERE id = $2",
-      [sortOrder, id],
-    );
-  }
 }

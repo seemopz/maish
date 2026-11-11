@@ -5,6 +5,10 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { getActiveLabel } from "@/router/navigate";
 import { useComposerStore } from "@/stores/composerStore";
+import { replyHeaders } from "@/utils/emailBuilder";
+import { buildQuote, buildForwardQuote } from "@/utils/quote";
+import { getSetting } from "@/services/db/settings";
+import { getAllowlistedSenders } from "@/services/db/imageAllowlist";
 import { useLabelStore } from "@/stores/labelStore";
 import { undoBatch } from "@/services/undoableActions";
 import { archiveThread, trashThread, permanentDeleteThread, markThreadRead, starThread, spamThread, addThreadLabel, removeThreadLabel } from "@/services/emailActions";
@@ -44,17 +48,11 @@ import { triggerSync } from "@/services/gmail/syncManager";
 import { useUIStore } from "@/stores/uiStore";
 import { setThreadCategory, ALL_CATEGORIES } from "@/services/db/threadCategories";
 
-function buildQuote(msg: { from_name: string | null; from_address: string | null; date: string | number; body_html: string | null; body_text: string | null }): string {
-  const date = new Date(msg.date).toLocaleString();
-  const from = msg.from_name
-    ? `${msg.from_name} &lt;${msg.from_address}&gt;`
-    : (msg.from_address ?? "Unknown");
-  return `<br><br><div style="border-left:2px solid #ccc;padding-left:12px;margin-left:0;color:#666">On ${date}, ${from} wrote:<br>${msg.body_html ?? msg.body_text ?? ""}</div>`;
-}
-
-function buildForwardQuote(msg: { from_name: string | null; from_address: string | null; date: string | number; subject: string | null; to_addresses: string | null; body_html: string | null; body_text: string | null }): string {
-  const date = new Date(msg.date).toLocaleString();
-  return `<br><br>---------- Forwarded message ---------<br>From: ${msg.from_name ?? ""} &lt;${msg.from_address ?? ""}&gt;<br>Date: ${date}<br>Subject: ${msg.subject ?? ""}<br>To: ${msg.to_addresses ?? ""}<br><br>${msg.body_html ?? msg.body_text ?? ""}`;
+// Same rule as the reading pane: images load only when blocking is off or the sender is allowlisted.
+async function remoteImagesAllowed(accountId: string | null, fromAddress: string | null): Promise<boolean> {
+  if ((await getSetting("block_remote_images")) === "false") return true;
+  if (!accountId || !fromAddress) return false;
+  return (await getAllowlistedSenders(accountId, [fromAddress])).size > 0;
 }
 
 export function ContextMenuPortal() {
@@ -251,9 +249,9 @@ function ThreadMenu({
       mode: "reply",
       to: replyTo ? [replyTo] : [],
       subject: `Re: ${lastMessage.subject ?? ""}`,
-      bodyHtml: buildQuote(lastMessage),
+      bodyHtml: buildQuote(lastMessage, await remoteImagesAllowed(activeAccountId, lastMessage.from_address)),
       threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
+      ...replyHeaders(lastMessage),
     });
   };
 
@@ -276,9 +274,9 @@ function ThreadMenu({
       to: Array.from(allRecipients),
       cc: ccList,
       subject: `Re: ${lastMessage.subject ?? ""}`,
-      bodyHtml: buildQuote(lastMessage),
+      bodyHtml: buildQuote(lastMessage, await remoteImagesAllowed(activeAccountId, lastMessage.from_address)),
       threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
+      ...replyHeaders(lastMessage),
     });
   };
 
@@ -290,9 +288,9 @@ function ThreadMenu({
       mode: "forward",
       to: [],
       subject: `Fwd: ${lastMessage.subject ?? ""}`,
-      bodyHtml: buildForwardQuote(lastMessage),
+      bodyHtml: buildForwardQuote(lastMessage, await remoteImagesAllowed(activeAccountId, lastMessage.from_address)),
       threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
+      ...replyHeaders(lastMessage),
     });
   };
 
@@ -615,6 +613,8 @@ function MessageMenu({
   const openComposer = useComposerStore((s) => s.openComposer);
 
   const messageId = data["messageId"] as string;
+  const messageIdHeader = data["messageIdHeader"] as string | null;
+  const referencesHeader = data["referencesHeader"] as string | null;
   const threadId = data["threadId"] as string;
   const accountId = data["accountId"] as string | null;
   const fromAddress = data["fromAddress"] as string | null;
@@ -629,19 +629,19 @@ function MessageMenu({
 
   const msg = { from_name: fromName, from_address: fromAddress, date, body_html: bodyHtml, body_text: bodyText, subject, to_addresses: toAddresses };
 
-  const handleReply = () => {
+  const handleReply = async () => {
     const replyAddr = replyTo ?? fromAddress;
     openComposer({
       mode: "reply",
       to: replyAddr ? [replyAddr] : [],
       subject: `Re: ${subject ?? ""}`,
-      bodyHtml: buildQuote(msg),
+      bodyHtml: buildQuote(msg, await remoteImagesAllowed(accountId, fromAddress)),
       threadId,
-      inReplyToMessageId: messageId,
+      ...replyHeaders({ message_id_header: messageIdHeader, references_header: referencesHeader }),
     });
   };
 
-  const handleReplyAll = () => {
+  const handleReplyAll = async () => {
     const replyAddr = replyTo ?? fromAddress;
     const allRecipients = new Set<string>();
     if (replyAddr) allRecipients.add(replyAddr);
@@ -657,20 +657,20 @@ function MessageMenu({
       to: Array.from(allRecipients),
       cc: ccList,
       subject: `Re: ${subject ?? ""}`,
-      bodyHtml: buildQuote(msg),
+      bodyHtml: buildQuote(msg, await remoteImagesAllowed(accountId, fromAddress)),
       threadId,
-      inReplyToMessageId: messageId,
+      ...replyHeaders({ message_id_header: messageIdHeader, references_header: referencesHeader }),
     });
   };
 
-  const handleForward = () => {
+  const handleForward = async () => {
     openComposer({
       mode: "forward",
       to: [],
       subject: `Fwd: ${subject ?? ""}`,
-      bodyHtml: buildForwardQuote(msg),
+      bodyHtml: buildForwardQuote(msg, await remoteImagesAllowed(accountId, fromAddress)),
       threadId,
-      inReplyToMessageId: messageId,
+      ...replyHeaders({ message_id_header: messageIdHeader, references_header: referencesHeader }),
     });
   };
 

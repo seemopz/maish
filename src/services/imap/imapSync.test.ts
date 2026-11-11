@@ -21,6 +21,9 @@ vi.mock("./imapConfigBuilder", () => ({
     auth_method: "password",
   })),
 }));
+vi.mock("../oauth/oauthTokenManager", () => ({
+  ensureFreshToken: vi.fn(async () => "fresh-token"),
+}));
 vi.mock("./folderMapper", () => ({
   mapFolderToLabel: vi.fn((folder: { path: string }) => ({
     labelId: folder.path,
@@ -90,6 +93,8 @@ import { upsertAttachment } from "../db/attachments";
 import { buildThreads } from "../threading/threadBuilder";
 import { getPendingOpsForResource, getResourceIdsWithOpenOps } from "../db/pendingOperations";
 import { getAllFolderSyncStates, upsertFolderSyncState } from "../db/folderSyncState";
+import { buildImapConfig } from "./imapConfigBuilder";
+import { ensureFreshToken } from "../oauth/oauthTokenManager";
 
 describe("imapMessageToParsedMessage", () => {
   it("converts basic IMAP message to ParsedMessage format", () => {
@@ -240,12 +245,20 @@ describe("imapMessageToParsedMessage", () => {
     expect(parsed.listUnsubscribePost).toBe("List-Unsubscribe=One-Click");
   });
 
-  it("preserves auth results", () => {
+  it("stores the Authentication-Results header in the parsed JSON shape the UI reads", () => {
     const msg = createMockImapMessage({
-      auth_results: '{"spf":"pass","dkim":"pass"}',
+      auth_results: "mx.example.com; spf=pass (sender ok) smtp.mailfrom=a.com; dkim=pass header.d=a.com; dmarc=fail",
     });
     const { parsed } = imapMessageToParsedMessage(msg, "acc-1", "INBOX");
-    expect(parsed.authResults).toBe('{"spf":"pass","dkim":"pass"}');
+    const stored = JSON.parse(parsed.authResults!);
+    expect(stored.spf).toEqual({ result: "pass", detail: "sender ok" });
+    expect(stored.dkim.result).toBe("pass");
+    expect(stored.dmarc.result).toBe("fail");
+  });
+
+  it("stores no auth results when the header is absent", () => {
+    const msg = createMockImapMessage({ auth_results: null });
+    expect(imapMessageToParsedMessage(msg, "acc-1", "INBOX").parsed.authResults).toBeNull();
   });
 
   it("handles date=0 (unparseable Date header) without crashing", () => {
@@ -604,6 +617,38 @@ describe("imapInitialSync", () => {
 
     // All folders should be attempted since these aren't connection errors
     expect(mockImapSearchFolder).toHaveBeenCalledTimes(6);
+  });
+});
+
+describe("OAuth accounts log in with a fresh access token", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getAccount).mockResolvedValue(
+      createMockImapAccount({ id: "acc-1", auth_method: "oauth2", imap_password: null }),
+    );
+    vi.mocked(imapListFolders).mockRejectedValue(new Error("stop after login"));
+  });
+
+  afterEach(() => {
+    vi.mocked(imapListFolders).mockReset();
+  });
+
+  it("initial sync passes the token to the IMAP config", async () => {
+    await imapInitialSync("acc-1").catch(() => {});
+    expect(ensureFreshToken).toHaveBeenCalled();
+    expect(buildImapConfig).toHaveBeenCalledWith(expect.objectContaining({ id: "acc-1" }), "fresh-token");
+  });
+
+  it("delta sync passes the token to the IMAP config", async () => {
+    await imapDeltaSync("acc-1").catch(() => {});
+    expect(buildImapConfig).toHaveBeenCalledWith(expect.objectContaining({ id: "acc-1" }), "fresh-token");
+  });
+
+  it("password accounts never ask for a token", async () => {
+    vi.mocked(getAccount).mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
+    await imapInitialSync("acc-1").catch(() => {});
+    expect(ensureFreshToken).not.toHaveBeenCalled();
+    expect(buildImapConfig).toHaveBeenCalledWith(expect.objectContaining({ id: "acc-1" }), undefined);
   });
 });
 

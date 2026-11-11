@@ -5,6 +5,7 @@ import { generateSmartReplies, SMART_REPLIES_CACHE } from "@/services/ai/aiServi
 import { deleteAiCache } from "@/services/db/aiCache";
 import { useComposerStore } from "@/stores/composerStore";
 import type { DbMessage } from "@/services/db/messages";
+import { replyHeaders } from "@/utils/emailBuilder";
 
 interface SmartReplySuggestionsProps {
   threadId: string;
@@ -73,7 +74,7 @@ export function SmartReplySuggestions({ threadId, accountId, messages, noReply }
       subject: `Re: ${lastMessage.subject ?? ""}`,
       bodyHtml: `<p>${replyText}</p>`,
       threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
+      ...replyHeaders(lastMessage),
     });
   }, [messages, openComposer]);
 

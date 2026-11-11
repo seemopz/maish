@@ -110,7 +110,7 @@ impl Authenticator for XOAuth2 {
 
 /// Wrapper to unify TLS / plain streams so Session can be generic.
 pub(crate) enum ImapStream {
-    Tls(TlsStream<TcpStream>),
+    Tls(Box<TlsStream<TcpStream>>),
     Plain(TcpStream),
 }
 
@@ -317,7 +317,7 @@ pub async fn list_folders(session: &mut ImapSession) -> Result<Vec<ImapFolder>, 
         let delimiter = name.delimiter().unwrap_or("/").to_string();
 
         // Decode modified UTF-7 (RFC 3501 §5.1.3) to UTF-8 for display
-        let path = utf7_imap::decode_utf7_imap(raw_path.clone());
+        let path = decode_mailbox_name(&raw_path);
 
         // Extract display name (last segment after delimiter)
         let display_name = path
@@ -634,6 +634,81 @@ pub async fn fetch_flags(
     })
 }
 
+/// `UID SEARCH` key for the UIDs above `last_uid`. A bare set in SEARCH is
+/// sequence numbers (RFC 3501 §6.4.4), not UIDs. `n:*` always matches the
+/// highest UID, so callers still filter `u > last_uid`.
+fn new_uids_query(last_uid: u32) -> String {
+    format!("UID {}:*", last_uid.saturating_add(1))
+}
+
+/// Decode a modified UTF-7 mailbox name (RFC 3501 §5.1.3). A name that is not
+/// valid modified UTF-7, such as `Q&A-Notes` from a client that did not encode
+/// the `&`, is returned as it is (the utf7-imap crate panicked on it).
+fn decode_mailbox_name(raw: &str) -> String {
+    use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
+    const MUTF7: GeneralPurpose = GeneralPurpose::new(
+        &base64::alphabet::IMAP_MUTF7,
+        GeneralPurposeConfig::new()
+            .with_decode_padding_mode(DecodePaddingMode::RequireNone)
+            .with_decode_allow_trailing_bits(true),
+    );
+
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        let Some((group, after)) = rest[start + 1..].split_once('-') else {
+            return raw.to_string();
+        };
+        if group.is_empty() {
+            out.push('&');
+        } else {
+            let Ok(bytes) = MUTF7.decode(group) else {
+                return raw.to_string();
+            };
+            if bytes.len() % 2 != 0 {
+                return raw.to_string();
+            }
+            let units: Vec<u16> = bytes
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&b| u16::from_be_bytes(b))
+                .collect();
+            let Ok(text) = String::from_utf16(&units) else {
+                return raw.to_string();
+            };
+            out.push_str(&text);
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Run a command whose only result is its tagged status. async-imap's response
+/// streams (STORE, EXPUNGE) end at the tagged reply without reading its status,
+/// so a NO or BAD would pass for success.
+async fn run_checked(session: &mut ImapSession, label: &str, command: &str) -> Result<(), String> {
+    if command.contains(['\r', '\n']) {
+        return Err(format!("{label}: arguments cannot contain a line break"));
+    }
+    match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.run_command_and_check_ok(command)).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => {
+            session.taint_unless_refusal(&e);
+            Err(format!("{label} failed: {e}"))
+        }
+        Err(_) => {
+            session.taint();
+            Err(format!(
+                "{label} timed out after {}s — check your server settings or network connection",
+                IMAP_CMD_TIMEOUT.as_secs()
+            ))
+        }
+    }
+}
+
 /// Get UIDs of messages newer than `last_uid`.
 pub async fn fetch_new_uids(
     session: &mut ImapSession,
@@ -645,7 +720,7 @@ pub async fn fetch_new_uids(
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
-    let query = format!("{}:*", last_uid + 1);
+    let query = new_uids_query(last_uid);
     let uids = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&query))
         .await
         .map_err(|_| {
@@ -678,23 +753,12 @@ pub async fn set_flags(
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
-    let query = format!("{flag_op} {flags}");
-    let items = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
-        let stream = session
-            .uid_store(uid_set, &query)
-            .await
-            .map_err(|e| format!("UID STORE failed: {e}"))?;
-        Ok::<_, String>(stream.collect::<Vec<_>>().await)
-    })
+    run_checked(
+        session,
+        "UID STORE",
+        &format!("UID STORE {uid_set} {flag_op} {flags}"),
+    )
     .await
-    .map_err(|_| {
-        format!(
-            "UID STORE timed out after {}s — check your server settings or network connection",
-            IMAP_CMD_TIMEOUT.as_secs()
-        )
-    })??;
-    collect_ok(session, items);
-    Ok(())
 }
 
 /// Move messages between folders.
@@ -713,30 +777,33 @@ pub async fn move_messages(
 
     // Try MOVE extension first
     match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.uid_mv(uid_set, dest_folder)).await {
-        Ok(Ok(())) => return Ok(()),
-        _ => {
+        Ok(Ok(())) => Ok(()),
+        // Only a server that refused MOVE gets the COPY fallback: after a timeout
+        // or I/O error the MOVE may have happened and the stream is out of sync.
+        Ok(Err(e)) if refusal_leaves_session_usable(&e) => {
             // Fallback: COPY, then mark Deleted, then EXPUNGE
-            tokio::time::timeout(IMAP_CMD_TIMEOUT, session.uid_copy(uid_set, dest_folder))
-                .await
-                .map_err(|_| format!("UID COPY timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
-                .map_err(|e| format!("UID COPY failed: {e}"))?;
-
-            let items = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
-                let store_stream = session
-                    .uid_store(uid_set, "+FLAGS (\\Deleted)")
-                    .await
-                    .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
-                Ok::<_, String>(store_stream.collect::<Vec<_>>().await)
-            })
-            .await
-            .map_err(|_| format!("UID STORE +Deleted timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))??;
-            collect_ok(session, items);
-
-            expunge_uid_set(session, uid_set).await?;
+            let dest = imap_quote(dest_folder)?;
+            run_checked(session, "UID COPY", &format!("UID COPY {uid_set} {dest}")).await?;
+            run_checked(
+                session,
+                "UID STORE +Deleted",
+                &format!("UID STORE {uid_set} +FLAGS (\\Deleted)"),
+            )
+            .await?;
+            expunge_uid_set(session, uid_set).await
+        }
+        Ok(Err(e)) => {
+            session.taint();
+            Err(format!("UID MOVE failed: {e}"))
+        }
+        Err(_) => {
+            session.taint();
+            Err(format!(
+                "UID MOVE timed out after {}s — check your server settings or network connection",
+                IMAP_CMD_TIMEOUT.as_secs()
+            ))
         }
     }
-
-    Ok(())
 }
 
 /// Format a value as an IMAP quoted string (RFC 3501 section 4.3).
@@ -823,22 +890,7 @@ async fn expunge_uid_set(session: &mut ImapSession, uid_set: &str) -> Result<(),
             Ok(())
         }
         ExpungeMode::ByUid => {
-            let items = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
-                let expunge_stream = session
-                    .uid_expunge(uid_set)
-                    .await
-                    .map_err(|e| format!("UID EXPUNGE failed: {e}"))?;
-                Ok::<_, String>(expunge_stream.collect::<Vec<_>>().await)
-            })
-            .await
-            .map_err(|_| {
-                format!(
-                    "UID EXPUNGE timed out after {}s — check your server settings or network connection",
-                    IMAP_CMD_TIMEOUT.as_secs()
-                )
-            })??;
-            collect_ok(session, items);
-            Ok(())
+            run_checked(session, "UID EXPUNGE", &format!("UID EXPUNGE {uid_set}")).await
         }
     }
 }
@@ -854,20 +906,14 @@ pub async fn delete_messages(
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
-    let items = tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
-        let store_stream = session
-            .uid_store(uid_set, "+FLAGS (\\Deleted)")
-            .await
-            .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
-        Ok::<_, String>(store_stream.collect::<Vec<_>>().await)
-    })
-    .await
-    .map_err(|_| format!("UID STORE +Deleted timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))??;
-    collect_ok(session, items);
+    run_checked(
+        session,
+        "UID STORE +Deleted",
+        &format!("UID STORE {uid_set} +FLAGS (\\Deleted)"),
+    )
+    .await?;
 
-    expunge_uid_set(session, uid_set).await?;
-
-    Ok(())
+    expunge_uid_set(session, uid_set).await
 }
 
 /// Append a raw message to a folder (for saving sent mail or drafts).
@@ -876,7 +922,7 @@ pub async fn append_message(
     folder: &str,
     flags: Option<&str>,
     raw_message: &[u8],
-) -> Result<(), String> {
+) -> Result<Option<u32>, String> {
     tokio::time::timeout(
         IMAP_FETCH_TIMEOUT,
         session.append(folder, flags, None, raw_message),
@@ -888,7 +934,58 @@ pub async fn append_message(
             IMAP_FETCH_TIMEOUT.as_secs()
         )
     })?
-    .map_err(|e| format!("APPEND failed: {e}"))
+    .map_err(|e| format!("APPEND failed: {e}"))?;
+    // async-imap drops the APPENDUID code (RFC 4315) of the tagged reply.
+    Ok(find_uid_by_message_id(session, folder, raw_message).await)
+}
+
+/// The highest UID in `folder` whose Message-ID is the one in `raw`, or None.
+/// Never an error: the message is already stored when this runs.
+async fn find_uid_by_message_id(
+    session: &mut ImapSession,
+    folder: &str,
+    raw: &[u8],
+) -> Option<u32> {
+    let query = message_id_query(raw)?;
+    let found = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, async {
+        session.select(folder).await?;
+        session.uid_search(&query).await
+    })
+    .await;
+    match found {
+        Ok(Ok(uids)) => {
+            let uid = uids.into_iter().max();
+            // async-imap reads a NO or a dropped connection as an empty result.
+            if uid.is_none() {
+                session.taint();
+            }
+            uid
+        }
+        Ok(Err(e)) => {
+            session.taint_unless_refusal(&e);
+            log::warn!("UID lookup after APPEND to {folder} failed: {e}");
+            None
+        }
+        Err(_) => {
+            session.taint();
+            log::warn!("UID lookup after APPEND to {folder} timed out");
+            None
+        }
+    }
+}
+
+/// `UID SEARCH` key for the Message-ID header of `raw`, if it has one that fits
+/// in a quoted string (7-bit, no line break: RFC 3501 §4.3).
+fn message_id_query(raw: &[u8]) -> Option<String> {
+    let id = MessageParser::default()
+        .parse_headers(raw)?
+        .message_id()?
+        .to_string();
+    if !id.is_ascii() {
+        return None;
+    }
+    let quoted = imap_quote(&format!("<{id}>")).ok()?;
+    Some(format!("HEADER Message-ID {quoted}"))
 }
 
 /// Get folder status (UIDVALIDITY, UIDNEXT, MESSAGES, UNSEEN).
@@ -908,9 +1005,15 @@ pub async fn get_folder_status(
         )
     })?
     .map_err(|e| format!("STATUS failed: {e}"))?;
+    // A response that ends early (or names the mailbox differently) comes back
+    // as defaults; 0 would read as a changed UIDVALIDITY and drop the folder.
+    let Some(uidvalidity) = mailbox.uid_validity else {
+        session.taint();
+        return Err(format!("STATUS {folder} gave no UIDVALIDITY"));
+    };
 
     Ok(ImapFolderStatus {
-        uidvalidity: mailbox.uid_validity.unwrap_or(0),
+        uidvalidity,
         uidnext: mailbox.uid_next.unwrap_or(0),
         exists: mailbox.exists,
         unseen: mailbox.unseen.unwrap_or(0),
@@ -1062,7 +1165,17 @@ pub async fn delta_check_folders(
                 }
             };
 
-        let current_uidvalidity = mailbox.uid_validity.unwrap_or(0);
+        // See fetch_flags: an early-ended SELECT has no UIDVALIDITY, and 0
+        // would read as "changed" and delete the folder's local mail.
+        let Some(current_uidvalidity) = mailbox.uid_validity else {
+            session.taint();
+            log::warn!("delta_check: SELECT {} gave no UIDVALIDITY", req.folder);
+            results.push(DeltaCheckResult::failed(
+                req,
+                "SELECT gave no UIDVALIDITY".to_string(),
+            ));
+            continue;
+        };
         let uidvalidity_changed = req.uidvalidity != 0 && current_uidvalidity != req.uidvalidity;
 
         if uidvalidity_changed {
@@ -1077,7 +1190,7 @@ pub async fn delta_check_folders(
         }
 
         // UID SEARCH for messages newer than last_uid
-        let query = format!("{}:*", req.last_uid + 1);
+        let query = new_uids_query(req.last_uid);
         let new_uids = match tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&query))
             .await
         {
@@ -1370,7 +1483,7 @@ async fn raw_connect_starttls(config: &ImapConfig) -> Result<ImapStream, String>
         )
         })?
         .map_err(|e| format!("TLS: {e}"))?;
-    Ok(ImapStream::Tls(tls))
+    Ok(ImapStream::Tls(Box::new(tls)))
 }
 
 /// Send a command and read all response lines until the tagged response (e.g. "a1 OK ...").
@@ -1618,7 +1731,7 @@ async fn connect_stream(config: &ImapConfig) -> Result<ImapStream, String> {
                     config.host, TLS_HANDSHAKE_TIMEOUT.as_secs()
                 ))?
                 .map_err(|e| format!("TLS handshake with {} failed: {e}", config.host))?;
-            Ok(ImapStream::Tls(tls))
+            Ok(ImapStream::Tls(Box::new(tls)))
         }
         "none" => {
             let tcp = tcp_connect(config).await?;
@@ -1684,7 +1797,7 @@ async fn connect_starttls(config: &ImapConfig) -> Result<ImapSession, String> {
         .map_err(|e| format!("TLS upgrade after STARTTLS failed: {e}"))?;
 
     // Create a new IMAP client on the TLS stream and authenticate
-    let client = Client::new(ImapStream::Tls(tls));
+    let client = Client::new(ImapStream::Tls(Box::new(tls)));
     tokio::time::timeout(AUTH_TIMEOUT, authenticate(client, config))
         .await
         .map_err(|_| format!(
@@ -2103,6 +2216,229 @@ fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A loopback IMAP server. Each command is answered by the first script
+    /// entry whose key the command line contains (`{tag}` is filled in), the
+    /// entry is used up, and anything unscripted gets a plain OK. A `None`
+    /// reply closes the connection. The handle yields every command received
+    /// once the session is dropped.
+    async fn scripted(
+        mut script: Vec<(&'static str, Option<&'static str>)>,
+    ) -> (ImapSession, tokio::task::JoinHandle<Vec<String>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.unwrap();
+            let (r, mut w) = sock.into_split();
+            let mut r = BufReader::new(r);
+            let mut seen = Vec::new();
+            w.write_all(b"* OK ready\r\n").await.unwrap();
+            loop {
+                let mut line = String::new();
+                if r.read_line(&mut line).await.unwrap_or(0) == 0 {
+                    break;
+                }
+                let line = line.trim_end().to_string();
+                let literal = line
+                    .strip_suffix('}')
+                    .and_then(|l| l.rsplit_once('{'))
+                    .and_then(|(_, n)| n.parse::<usize>().ok());
+                if let Some(n) = literal {
+                    w.write_all(b"+ go\r\n").await.unwrap();
+                    let mut body = vec![0; n + 2];
+                    r.read_exact(&mut body).await.unwrap();
+                }
+                let tag = line.split(' ').next().unwrap_or("").to_string();
+                let reply = match script.iter().position(|(k, _)| line.contains(k)) {
+                    Some(i) => script.remove(i).1,
+                    None => Some("{tag} OK done\r\n"),
+                };
+                seen.push(line);
+                let Some(reply) = reply else { break };
+                w.write_all(reply.replace("{tag}", &tag).as_bytes())
+                    .await
+                    .unwrap();
+            }
+            seen
+        });
+        let config = ImapConfig {
+            host: "127.0.0.1".into(),
+            port,
+            security: "none".into(),
+            username: "u".into(),
+            password: "p".into(),
+            auth_method: "password".into(),
+            accept_invalid_certs: false,
+        };
+        (connect(&config).await.unwrap(), server)
+    }
+
+    async fn commands(
+        session: ImapSession,
+        server: tokio::task::JoinHandle<Vec<String>>,
+    ) -> Vec<String> {
+        drop(session);
+        server.await.unwrap()
+    }
+
+    // A bare set in SEARCH is sequence numbers (RFC 3501 §6.4.4), so with
+    // 500 messages `10001:*` matches only the last one.
+    #[test]
+    fn new_uids_are_searched_by_uid() {
+        assert_eq!(new_uids_query(10000), "UID 10001:*");
+    }
+
+    #[tokio::test]
+    async fn delta_check_without_uidvalidity_fails_the_folder() {
+        let (mut session, _server) = scripted(vec![(
+            "SELECT",
+            Some("* 5 EXISTS\r\n{tag} OK [READ-WRITE] done\r\n"),
+        )])
+        .await;
+        let req = DeltaCheckRequest {
+            folder: "INBOX".into(),
+            last_uid: 10,
+            uidvalidity: 7,
+        };
+
+        let results = delta_check_folders(&mut session, &[req]).await.unwrap();
+
+        assert!(!results[0].uidvalidity_changed);
+        assert!(results[0].error.is_some());
+        assert!(!session.is_clean());
+    }
+
+    #[tokio::test]
+    async fn folder_status_without_uidvalidity_is_an_error() {
+        let (mut session, _server) = scripted(vec![(
+            "STATUS",
+            Some("* STATUS INBOX (MESSAGES 3)\r\n{tag} OK done\r\n"),
+        )])
+        .await;
+
+        assert!(get_folder_status(&mut session, "INBOX").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn refused_flag_change_is_an_error() {
+        let (mut session, _server) =
+            scripted(vec![("UID STORE", Some("{tag} NO [CANNOT] read-only\r\n"))]).await;
+
+        let result = set_flags(&mut session, "INBOX", "1", "+FLAGS", "(\\Seen)").await;
+
+        assert!(result.is_err());
+        assert!(session.is_clean());
+    }
+
+    #[tokio::test]
+    async fn refused_delete_is_an_error() {
+        let (mut session, _server) =
+            scripted(vec![("UID STORE", Some("{tag} NO [CANNOT] read-only\r\n"))]).await;
+
+        assert!(delete_messages(&mut session, "INBOX", "1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn refused_uid_expunge_is_an_error() {
+        let (mut session, _server) = scripted(vec![
+            (
+                "CAPABILITY",
+                Some("* CAPABILITY IMAP4rev1 UIDPLUS\r\n{tag} OK done\r\n"),
+            ),
+            ("UID EXPUNGE", Some("{tag} NO [CANNOT] nope\r\n")),
+        ])
+        .await;
+
+        assert!(delete_messages(&mut session, "INBOX", "1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn move_falls_back_to_a_quoted_copy_and_reports_a_refused_store() {
+        let (mut session, server) = scripted(vec![
+            ("UID MOVE", Some("{tag} NO [CANNOT] no MOVE\r\n")),
+            ("UID STORE", Some("{tag} NO [CANNOT] read-only\r\n")),
+        ])
+        .await;
+
+        let result = move_messages(&mut session, "INBOX", "1", "My \"Box\"").await;
+
+        assert!(result.is_err());
+        let sent = commands(session, server).await;
+        assert!(
+            sent.iter()
+                .any(|c| c.ends_with(r#"UID COPY 1 "My \"Box\"""#)),
+            "{sent:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn move_does_not_copy_after_a_lost_connection() {
+        let (mut session, _server) = scripted(vec![("UID MOVE", None)]).await;
+
+        let err = move_messages(&mut session, "INBOX", "1", "Archive")
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("MOVE"), "{err}");
+    }
+
+    const DRAFT: &[u8] = b"Message-ID: <abc@example.com>\r\nSubject: x\r\n\r\nbody\r\n";
+
+    #[tokio::test]
+    async fn append_returns_the_uid_found_by_message_id() {
+        let (mut session, server) =
+            scripted(vec![("SEARCH", Some("* SEARCH 7 9\r\n{tag} OK done\r\n"))]).await;
+
+        let uid = append_message(&mut session, "Drafts", Some("(\\Draft)"), DRAFT).await;
+
+        assert_eq!(uid, Ok(Some(9)));
+        let sent = commands(session, server).await;
+        assert!(
+            sent.iter()
+                .any(|c| c.ends_with(r#"UID SEARCH HEADER Message-ID "<abc@example.com>""#)),
+            "{sent:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn append_without_message_id_returns_no_uid() {
+        let (mut session, _server) = scripted(vec![]).await;
+
+        let uid = append_message(&mut session, "Drafts", None, b"Subject: x\r\n\r\nbody\r\n").await;
+
+        assert_eq!(uid, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn failed_uid_lookup_still_reports_the_append() {
+        let (mut session, _server) = scripted(vec![("SEARCH", None)]).await;
+
+        let uid = append_message(&mut session, "Drafts", None, DRAFT).await;
+
+        assert_eq!(uid, Ok(None));
+        assert!(!session.is_clean());
+    }
+
+    #[test]
+    fn decodes_modified_utf7_mailbox_names() {
+        assert_eq!(
+            decode_mailbox_name("&BB4EQgQ,BEAEMAQyBDsENQQ9BD0ESwQ1-"),
+            "Отправленные"
+        );
+        assert_eq!(
+            decode_mailbox_name("&AWA-iuk&AWE-liad&ARcBfgEX-"),
+            "Šiukšliadėžė"
+        );
+        assert_eq!(decode_mailbox_name("R&-D"), "R&D");
+        assert_eq!(decode_mailbox_name("INBOX/Sent"), "INBOX/Sent");
+    }
+
+    // Written by a client that does not encode `&`: shown as it is, not a panic.
+    #[test]
+    fn keeps_a_name_that_is_not_valid_modified_utf7() {
+        assert_eq!(decode_mailbox_name("Q&A-Notes"), "Q&A-Notes");
+        assert_eq!(decode_mailbox_name("R&D"), "R&D");
+    }
 
     #[test]
     fn flag_list_must_match_the_mailbox_count() {

@@ -1,7 +1,6 @@
 import {
   getAllAccounts,
   getAccount,
-  getAccountByEmail,
   findAccount,
   findAccountByEmail,
   saveCardDavAccount,
@@ -96,25 +95,6 @@ describe("accounts", () => {
       const result = await getAccount("acc-imap");
 
       expect(result!.imap_password).toBeNull();
-    });
-  });
-
-  describe("getAccountByEmail", () => {
-    it("returns account matching email", async () => {
-      mockSelectFirstBy.mockResolvedValue(createMockImapAccount());
-
-      const result = await getAccountByEmail("user@example.com");
-
-      expect(result).not.toBeNull();
-      expect(result!.email).toBe("user@example.com");
-    });
-
-    it("returns null when email not found", async () => {
-      mockSelectFirstBy.mockResolvedValue(null);
-
-      const result = await getAccountByEmail("unknown@example.com");
-
-      expect(result).toBeNull();
     });
   });
 

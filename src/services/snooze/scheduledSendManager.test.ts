@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 const mockGetPending = vi.fn(() => Promise.resolve([] as unknown[]));
 const mockUpdateStatus = vi.fn(() => Promise.resolve());
 const mockGetAccount = vi.fn();
+const mockClaim = vi.fn((_id: string) => Promise.resolve(true));
 const mockSendMessage = vi.fn(() => Promise.resolve({ id: "sent-1" }));
 const mockGetEmailProvider = vi.fn(() => Promise.resolve({ sendMessage: mockSendMessage }));
 const mockGetGmailClient = vi.fn(() => {
@@ -12,6 +13,7 @@ const mockGetGmailClient = vi.fn(() => {
 vi.mock("../db/scheduledEmails", () => ({
   getPendingScheduledEmails: (...a: unknown[]) => mockGetPending(...a),
   updateScheduledEmailStatus: (...a: unknown[]) => mockUpdateStatus(...(a as [])),
+  claimScheduledEmail: (...a: unknown[]) => mockClaim(...(a as [])),
 }));
 vi.mock("../db/accounts", () => ({
   getAccount: (...a: unknown[]) => mockGetAccount(...(a as [])),
@@ -79,12 +81,23 @@ describe("checkScheduledEmails", () => {
     expect(mockGetGmailClient).not.toHaveBeenCalled();
   });
 
+  it("does not send a row another run has already claimed", async () => {
+    mockGetPending.mockResolvedValue([imapEmail]);
+    mockClaim.mockResolvedValueOnce(false);
+
+    await __checkScheduledEmailsForTest();
+
+    expect(mockClaim).toHaveBeenCalledWith("sched-1");
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
+  });
+
   it("marks the mail sent rather than failed", async () => {
     mockGetPending.mockResolvedValue([imapEmail]);
 
     await __checkScheduledEmailsForTest();
 
-    expect(mockUpdateStatus).toHaveBeenCalledWith("sched-1", "sending");
+    expect(mockClaim).toHaveBeenCalledWith("sched-1");
     expect(mockUpdateStatus).toHaveBeenCalledWith("sched-1", "sent");
     expect(mockUpdateStatus).not.toHaveBeenCalledWith("sched-1", "failed");
   });

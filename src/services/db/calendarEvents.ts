@@ -1,4 +1,4 @@
-import { getDb, selectFirstBy } from "./connection";
+import { getDb } from "./connection";
 
 export interface DbCalendarEvent {
   id: string;
@@ -119,21 +119,6 @@ export async function getCalendarEventsInRangeMulti(
        AND (calendar_id IN (${placeholders}) OR calendar_id IS NULL)
      ORDER BY start_time ASC`,
     [accountId, startTime, endTime, ...calendarIds],
-  );
-}
-
-export async function deleteEventsForCalendar(calendarId: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM calendar_events WHERE calendar_id = $1", [calendarId]);
-}
-
-export async function getEventByRemoteId(
-  calendarId: string,
-  remoteEventId: string,
-): Promise<DbCalendarEvent | null> {
-  return selectFirstBy<DbCalendarEvent>(
-    "SELECT * FROM calendar_events WHERE calendar_id = $1 AND remote_event_id = $2",
-    [calendarId, remoteEventId],
   );
 }
 

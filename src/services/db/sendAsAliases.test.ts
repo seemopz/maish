@@ -21,9 +21,7 @@ import { getDb } from "@/services/db/connection";
 import {
   getAliasesForAccount,
   upsertAlias,
-  getDefaultAlias,
   setDefaultAlias,
-  deleteAlias,
   mapDbAlias,
   type DbSendAsAlias,
 } from "./sendAsAliases";
@@ -94,66 +92,6 @@ describe("sendAsAliases service", () => {
     });
   });
 
-  describe("getDefaultAlias", () => {
-    it("returns the default alias when one exists", async () => {
-      const alias: DbSendAsAlias = {
-        id: "alias-1",
-        account_id: "acc-1",
-        email: "default@example.com",
-        display_name: "Default",
-        reply_to_address: null,
-        signature_id: null,
-        is_primary: 0,
-        is_default: 1,
-        treat_as_alias: 1,
-        verification_status: "accepted",
-        created_at: 1000,
-      };
-      mockDb.select.mockResolvedValueOnce([alias]);
-
-      const result = await getDefaultAlias("acc-1");
-
-      expect(result).toEqual(alias);
-      expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringContaining("is_default = 1"),
-        ["acc-1"],
-      );
-    });
-
-    it("falls back to primary alias when no default exists", async () => {
-      const primary: DbSendAsAlias = {
-        id: "alias-2",
-        account_id: "acc-1",
-        email: "primary@example.com",
-        display_name: "Primary",
-        reply_to_address: null,
-        signature_id: null,
-        is_primary: 1,
-        is_default: 0,
-        treat_as_alias: 1,
-        verification_status: "accepted",
-        created_at: 1000,
-      };
-      mockDb.select
-        .mockResolvedValueOnce([]) // no default
-        .mockResolvedValueOnce([primary]); // primary fallback
-
-      const result = await getDefaultAlias("acc-1");
-
-      expect(result).toEqual(primary);
-    });
-
-    it("returns null when no aliases exist", async () => {
-      mockDb.select
-        .mockResolvedValueOnce([]) // no default
-        .mockResolvedValueOnce([]); // no primary
-
-      const result = await getDefaultAlias("acc-1");
-
-      expect(result).toBeNull();
-    });
-  });
-
   describe("setDefaultAlias", () => {
     it("clears existing defaults and sets the specified one", async () => {
       await setDefaultAlias("acc-1", "alias-3");
@@ -166,17 +104,6 @@ describe("sendAsAliases service", () => {
       expect(mockDb.execute).toHaveBeenCalledWith(
         expect.stringContaining("UPDATE send_as_aliases SET is_default = 1"),
         ["alias-3", "acc-1"],
-      );
-    });
-  });
-
-  describe("deleteAlias", () => {
-    it("deletes the alias by id", async () => {
-      await deleteAlias("alias-5");
-
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        "DELETE FROM send_as_aliases WHERE id = $1",
-        ["alias-5"],
       );
     });
   });

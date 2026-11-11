@@ -90,13 +90,3 @@ export async function updateAddressBookSyncState(
     [ctag, syncToken, id],
   );
 }
-
-/**
- * Drop the books of an account, and with them their contacts — the rows
- * reference the book with ON DELETE CASCADE, so removing an account's CardDAV
- * settings does not leave synced contacts behind with nothing to refresh them.
- */
-export async function deleteAddressBooksForAccount(accountId: string): Promise<void> {
-  const db = await getDb();
-  await db.execute("DELETE FROM address_books WHERE account_id = $1", [accountId]);
-}

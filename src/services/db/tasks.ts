@@ -22,14 +22,6 @@ export interface DbTask {
   updated_at: number;
 }
 
-export interface DbTaskTag {
-  tag: string;
-  account_id: string | null;
-  color: string | null;
-  sort_order: number;
-  created_at: number;
-}
-
 export async function getTasksForAccount(
   accountId: string | null,
   includeCompleted = false,
@@ -194,18 +186,6 @@ export async function uncompleteTask(id: string): Promise<void> {
   );
 }
 
-export async function reorderTasks(
-  taskIds: string[],
-): Promise<void> {
-  const db = await getDb();
-  for (let i = 0; i < taskIds.length; i++) {
-    await db.execute(
-      "UPDATE tasks SET sort_order = $1, updated_at = unixepoch() WHERE id = $2",
-      [i, taskIds[i]],
-    );
-  }
-}
-
 export async function getIncompleteTaskCount(
   accountId: string | null,
 ): Promise<number> {
@@ -215,39 +195,4 @@ export async function getIncompleteTaskCount(
     [accountId],
   );
   return rows[0]?.count ?? 0;
-}
-
-export async function getTaskTags(
-  accountId: string | null,
-): Promise<DbTaskTag[]> {
-  const db = await getDb();
-  return db.select<DbTaskTag[]>(
-    "SELECT * FROM task_tags WHERE account_id = $1 OR account_id IS NULL ORDER BY sort_order ASC",
-    [accountId],
-  );
-}
-
-export async function upsertTaskTag(
-  tag: string,
-  accountId: string | null,
-  color?: string | null,
-): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    `INSERT INTO task_tags (tag, account_id, color)
-     VALUES ($1, $2, $3)
-     ON CONFLICT(tag, account_id) DO UPDATE SET color = $3`,
-    [tag, accountId, color ?? null],
-  );
-}
-
-export async function deleteTaskTag(
-  tag: string,
-  accountId: string | null,
-): Promise<void> {
-  const db = await getDb();
-  await db.execute(
-    "DELETE FROM task_tags WHERE tag = $1 AND account_id = $2",
-    [tag, accountId],
-  );
 }

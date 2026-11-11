@@ -10,14 +10,15 @@ interface AuthWarningBannerProps {
 export function AuthWarningBanner({ authResults, senderAddress, onDismiss }: AuthWarningBannerProps) {
   if (!authResults) return null;
 
-  let parsed: AuthResult;
+  let parsed: AuthResult | null;
   try {
-    parsed = JSON.parse(authResults) as AuthResult;
+    parsed = JSON.parse(authResults) as AuthResult | null;
   } catch {
     return null;
   }
 
-  if (parsed.aggregate !== "fail") return null;
+  // Valid JSON is not necessarily an AuthResult (e.g. a stored "null").
+  if (parsed?.aggregate !== "fail") return null;
 
   const sender = senderAddress ?? "this sender";
 

@@ -1,5 +1,5 @@
+import { callAi } from "./aiService";
 import { getActiveProvider } from "./providerManager";
-import { AiError } from "./errors";
 import { getAiCache, setAiCache, deleteAiCache } from "@/services/db/aiCache";
 import {
   getWritingStyleProfile,
@@ -10,23 +10,6 @@ import { getRecentSentMessages, type DbMessage } from "@/services/db/messages";
 import { getAccount } from "@/services/db/accounts";
 import { getSetting } from "@/services/db/settings";
 import { WRITING_STYLE_ANALYSIS_PROMPT, AUTO_DRAFT_REPLY_PROMPT } from "./prompts";
-
-async function callAi(systemPrompt: string, userContent: string): Promise<string> {
-  try {
-    const provider = await getActiveProvider();
-    return await provider.complete({ systemPrompt, userContent });
-  } catch (err) {
-    if (err instanceof AiError) throw err;
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("401") || message.includes("authentication")) {
-      throw new AiError("AUTH_ERROR", "Invalid API key");
-    }
-    if (message.includes("429") || message.includes("rate")) {
-      throw new AiError("RATE_LIMITED", "Rate limited — please try again shortly");
-    }
-    throw new AiError("NETWORK_ERROR", message);
-  }
-}
 
 /**
  * Analyze writing style from sent email samples.

@@ -494,7 +494,7 @@ export default function App() {
       isActive: a.is_active === 1,
       provider: a.provider,
     }));
-    useAccountStore.getState().setAccounts(mapped);
+    useAccountStore.getState().setAccounts(mapped, useAccountStore.getState().activeAccountId);
 
     // Re-initialize clients for the new account
     await initializeClients();

@@ -1,7 +1,7 @@
 import { useRef, useCallback, useLayoutEffect, useMemo, useState, useEffect } from "react";
 import { ImageOff } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { stripRemoteImages, hasBlockedImages } from "@/utils/imageBlocker";
+import { stripRemoteImages, hasBlockedImages, REMOTE_IMAGE_BLOCK } from "@/utils/imageBlocker";
 import { addToAllowlist } from "@/services/db/imageAllowlist";
 import { sanitizeHtml } from "@/utils/sanitize";
 import { linkifyPlainText } from "@/utils/linkify";
@@ -147,6 +147,7 @@ export function EmailRenderer({
     return `<!DOCTYPE html>
 <html>
 <head>
+  ${shouldBlock ? REMOTE_IMAGE_BLOCK : ""}
   <style>
     body {
       margin: 0;
@@ -174,7 +175,7 @@ export function EmailRenderer({
 </head>
 <body>${bodyHtml}<script src="/emailFrame.js"></script></body>
 </html>`;
-  }, [bodyHtml, isDark, isPlainText]);
+  }, [bodyHtml, isDark, isPlainText, shouldBlock]);
 
   // The frame cannot read the store, so it is told the zoom whenever it changes
   // and whenever a fresh document has loaded.

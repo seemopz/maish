@@ -6,7 +6,6 @@ import { getThreadCountForAccount, deleteAllThreadsForAccount } from "../db/thre
 import { deleteAllMessagesForAccount } from "../db/messages";
 import { imapInitialSync, imapDeltaSync } from "../imap/imapSync";
 import { clearAllFolderSyncStates } from "../db/folderSyncState";
-import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { hasCalendarSupport, getCalendarProvider } from "../calendar/providerFactory";
 import { getVisibleCalendars, upsertCalendar, updateCalendarSyncToken } from "../db/calendars";
 import { upsertCalendarEvent, deleteEventByRemoteId } from "../db/calendarEvents";
@@ -152,11 +151,6 @@ async function syncImapAccount(accountId: string): Promise<void> {
 
   if (!account) {
     throw new Error("Account not found");
-  }
-
-  // Refresh OAuth2 token before syncing (if applicable)
-  if (account.auth_method === "oauth2") {
-    await ensureFreshToken(account);
   }
 
   const syncPeriodStr = await getSetting("sync_period_days");

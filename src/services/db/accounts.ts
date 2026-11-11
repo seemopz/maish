@@ -119,13 +119,6 @@ export async function getAccount(id: string): Promise<DbAccount | null> {
   return account ? requireCredentials(account) : null;
 }
 
-export async function getAccountByEmail(
-  email: string,
-): Promise<DbAccount | null> {
-  const account = await findAccountByEmail(email);
-  return account ? requireCredentials(account) : null;
-}
-
 export async function insertAccount(account: {
   id: string;
   email: string;

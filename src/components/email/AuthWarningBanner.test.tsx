@@ -53,4 +53,12 @@ describe("AuthWarningBanner", () => {
     fireEvent.click(dismissBtn);
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
+
+  it("should render nothing for a stored JSON null", () => {
+    const { container } = render(
+      <AuthWarningBanner authResults="null" senderAddress="a@example.com" onDismiss={vi.fn()} />,
+    );
+
+    expect(container.innerHTML).toBe("");
+  });
 });

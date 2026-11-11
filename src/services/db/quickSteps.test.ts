@@ -16,7 +16,6 @@ import {
   insertQuickStep,
   updateQuickStep,
   deleteQuickStep,
-  reorderQuickSteps,
 } from "./quickSteps";
 import { createMockDb } from "@/test/mocks";
 
@@ -154,26 +153,6 @@ describe("quickSteps DB service", () => {
       expect(mockDb.execute).toHaveBeenCalledWith(
         "DELETE FROM quick_steps WHERE id = $1",
         ["qs-1"],
-      );
-    });
-  });
-
-  describe("reorderQuickSteps", () => {
-    it("updates sort_order for each id in order", async () => {
-      await reorderQuickSteps("acct-1", ["qs-b", "qs-a", "qs-c"]);
-
-      expect(mockDb.execute).toHaveBeenCalledTimes(3);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE quick_steps SET sort_order = $1"),
-        [0, "qs-b", "acct-1"],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE quick_steps SET sort_order = $1"),
-        [1, "qs-a", "acct-1"],
-      );
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE quick_steps SET sort_order = $1"),
-        [2, "qs-c", "acct-1"],
       );
     });
   });

@@ -48,14 +48,23 @@ describe("parseSearchQuery", () => {
     const result = parseSearchQuery("before:2024/01/15");
     expect(result.before).toBeDefined();
     const date = new Date(2024, 0, 15);
-    expect(result.before).toBe(Math.floor(date.getTime() / 1000));
+    expect(result.before).toBe(date.getTime());
   });
 
   it("parses after: date with dashes", () => {
     const result = parseSearchQuery("after:2024-06-01");
     expect(result.after).toBeDefined();
     const date = new Date(2024, 5, 1);
-    expect(result.after).toBe(Math.floor(date.getTime() / 1000));
+    expect(result.after).toBe(date.getTime());
+  });
+
+  it("compares in milliseconds like messages.date", () => {
+    const { after, before } = parseSearchQuery("after:2024/01/01 before:2024/02/01");
+    const dec2023 = new Date(2023, 11, 15).getTime();
+    const jan2024 = new Date(2024, 0, 15).getTime();
+    expect(dec2023 > after!).toBe(false);
+    expect(jan2024 > after!).toBe(true);
+    expect(jan2024 < before!).toBe(true);
   });
 
   it("parses label: operator", () => {

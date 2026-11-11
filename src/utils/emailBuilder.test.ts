@@ -1,7 +1,31 @@
 import { describe, it, expect } from "vitest";
-import { buildRawEmail } from "./emailBuilder";
+import { buildRawEmail, replyHeaders } from "./emailBuilder";
 
 describe("emailBuilder", () => {
+  it("keeps a CR/LF in a header value from starting a new header", () => {
+    const raw = buildRawEmail({
+      from: "sender@example.com",
+      to: ["boss@corp.example\r\nBcc: spy@evil.example"],
+      subject: "Hi\r\nBcc: spy@evil.example\r\n\r\nInjected body",
+      htmlBody: "<p>Hi</p>",
+      inReplyTo: "<a@x>\nX-Evil: 1",
+    });
+
+    const headerBlock = decodeBase64Url(raw).split("\r\n\r\n")[0]!;
+    expect(headerBlock).not.toMatch(/^Bcc:/m);
+    expect(headerBlock).not.toMatch(/^X-Evil:/m);
+    expect(headerBlock).toContain("Subject: Hi Bcc: spy@evil.example Injected body");
+  });
+
+  it("builds reply headers from the RFC Message-ID, never the internal id", () => {
+    expect(replyHeaders({ message_id_header: "<b@x>", references_header: "<a@x>" }))
+      .toEqual({ inReplyToMessageId: "<b@x>", references: "<a@x> <b@x>" });
+    expect(replyHeaders({ message_id_header: "<b@x>", references_header: null }))
+      .toEqual({ inReplyToMessageId: "<b@x>", references: "<b@x>" });
+    expect(replyHeaders({ message_id_header: null, references_header: "<a@x>" }))
+      .toEqual({ inReplyToMessageId: null, references: null });
+  });
+
   it("builds a basic email", () => {
     const raw = buildRawEmail({
       from: "sender@example.com",

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, act } from "@testing-library/react";
 
 /**
@@ -59,12 +59,25 @@ vi.mock("@/services/db/templates", () => ({ getTemplatesForAccount: vi.fn(() => 
 vi.mock("@/services/composer/draftAutoSave", () => ({
   startAutoSave: vi.fn(),
   stopAutoSave: vi.fn(),
+  flushAutoSave: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("@/services/logFile", () => ({ logToFile: vi.fn() }));
+const { webviewCtor } = vi.hoisted(() => ({ webviewCtor: vi.fn() }));
+vi.mock("@tauri-apps/api/webviewWindow", () => ({
+  WebviewWindow: class {
+    static getByLabel = () => Promise.resolve(null);
+    constructor(label: string, opts: unknown) { webviewCtor(label, opts); }
+  },
 }));
 vi.mock("@/utils/emailBuilder", () => ({ buildRawEmail: vi.fn(() => "") }));
 
 import { Composer } from "./Composer";
 import { useComposerStore } from "@/stores/composerStore";
 import { useAccountStore } from "@/stores/accountStore";
+import { sendEmail, deleteDraft } from "@/services/emailActions";
+import { getSetting } from "@/services/db/settings";
+import { flushAutoSave } from "@/services/composer/draftAutoSave";
+import { logToFile } from "@/services/logFile";
 
 /**
  * <Composer /> is mounted unconditionally by App, so useEditor runs once at
@@ -235,5 +248,161 @@ describe("Composer send guard", () => {
     expect(pending!.to).toEqual(["bob@example.com"]);
     expect(pending!.subject).toBe("Half-written");
     expect(pending!.bodyHtml).toContain("text that must not be lost");
+  });
+});
+
+/**
+ * A permanent send error comes back as `{ success: false }`, not as a throw.
+ * The timer used to ignore it, delete the draft and drop the snapshot, so the
+ * mail was gone without a trace.
+ */
+describe("Composer failed send", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    editorHtml = "";
+    vi.mocked(getSetting).mockResolvedValue("0");
+    useComposerStore.setState({
+      isOpen: false,
+      session: 0,
+      bodyHtml: "",
+      undoSendTimer: null,
+      undoSendVisible: false,
+      pendingSend: null,
+    });
+    useAccountStore.setState({
+      accounts: [{ id: "acct-1", email: "simon@hochreiner.xyz" }],
+      activeAccountId: "acct-1",
+    } as never);
+  });
+
+  afterEach(() => {
+    vi.mocked(getSetting).mockResolvedValue(null);
+  });
+
+  async function sendAndWait(getByText: (t: string) => HTMLElement) {
+    await act(async () => {
+      getByText("Send").click();
+    });
+    // pendingSend is set before the timer fires and cleared as its last step.
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(sendEmail).toHaveBeenCalled();
+        expect(useComposerStore.getState().pendingSend).toBeNull();
+      });
+    });
+  }
+
+  it("keeps the draft and hands the mail back when the send fails", async () => {
+    vi.mocked(sendEmail).mockResolvedValueOnce({ success: false, error: "550 rejected" });
+    const { getByText } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({
+        to: ["bob@example.com"],
+        subject: "Important",
+        bodyHtml: "<p>must not be lost</p>",
+        draftId: "d1",
+      });
+    });
+
+    await sendAndWait(getByText);
+
+    expect(deleteDraft).not.toHaveBeenCalled();
+    const state = useComposerStore.getState();
+    expect(state.isOpen).toBe(true);
+    expect(state.to).toEqual(["bob@example.com"]);
+    expect(state.subject).toBe("Important");
+    expect(state.draftId).toBe("d1");
+    expect(state.pendingSend).toBeNull();
+    expect(state.undoSendTimer).toBeNull();
+    expect(logToFile).toHaveBeenCalledWith("error", expect.stringContaining("550 rejected"));
+  });
+
+  it("hands the mail back when the send throws", async () => {
+    vi.mocked(sendEmail).mockRejectedValueOnce(new Error("db locked"));
+    const { getByText } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({ to: ["bob@example.com"], subject: "Important" });
+    });
+
+    await sendAndWait(getByText);
+
+    expect(useComposerStore.getState().isOpen).toBe(true);
+    expect(useComposerStore.getState().subject).toBe("Important");
+  });
+
+  it("deletes the draft once the send went through", async () => {
+    const { getByText } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({ to: ["bob@example.com"], draftId: "d1" });
+    });
+
+    await sendAndWait(getByText);
+
+    expect(deleteDraft).toHaveBeenCalledWith("acct-1", "d1");
+    expect(useComposerStore.getState().isOpen).toBe(false);
+  });
+});
+
+describe("Composer close and pop-out", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    editorHtml = "";
+    useComposerStore.setState({ isOpen: false, session: 0, bodyHtml: "", attachments: [] });
+    useAccountStore.setState({
+      accounts: [
+        { id: "acct-1", email: "simon@hochreiner.xyz" },
+        { id: "acct-2", email: "other@example.com" },
+      ],
+      activeAccountId: "acct-2",
+    } as never);
+  });
+
+  it("saves the last edits before the close button closes the composer", async () => {
+    const { getByLabelText } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({ to: ["bob@example.com"] });
+    });
+
+    await act(async () => {
+      getByLabelText("Close").click();
+    });
+
+    expect(flushAutoSave).toHaveBeenCalled();
+    expect(useComposerStore.getState().isOpen).toBe(false);
+  });
+
+  // setAccounts without an id made accounts[0] active, so a reply from account B went out via A.
+  it("tells the pop-out window which account is writing", async () => {
+    const { getByTitle } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({ to: ["bob@example.com"] });
+    });
+
+    await act(async () => {
+      getByTitle("Open in new window").click();
+    });
+
+    // The handler imports the window module first; wait for it so it cannot leak into the next test.
+    await vi.waitFor(() => expect(webviewCtor).toHaveBeenCalledTimes(1));
+    const url = (webviewCtor.mock.calls[0][1] as { url: string }).url;
+    expect(new URLSearchParams(url.split("?")[1]).get("accountId")).toBe("acct-2");
+  });
+
+  it("does not pop out a mail whose attachments the window cannot take along", async () => {
+    const { getByLabelText } = render(<Composer />);
+    act(() => {
+      useComposerStore.getState().openComposer({
+        to: ["bob@example.com"],
+        attachments: [{ id: "a1", file: new File(["x"], "x.txt"), filename: "x.txt", mimeType: "text/plain", size: 1, content: "eA==" }],
+      });
+    });
+
+    const button = getByLabelText("Open in new window") as HTMLButtonElement;
+    await act(async () => {
+      button.click();
+    });
+
+    expect(button.disabled).toBe(true);
+    expect(webviewCtor).not.toHaveBeenCalled();
   });
 });

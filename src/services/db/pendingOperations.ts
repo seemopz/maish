@@ -201,13 +201,12 @@ export async function getResourceIdsWithOpenOps(accountId: string): Promise<Set<
   return new Set(rows.map((r) => r.resource_id));
 }
 
-export async function compactQueue(accountId?: string): Promise<number> {
+export async function compactQueue(): Promise<number> {
   const db = await getDb();
 
   // Get all pending ops grouped by resource
-  const filter = accountId ? `AND account_id = '${accountId}'` : "";
   const ops = await db.select<PendingOperation[]>(
-    `SELECT * FROM pending_operations WHERE status = 'pending' ${filter} ORDER BY created_at ASC`,
+    "SELECT * FROM pending_operations WHERE status = 'pending' ORDER BY created_at ASC",
   );
 
   // Group by resource_id

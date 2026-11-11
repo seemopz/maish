@@ -15,7 +15,7 @@ import { ScheduleSendDialog } from "./ScheduleSendDialog";
 import { SignatureSelector } from "./SignatureSelector";
 import { TemplatePicker } from "./TemplatePicker";
 import { FromSelector } from "./FromSelector";
-import { useComposerStore } from "@/stores/composerStore";
+import { useComposerStore, type PendingSend } from "@/stores/composerStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { useUIStore } from "@/stores/uiStore";
 import { sendEmail, archiveThread, deleteDraft as deleteDraftAction } from "@/services/emailActions";
@@ -26,7 +26,8 @@ import { insertScheduledEmail } from "@/services/db/scheduledEmails";
 import { getDefaultSignature } from "@/services/db/signatures";
 import { getAliasesForAccount, mapDbAlias, type SendAsAlias } from "@/services/db/sendAsAliases";
 import { resolveFromAddress } from "@/utils/resolveFromAddress";
-import { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
+import { startAutoSave, stopAutoSave, flushAutoSave } from "@/services/composer/draftAutoSave";
+import { logToFile } from "@/services/logFile";
 import { getTemplatesForAccount, type DbTemplate } from "@/services/db/templates";
 import { readFileAsBase64 } from "@/utils/fileUtils";
 import { interpolateVariables } from "@/utils/templateVariables";
@@ -60,6 +61,7 @@ export function Composer() {
   const setFromEmail = useComposerStore((s) => s.setFromEmail);
   const setViewMode = useComposerStore((s) => s.setViewMode);
   const addAttachment = useComposerStore((s) => s.addAttachment);
+  const hasAttachments = useComposerStore((s) => s.attachments.length > 0);
 
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
   const accounts = useAccountStore((s) => s.accounts);
@@ -258,11 +260,13 @@ export function Composer() {
 
   const handleSend = useCallback(async () => {
     if (!activeAccountId || !activeAccount || sendingRef.current) return;
-    const state = useComposerStore.getState();
-    if (state.to.length === 0) return;
+    if (useComposerStore.getState().to.length === 0) return;
 
     sendingRef.current = true;
     stopAutoSave();
+    // A save in flight may still hand back the draft id; without it the draft outlives the send.
+    await flushAutoSave();
+    const state = useComposerStore.getState();
 
     const html = getFullHtml();
     const senderEmail = state.fromEmail ?? activeAccount.email;
@@ -274,6 +278,7 @@ export function Composer() {
       subject: state.subject,
       htmlBody: html,
       inReplyTo: state.inReplyToMessageId ?? undefined,
+      references: state.references ?? undefined,
       threadId: state.threadId ?? undefined,
       attachments: state.attachments.length > 0
         ? state.attachments.map((a) => ({
@@ -292,40 +297,9 @@ export function Composer() {
     // Show undo send UI
     state.setUndoSendVisible(true);
 
-    const timer = setTimeout(async () => {
-      try {
-        await sendEmail(activeAccountId, raw, state.threadId ?? undefined);
-
-        // Delete draft if it was saved
-        if (currentDraftId) {
-          try { await deleteDraftAction(activeAccountId, currentDraftId); } catch { /* ignore */ }
-        }
-
-        // Send & archive: remove from inbox if replying to a thread
-        if (useUIStore.getState().sendAndArchive && state.threadId) {
-          try { await archiveThread(activeAccountId, state.threadId, [], { undo: false }); } catch { /* ignore */ }
-        }
-
-        // Update contacts frequency
-        for (const addr of [...state.to, ...state.cc, ...state.bcc]) {
-          await upsertContact(addr, null);
-        }
-      } catch (err) {
-        console.error("Failed to send email:", err);
-      } finally {
-        const store = useComposerStore.getState();
-        store.setUndoSendVisible(false);
-        store.setUndoSendTimer(null);
-        // The mail is gone; there is nothing left to hand back.
-        store.setPendingSend(null);
-      }
-    }, delay);
-
-    state.setUndoSendTimer(timer);
-
-    // Keep a copy of what was written. closeComposer empties the store on the
-    // next line, and the toast's Undo has nothing else to put back.
-    state.setPendingSend({
+    // Keep a copy of what was written. closeComposer empties the store below,
+    // and both the toast's Undo and a failed send have nothing else to put back.
+    const pending: PendingSend = {
       mode: state.mode,
       to: state.to,
       cc: state.cc,
@@ -334,10 +308,58 @@ export function Composer() {
       bodyHtml: html,
       threadId: state.threadId,
       inReplyToMessageId: state.inReplyToMessageId,
+      references: state.references,
       draftId: currentDraftId,
       fromEmail: state.fromEmail,
       attachments: state.attachments,
-    });
+    };
+
+    const timer = setTimeout(async () => {
+      let store = useComposerStore.getState();
+      // A later send owns the toast once it has started; only hide our own.
+      if (store.undoSendTimer === timer) {
+        store.setUndoSendVisible(false);
+        store.setUndoSendTimer(null);
+      }
+
+      // A permanent error comes back as success: false, not as a throw.
+      const result = await sendEmail(activeAccountId, raw, state.threadId ?? undefined)
+        .catch((err: unknown) => ({ success: false, error: String(err) }));
+
+      if (!result.success) {
+        logToFile("error", `Send failed, mail handed back to the composer: ${result.error ?? "unknown error"}`);
+        // Reopening replaces whatever is being written now, so save that as a draft first.
+        await flushAutoSave();
+        store = useComposerStore.getState();
+        store.openComposer(pending);
+      } else {
+        try {
+          // Delete draft if it was saved
+          if (currentDraftId) {
+            try { await deleteDraftAction(activeAccountId, currentDraftId); } catch { /* ignore */ }
+          }
+
+          // Send & archive: remove from inbox if replying to a thread
+          if (useUIStore.getState().sendAndArchive && state.threadId) {
+            try { await archiveThread(activeAccountId, state.threadId, [], { undo: false }); } catch { /* ignore */ }
+          }
+
+          // Update contacts frequency
+          for (const addr of [...state.to, ...state.cc, ...state.bcc]) {
+            await upsertContact(addr, null);
+          }
+        } catch (err) {
+          console.error("Failed to finish sending email:", err);
+        }
+      }
+
+      // Cleared last: the pop-out window closes itself once nothing is pending.
+      store = useComposerStore.getState();
+      if (store.pendingSend === pending) store.setPendingSend(null);
+    }, delay);
+
+    state.setUndoSendTimer(timer);
+    state.setPendingSend(pending);
 
     closeComposer();
 
@@ -421,12 +443,22 @@ export function Composer() {
     closeComposer();
   }, [activeAccountId, closeComposer]);
 
+  const handleClose = useCallback(async () => {
+    await flushAutoSave();
+    closeComposer();
+  }, [closeComposer]);
+
   const handlePopOutComposer = useCallback(async () => {
+    // The URL cannot carry attachments; popping out would drop them.
+    if (!activeAccountId || useComposerStore.getState().attachments.length > 0) return;
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      // The window takes the draft id along, so a save in flight has to land first.
+      await flushAutoSave();
       const state = useComposerStore.getState();
       const params = new URLSearchParams();
       params.set("compose", "true");
+      params.set("accountId", activeAccountId);
       params.set("mode", state.mode);
       if (state.to.length > 0) params.set("to", state.to.join(","));
       if (state.cc.length > 0) params.set("cc", state.cc.join(","));
@@ -434,6 +466,7 @@ export function Composer() {
       if (state.subject) params.set("subject", state.subject);
       if (state.threadId) params.set("threadId", state.threadId);
       if (state.inReplyToMessageId) params.set("inReplyToMessageId", state.inReplyToMessageId);
+      if (state.references) params.set("references", state.references);
       if (state.draftId) params.set("draftId", state.draftId);
       if (state.fromEmail) params.set("fromEmail", state.fromEmail);
       // Encode body as base64 to safely pass HTML
@@ -460,7 +493,7 @@ export function Composer() {
     } catch (err) {
       console.error("Failed to pop out composer:", err);
     }
-  }, [editor, closeComposer]);
+  }, [editor, closeComposer, activeAccountId]);
 
   const isFullpage = viewMode === "fullpage";
 
@@ -485,7 +518,7 @@ export function Composer() {
       {/* Backdrop */}
       <div
         className="absolute inset-0 pointer-events-auto backdrop-animate"
-        onClick={closeComposer}
+        onClick={handleClose}
       />
 
       {/* Composer window */}
@@ -519,13 +552,15 @@ export function Composer() {
             </button>
             <button
               onClick={handlePopOutComposer}
-              className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-colors"
-              title="Open in new window"
+              disabled={hasAttachments}
+              className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Open in new window"
+              title={hasAttachments ? "Attachments cannot be moved to a new window" : "Open in new window"}
             >
               <ExternalLink size={14} />
             </button>
             <button
-              onClick={closeComposer}
+              onClick={handleClose}
               className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-bg-hover transition-colors"
               aria-label="Close"
             >

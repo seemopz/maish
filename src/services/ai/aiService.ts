@@ -24,7 +24,7 @@ async function getSummaryLanguage(): Promise<SummaryLanguage> {
   return parseSummaryLanguage(await getSetting("ai_summary_language"));
 }
 
-async function callAi(systemPrompt: string, userContent: string): Promise<string> {
+export async function callAi(systemPrompt: string, userContent: string): Promise<string> {
   try {
     const provider = await getActiveProvider();
     return await provider.complete({ systemPrompt, userContent });

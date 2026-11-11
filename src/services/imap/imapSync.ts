@@ -9,6 +9,8 @@ import {
 } from "./tauriCommands";
 import { logToFile } from "../logFile";
 import { buildImapConfig } from "./imapConfigBuilder";
+import { ensureFreshToken } from "../oauth/oauthTokenManager";
+import { parseAuthenticationResults } from "../gmail/authParser";
 import {
   mapFolderToLabel,
   getLabelsForMessage,
@@ -32,7 +34,7 @@ import {
   deleteEmptyThreads,
 } from "../db/threads";
 import { upsertAttachment } from "../db/attachments";
-import { getAccount, updateAccountSyncState } from "../db/accounts";
+import { getAccount, updateAccountSyncState, type DbAccount } from "../db/accounts";
 import { withTransaction } from "../db/connection";
 import {
   upsertFolderSyncState,
@@ -139,6 +141,12 @@ export type ImapSyncProgressCallback = (progress: ImapSyncProgress) => void;
 // Message conversion
 // ---------------------------------------------------------------------------
 
+/** The UI reads the parsed JSON shape the Gmail path stores, not the raw header. */
+function authResultsJson(header: string | null): string | null {
+  const parsed = header ? parseAuthenticationResults([{ name: "Authentication-Results", value: header }]) : null;
+  return parsed ? JSON.stringify(parsed) : null;
+}
+
 /**
  * Generate a synthetic Message-ID for messages that lack one.
  *
@@ -205,7 +213,7 @@ export function imapMessageToParsedMessage(
     attachments,
     listUnsubscribe: msg.list_unsubscribe,
     listUnsubscribePost: msg.list_unsubscribe_post,
-    authResults: msg.auth_results,
+    authResults: authResultsJson(msg.auth_results),
   };
 
   const threadable: ThreadableMessage = {
@@ -536,6 +544,12 @@ function emptyFolderState(
   };
 }
 
+/** OAuth accounts have no stored password; they log in with a fresh access token. */
+async function imapConfigFor(account: DbAccount): Promise<ImapConfig> {
+  const token = account.auth_method === "oauth2" ? await ensureFreshToken(account) : undefined;
+  return buildImapConfig(account, token);
+}
+
 // ---------------------------------------------------------------------------
 // Initial sync
 // ---------------------------------------------------------------------------
@@ -554,7 +568,7 @@ export async function imapInitialSync(
     throw new Error(`Account ${accountId} not found`);
   }
 
-  const config = buildImapConfig(account);
+  const config = await imapConfigFor(account);
 
   // Phase 1: List and sync folders
   onProgress?.({ phase: "folders", current: 0, total: 1 });
@@ -1117,7 +1131,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     throw new Error(`Account ${accountId} not found`);
   }
 
-  const config = buildImapConfig(account);
+  const config = await imapConfigFor(account);
 
   // Get all folders we've synced before
   const syncStates = await getAllFolderSyncStates(accountId);

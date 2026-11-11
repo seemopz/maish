@@ -1,7 +1,5 @@
 import {
-  getFolderSyncState,
   upsertFolderSyncState,
-  deleteFolderSyncState,
   getAllFolderSyncStates,
   type FolderSyncState,
 } from "./folderSyncState";
@@ -24,47 +22,6 @@ const mockSelectFirstBy = vi.mocked(selectFirstBy);
 describe("folderSyncState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  describe("getFolderSyncState", () => {
-    it("returns null for non-existent folder sync state", async () => {
-      mockSelectFirstBy.mockResolvedValue(null);
-
-      const result = await getFolderSyncState("acc-1", "INBOX");
-
-      expect(result).toBeNull();
-      expect(mockSelectFirstBy).toHaveBeenCalledWith(
-        "SELECT * FROM folder_sync_state WHERE account_id = $1 AND folder_path = $2",
-        ["acc-1", "INBOX"],
-      );
-    });
-
-    it("returns existing folder sync state", async () => {
-      const state: FolderSyncState = {
-        account_id: "acc-1",
-        folder_path: "INBOX",
-        uidvalidity: 12345,
-        last_uid: 100,
-        modseq: 999,
-        last_sync_at: 1700000000,
-      };
-      mockSelectFirstBy.mockResolvedValue(state);
-
-      const result = await getFolderSyncState("acc-1", "INBOX");
-
-      expect(result).toEqual(state);
-    });
-
-    it("passes correct parameters for different folder paths", async () => {
-      mockSelectFirstBy.mockResolvedValue(null);
-
-      await getFolderSyncState("acc-2", "Sent");
-
-      expect(mockSelectFirstBy).toHaveBeenCalledWith(
-        expect.any(String),
-        ["acc-2", "Sent"],
-      );
-    });
   });
 
   describe("upsertFolderSyncState", () => {
@@ -149,29 +106,6 @@ describe("folderSyncState", () => {
         1500,
         1700001000,
       ]);
-    });
-  });
-
-  describe("deleteFolderSyncState", () => {
-    it("deletes by account_id and folder_path", async () => {
-      mockExecute.mockResolvedValue(undefined);
-
-      await deleteFolderSyncState("acc-1", "INBOX");
-
-      expect(mockExecute).toHaveBeenCalledTimes(1);
-      const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("DELETE FROM folder_sync_state");
-      expect(params).toEqual(["acc-1", "INBOX"]);
-    });
-
-    it("uses correct SQL with both WHERE conditions", async () => {
-      mockExecute.mockResolvedValue(undefined);
-
-      await deleteFolderSyncState("acc-2", "Sent");
-
-      const [sql] = mockExecute.mock.calls[0] as [string, unknown[]];
-      expect(sql).toContain("account_id = $1");
-      expect(sql).toContain("folder_path = $2");
     });
   });
 

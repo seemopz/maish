@@ -1,4 +1,5 @@
 import {
+  claimScheduledEmail,
   getPendingScheduledEmails,
   updateScheduledEmailStatus,
 } from "../db/scheduledEmails";
@@ -21,8 +22,8 @@ async function checkScheduledEmails(): Promise<void> {
         continue;
       }
 
-      // Mark as "sending" BEFORE attempting send to prevent duplicate sends
-      await updateScheduledEmailStatus(email.id, "sending");
+      // Claim before sending: an overlapping run that lost the claim skips the row.
+      if (!(await claimScheduledEmail(email.id))) continue;
 
       // Whichever provider the account uses. This used to ask for a Gmail
       // client outright, which an IMAP account has none of: the call threw,

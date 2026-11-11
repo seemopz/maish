@@ -11,12 +11,14 @@ export function AuthBadge({ authResults }: AuthBadgeProps) {
 
   if (!authResults) return null;
 
-  let parsed: AuthResult;
+  let parsed: AuthResult | null;
   try {
-    parsed = JSON.parse(authResults) as AuthResult;
+    parsed = JSON.parse(authResults) as AuthResult | null;
   } catch {
     return null;
   }
+  // Valid JSON is not necessarily an AuthResult (e.g. a stored "null").
+  if (!parsed?.spf || !parsed.dkim || !parsed.dmarc) return null;
 
   const { aggregate, spf, dkim, dmarc } = parsed;
 

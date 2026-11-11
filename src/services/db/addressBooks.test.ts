@@ -21,7 +21,6 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 
 import { getDb } from "@/services/db/connection";
 import {
-  deleteAddressBooksForAccount,
   getAddressBooksForAccount,
   getVisibleAddressBooks,
   setAddressBookVisibility,
@@ -114,17 +113,6 @@ describe("address books service", () => {
       expect(mockDb.execute).toHaveBeenCalledWith(
         expect.stringContaining("ctag = $1, sync_token = $2"),
         ["ctag-2", "token-2", "book-1"],
-      );
-    });
-  });
-
-  describe("deleteAddressBooksForAccount", () => {
-    it("removes every book of the account", async () => {
-      await deleteAddressBooksForAccount("acc-1");
-
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE FROM address_books WHERE account_id = $1"),
-        ["acc-1"],
       );
     });
   });

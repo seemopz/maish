@@ -59,4 +59,11 @@ describe("AuthBadge", () => {
     expect(badge).toBeInTheDocument();
     expect(badge?.className).toContain("text-text-tertiary");
   });
+
+  // A stored value that is valid JSON but not an AuthResult must not crash the thread.
+  it.each(["null", "{}", '{"aggregate":"pass"}'])("should render nothing for %s", (authResults) => {
+    const { container } = render(<AuthBadge authResults={authResults} />);
+
+    expect(container.innerHTML).toBe("");
+  });
 });

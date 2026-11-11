@@ -208,14 +208,15 @@ export async function imapDeleteMessages(
  * Append a raw message to a folder (for saving sent mail or drafts).
  * @param rawMessage - The full email message encoded as base64url.
  * @param flags - Optional IMAP flags string (e.g. "(\\Seen)" or "(\\Draft)").
+ * @returns The UID of the stored message, or null when it could not be found.
  */
 export async function imapAppendMessage(
   config: ImapConfig,
   folder: string,
   rawMessage: string,
   flags?: string
-): Promise<void> {
-  return invoke<void>('imap_append_message', { config, folder, flags: flags ?? null, rawMessage });
+): Promise<number | null> {
+  return invoke<number | null>('imap_append_message', { config, folder, flags: flags ?? null, rawMessage });
 }
 
 /**

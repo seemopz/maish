@@ -242,6 +242,53 @@ describe("EventDetailModal", () => {
     });
   });
 
+  describe("editing all events from a later occurrence", () => {
+    const JAN_19 = JAN_5 + 14 * 86400;
+    const third = () => makeOccurrence({
+      id: "row-1#" + JAN_19,
+      start_time: JAN_19,
+      end_time: JAN_19 + 3600,
+      occurrenceId: JAN_19,
+    });
+    const savedUpdate = () => mockUpdateEvent.mock.calls[0]?.[2];
+
+    it("sends no times when only the title changed", async () => {
+      // The dialog shows the clicked instance's times; sent for the whole
+      // series they would move its start onto that instance.
+      const { onUpdated } = renderModal(third());
+
+      fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+      fireEvent.click(screen.getByRole("radio", { name: /all events/i }));
+      fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Renamed" } });
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(onUpdated).toHaveBeenCalled());
+      expect(savedUpdate()).toMatchObject({ summary: "Renamed" });
+      expect(savedUpdate()).not.toHaveProperty("startTime");
+      expect(savedUpdate()).not.toHaveProperty("endTime");
+    });
+
+    it("sends the times once they were changed", async () => {
+      const { onUpdated } = renderModal(third());
+
+      fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+      fireEvent.click(screen.getByRole("radio", { name: /all events/i }));
+      const later = toLocal(JAN_19 + 3600);
+      fireEvent.change(screen.getByLabelText(/^start$/i), { target: { value: later } });
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+      await waitFor(() => expect(onUpdated).toHaveBeenCalled());
+      expect(savedUpdate().startTime).toBe(new Date((JAN_19 + 3600) * 1000).toISOString());
+      expect(mockUpdateEvent.mock.calls[0]?.[4]).toEqual({ recurrenceId: JAN_19, scope: "all" });
+    });
+
+    const toLocal = (epoch: number) => {
+      const d = new Date(epoch * 1000);
+      const p = (n: number) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    };
+  });
+
   describe("changing the repetition", () => {
     const SERIES_ICAL = [
       "BEGIN:VCALENDAR",

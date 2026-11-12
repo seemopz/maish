@@ -2,8 +2,6 @@ import { useRef } from "react";
 import { CSSTransition } from "react-transition-group";
 import { useComposerStore } from "@/stores/composerStore";
 
-const UNDO_DELAY_SECONDS = 5;
-
 export function UndoSendToast() {
   const {
     undoSendVisible,
@@ -60,7 +58,7 @@ export function UndoSendToast() {
         <div className="h-0.5 bg-on-accent/20">
           <div
             className="h-full bg-on-accent/70"
-            style={{ animation: `countdownBar ${UNDO_DELAY_SECONDS}s linear forwards` }}
+            style={{ animation: `countdownBar ${pendingSend?.delaySeconds ?? 5}s linear forwards` }}
           />
         </div>
       </div>

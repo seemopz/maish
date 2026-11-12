@@ -1,11 +1,11 @@
-import { countInstancesBefore } from "./recurrence";
+import { countInstancesBefore, expandOccurrences } from "./recurrence";
 import {
   buildRRule,
   formatUntil,
   type RecurrenceForm,
   type RuleDateStyle,
 } from "./recurrenceForm";
-import { formatDateTimeInZone, wallClockToEpoch } from "./timezone";
+import { epochToWallClock, formatDateTimeInZone, wallClockToEpoch } from "./timezone";
 
 /**
  * In-place editing of a stored calendar object.
@@ -60,12 +60,105 @@ export function editMaster(icalData: string, edits: EventEdits): string {
   if (!master) return icalData;
 
   const style = styleOf(master);
+  const startIndex = propertyIndex(master, "DTSTART");
+  const oldStart = startIndex === -1 ? null : valueToEpoch(master[startIndex]!, style);
+  if (edits.startTime !== undefined && oldStart !== null && edits.startTime !== oldStart) {
+    shiftSeriesAnchors(doc, master, icalData, oldStart, edits.startTime, style);
+  }
   applyEdits(master, edits, style);
   if (edits.recurrence !== undefined) {
     applyRule(doc, master, edits.recurrence, style);
   }
   touch(master, { bumpSequence: true });
   return serialize(doc);
+}
+
+/**
+ * Moving a series' DTSTART moves its instances; everything anchored to the old
+ * instance times has to move by the same wall-clock change or it stops
+ * matching: EXDATE excludes nothing, an override's RECURRENCE-ID names no
+ * instance, a BYDAY keeps the old weekday, and an UNTIL set on the last
+ * instance now falls before it.
+ */
+function shiftSeriesAnchors(
+  doc: CalDoc,
+  master: string[],
+  icalData: string,
+  from: number,
+  to: number,
+  style: DateStyle,
+): void {
+  const zone = style.isDate ? null : style.zone;
+  const naive = (epoch: number) => {
+    const w = epochToWallClock(epoch, zone);
+    return Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second) / 1000;
+  };
+  const delta = naive(to) - naive(from);
+  const shift = (epoch: number) => {
+    const d = new Date((naive(epoch) + delta) * 1000);
+    return wallClockToEpoch({
+      year: d.getUTCFullYear(),
+      month: d.getUTCMonth() + 1,
+      day: d.getUTCDate(),
+      hour: d.getUTCHours(),
+      minute: d.getUTCMinutes(),
+      second: d.getUTCSeconds(),
+    }, zone);
+  };
+
+  // EXDATE, possibly several properties with several values each.
+  const exdates: number[] = [];
+  for (const line of master.filter((l) => nameOf(l) === "EXDATE")) {
+    const params = paramsOf(line);
+    for (const value of valueOf(line).split(",")) {
+      const epoch = valueToEpoch(`EXDATE${params}:${value.trim()}`, style);
+      if (epoch !== null) exdates.push(epoch);
+    }
+  }
+  if (exdates.length > 0) {
+    removeProperty(master, "EXDATE");
+    for (const epoch of exdates) addProperty(master, dateLine("EXDATE", shift(epoch), style));
+  }
+
+  for (const event of doc.events) {
+    if (event === master) continue;
+    const at = recurrenceIdOf(event, style);
+    if (at !== null) {
+      setProperty(event, "RECURRENCE-ID", dateLine("RECURRENCE-ID", shift(at), style));
+    }
+    for (const name of ["DTSTART", "DTEND"]) {
+      const index = propertyIndex(event, name);
+      const epoch = index === -1 ? null : valueToEpoch(event[index]!, style);
+      if (epoch !== null) setProperty(event, name, dateLine(name, shift(epoch), style));
+    }
+  }
+
+  const ruleIndex = propertyIndex(master, "RRULE");
+  if (ruleIndex === -1) return;
+  const days = Math.floor(naive(to) / 86400) - Math.floor(naive(from) / 86400);
+  const weekdays = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+  const parts = valueOf(master[ruleIndex]!).split(";").map((part) => {
+    const eq = part.indexOf("=");
+    const key = part.slice(0, eq).toUpperCase();
+    const value = part.slice(eq + 1);
+    if (key === "BYDAY" && days % 7 !== 0) {
+      return `BYDAY=${value.split(",").map((entry) => {
+        const m = /^([+-]?\d*)([A-Z]{2})$/i.exec(entry.trim());
+        const index = m ? weekdays.indexOf(m[2]!.toUpperCase()) : -1;
+        return index === -1 ? entry : `${m![1]}${weekdays[(((index + days) % 7) + 7) % 7]}`;
+      }).join(",")}`;
+    }
+    if (key === "UNTIL") {
+      // Only an UNTIL that is an instance itself moves; one at the end of a
+      // day already lies past the last instance and keeps covering it.
+      const until = valueToEpoch(`UNTIL:${value}`, style);
+      const exact = until !== null
+        && expandOccurrences(icalData, until, until + 1).some((o) => o.recurrenceId === until);
+      if (exact) return `UNTIL=${formatUntil(shift(until), style)}`;
+    }
+    return part;
+  });
+  master[ruleIndex] = `RRULE:${parts.join(";")}`;
 }
 
 /**

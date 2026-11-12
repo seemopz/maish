@@ -14,6 +14,7 @@ vi.mock("../db/scheduledEmails", () => ({
   getPendingScheduledEmails: (...a: unknown[]) => mockGetPending(...a),
   updateScheduledEmailStatus: (...a: unknown[]) => mockUpdateStatus(...(a as [])),
   claimScheduledEmail: (...a: unknown[]) => mockClaim(...(a as [])),
+  requeueInterruptedScheduledEmails: vi.fn(async () => {}),
 }));
 vi.mock("../db/accounts", () => ({
   getAccount: (...a: unknown[]) => mockGetAccount(...(a as [])),

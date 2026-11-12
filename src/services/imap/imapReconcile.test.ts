@@ -15,7 +15,7 @@ vi.mock("../db/imapReconcile", () => ({
   refreshThreadFlags: vi.fn(),
 }));
 
-import { reconcileFolder, resetReconcileClock } from "./imapReconcile";
+import { reconcileFolder, resetReconcileClock, reconcileSoon } from "./imapReconcile";
 import { imapFetchFlags, type ImapConfig } from "./tauriCommands";
 import { getResourceIdsWithOpenOps } from "../db/pendingOperations";
 import {
@@ -191,6 +191,14 @@ describe("reconcileFolder", () => {
     await reconcileFolder(args);
 
     expect(mockFlags).not.toHaveBeenCalled();
+  });
+
+  it("runs a folder again inside the interval once a move took mail out of it", async () => {
+    await reconcileFolder(args);
+    reconcileSoon("acc-1", "INBOX");
+    await reconcileFolder(args);
+
+    expect(mockFlags).toHaveBeenCalledTimes(2);
   });
 
   it("runs a folder only once per interval, but again after it", async () => {

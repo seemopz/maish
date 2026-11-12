@@ -23,8 +23,6 @@ export function generateVEvent(
   // A timed series is written in local wall time with its zone, so the rule is
   // evaluated there and keeps its time of day across DST (as UTC stamps it
   // drifts by an hour). A TZID needs a VTIMEZONE; without one, stay in UTC.
-  // shortcut: zones whose changes follow no nth-weekday rule (buildVTimezone
-  // returns null) still drift; upgrade with per-year observances if users hit it.
   const vtimezone = event.recurrence && !event.isAllDay && event.startTime && zone
     ? buildVTimezone(zone, new Date(event.startTime).getUTCFullYear() - 1)
     : null;

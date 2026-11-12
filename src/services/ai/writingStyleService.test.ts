@@ -8,11 +8,13 @@ import {
 } from "./writingStyleService";
 import type { DbMessage } from "@/services/db/messages";
 
+const testConnection = vi.fn().mockResolvedValue(true);
 vi.mock("./providerManager", () => ({
   getActiveProvider: vi.fn().mockResolvedValue({
     complete: vi.fn().mockResolvedValue("Mocked AI response"),
-    testConnection: vi.fn().mockResolvedValue(true),
+    testConnection: (...a: unknown[]) => testConnection(...a),
   }),
+  isAiAvailable: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("@/services/db/aiCache", () => ({
@@ -84,7 +86,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getActiveProvider).mockResolvedValue({
     complete: vi.fn().mockResolvedValue("Mocked AI response"),
-    testConnection: vi.fn().mockResolvedValue(true),
+    testConnection,
   } as never);
   vi.mocked(getAiCache).mockResolvedValue(null);
   vi.mocked(getWritingStyleProfile).mockResolvedValue(null);
@@ -182,19 +184,18 @@ describe("writingStyleService", () => {
       expect(result).toBe(false);
     });
 
-    it("returns false when the provider is refused (AI turned off)", async () => {
-      const { getActiveProvider } = await import("./providerManager");
-      const { AiError } = await import("./errors");
-      vi.mocked(getActiveProvider).mockRejectedValueOnce(
-        new AiError("NOT_CONFIGURED", "AI features are turned off in Settings"),
-      );
+    it("returns false when AI is not available", async () => {
+      const { isAiAvailable } = await import("./providerManager");
+      vi.mocked(isAiAvailable).mockResolvedValueOnce(false);
       const result = await isAutoDraftEnabled();
       expect(result).toBe(false);
     });
 
-    it("returns true when AI is configured and enabled", async () => {
+    it("returns true when AI is configured and enabled, without a billed provider call", async () => {
+      testConnection.mockClear();
       const result = await isAutoDraftEnabled();
       expect(result).toBe(true);
+      expect(testConnection).not.toHaveBeenCalled();
     });
   });
 });

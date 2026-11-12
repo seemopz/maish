@@ -108,6 +108,8 @@ export const MessageItem = memo(forwardRef<HTMLDivElement, MessageItemProps>(fun
   };
 
   // Scan HTML body for cid: references — these images are already rendered inline
+  // Stable between renders: the renderer refetches the cid images whenever it changes.
+  const inlineAttachments = useMemo(() => attachments.filter((a) => a.content_id), [attachments]);
   const referencedCids = useMemo(() => {
     const cids = new Set<string>();
     if (!message.body_html) return cids;
@@ -196,7 +198,7 @@ export const MessageItem = memo(forwardRef<HTMLDivElement, MessageItemProps>(fun
               accountId={message.account_id}
               senderAllowlisted={senderAllowlisted}
               messageId={message.id}
-              inlineAttachments={attachments.filter((a) => a.content_id)}
+              inlineAttachments={inlineAttachments}
               riskyLinks={phishingScan?.riskyLinks ?? EMPTY_LINKS}
             />
           ) : (

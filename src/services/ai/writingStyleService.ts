@@ -1,5 +1,5 @@
 import { callAi } from "./aiService";
-import { getActiveProvider } from "./providerManager";
+import { isAiAvailable } from "./providerManager";
 import { getAiCache, setAiCache, deleteAiCache } from "@/services/db/aiCache";
 import {
   getWritingStyleProfile,
@@ -136,10 +136,7 @@ export async function isAutoDraftEnabled(): Promise<boolean> {
   const enabled = await getSetting("ai_auto_draft_enabled");
   if (enabled === "false") return false;
 
-  try {
-    const provider = await getActiveProvider();
-    return await provider.testConnection();
-  } catch {
-    return false;
-  }
+  // A configuration check, not testConnection(): that is a billed request and
+  // this runs for every reply opened.
+  return isAiAvailable();
 }

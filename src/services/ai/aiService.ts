@@ -54,6 +54,32 @@ function formatMessageForSummary(msg: DbMessage): string {
   return `<email_content>From: ${from}\nDate: ${date}\n\n${body}</email_content>`;
 }
 
+const WRAP_END = "</email_content>";
+
+/**
+ * Join a thread's messages (oldest first) into at most `max` characters,
+ * dropping the oldest ones. Cutting the joined text instead lost the newest
+ * message, the one a summary or reply is about. A newest message too long on
+ * its own keeps its beginning and its closing tag.
+ */
+function newestWithin(parts: string[], max: number, separator = "\n---\n"): string {
+  const kept: string[] = [];
+  let length = 0;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i]!;
+    const add = part.length + (kept.length > 0 ? separator.length : 0);
+    if (length + add > max) {
+      if (kept.length === 0) {
+        kept.push(part.endsWith(WRAP_END) ? part.slice(0, max - WRAP_END.length) + WRAP_END : part.slice(0, max));
+      }
+      break;
+    }
+    kept.unshift(part);
+    length += add;
+  }
+  return kept.join(separator);
+}
+
 export async function summarizeThread(
   threadId: string,
   accountId: string,
@@ -70,9 +96,8 @@ export async function summarizeThread(
     if (cached) return cached;
   }
 
-  const subject = messages[0]?.subject ?? "No subject";
-  const formatted = messages.map(formatMessageForSummary).join("\n---\n");
-  const combined = `Subject: ${subject}\n\n${formatted}`.slice(0, 6000);
+  const header = `Subject: ${messages[0]?.subject ?? "No subject"}\n\n`;
+  const combined = header + newestWithin(messages.map(formatMessageForSummary), 6000 - header.length);
   const summary = await callAi(withSummaryLanguage(SUMMARIZE_PROMPT, language), combined);
 
   await setAiCache(accountId, threadId, cacheType, summary);
@@ -87,7 +112,7 @@ export async function generateReply(
   messagesText: string[],
   instructions?: string,
 ): Promise<string> {
-  const combined = messagesText.join("\n---\n").slice(0, 4000);
+  const combined = newestWithin(messagesText, 4000);
   const userContent = instructions
     ? `<email_content>${combined}</email_content>\n\nInstructions: ${instructions}`
     : `<email_content>${combined}</email_content>`;
@@ -129,8 +154,7 @@ export async function generateSmartReplies(
     }
   }
 
-  const formatted = messages.map(formatMessageForSummary).join("\n---\n");
-  const combined = formatted.slice(0, 4000);
+  const combined = newestWithin(messages.map(formatMessageForSummary), 4000);
   const result = await callAi(SMART_REPLY_PROMPT, `<email_content>${combined}</email_content>`);
 
   // Parse JSON array from response
@@ -251,9 +275,9 @@ export async function extractTaskFromThread(
   _accountId: string,
   messages: DbMessage[],
 ): Promise<string> {
-  const subject = messages[0]?.subject ?? "No subject";
-  const formatted = messages.map(formatMessageForSummary).join("\n---\n");
-  const combined = `<email_content>Subject: ${subject}\n\n${formatted}</email_content>`.slice(0, 6000);
+  const header = `<email_content>Subject: ${messages[0]?.subject ?? "No subject"}\n\n`;
+  const body = newestWithin(messages.map(formatMessageForSummary), 6000 - header.length - WRAP_END.length);
+  const combined = `${header}${body}${WRAP_END}`;
   return callAi(withSummaryLanguage(EXTRACT_TASK_PROMPT, await getSummaryLanguage()), combined);
 }
 

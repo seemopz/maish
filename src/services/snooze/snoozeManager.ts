@@ -7,7 +7,7 @@ import { createBackgroundChecker } from "../backgroundCheckers";
  * Check for snoozed threads that should be un-snoozed (time has passed).
  * Moves them back to INBOX.
  */
-async function checkSnoozedThreads(): Promise<void> {
+export async function checkSnoozedThreads(): Promise<void> {
   const db = await getDb();
   const now = getCurrentUnixTimestamp();
 
@@ -28,6 +28,10 @@ async function checkSnoozedThreads(): Promise<void> {
           [thread.account_id, thread.id],
         );
 
+        await txDb.execute(
+          "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id = 'SNOOZED'",
+          [thread.account_id, thread.id],
+        );
         // Re-add INBOX label
         await txDb.execute(
           "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, 'INBOX')",

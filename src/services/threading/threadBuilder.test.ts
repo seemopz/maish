@@ -154,7 +154,7 @@ describe('parseReferences', () => {
 describe('generateThreadId', () => {
   it('returns imap-thread-{hex} format', () => {
     const id = generateThreadId('abc@host.com');
-    expect(id).toMatch(/^imap-thread-[0-9a-f]+$/);
+    expect(id).toMatch(/^imap-thread-[0-9a-f]+-[0-9a-f]+$/);
   });
 
   it('is deterministic: same input produces same output', () => {
@@ -173,12 +173,12 @@ describe('generateThreadId', () => {
     const longId =
       'very-long-message-id-with-lots-of-characters-1234567890@extremely-long-domain-name.example.com';
     const id = generateThreadId(longId);
-    expect(id).toMatch(/^imap-thread-[0-9a-f]+$/);
+    expect(id).toMatch(/^imap-thread-[0-9a-f]+-[0-9a-f]+$/);
   });
 
   it('handles special characters', () => {
     const id = generateThreadId('msg+special=chars@host.com');
-    expect(id).toMatch(/^imap-thread-[0-9a-f]+$/);
+    expect(id).toMatch(/^imap-thread-[0-9a-f]+-[0-9a-f]+$/);
   });
 });
 

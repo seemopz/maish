@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAccountStore } from "@/stores/accountStore";
-import { upsertCalendarEvent } from "@/services/db/calendarEvents";
-import { getOccurrencesInRange, type CalendarOccurrence } from "@/services/calendar/occurrences";
-import { isRecurring, seriesEnd, seriesRule } from "@/services/calendar/recurrence";
+import { getOccurrencesInRange, storeProviderEvent, type CalendarOccurrence } from "@/services/calendar/occurrences";
 import { getVisibleCalendars, getCalendarsForAccount, upsertCalendar, type DbCalendar } from "@/services/db/calendars";
 import { getCalendarProvider, hasCalendarSupport } from "@/services/calendar/providerFactory";
-import type { CalendarEventData, CreateEventInput } from "@/services/calendar/types";
+import type { CreateEventInput } from "@/services/calendar/types";
 import type { RecurrenceForm } from "@/services/calendar/recurrenceForm";
 import { CalendarToolbar, type CalendarView } from "./CalendarToolbar";
 import { MonthView } from "./MonthView";
@@ -128,7 +126,7 @@ export function CalendarPage() {
         );
 
         for (const event of apiEvents) {
-          await upsertCalendarEventFromProvider(activeAccountId, cal.id, event);
+          await storeProviderEvent(activeAccountId, cal.id, event);
         }
       }
 
@@ -241,7 +239,7 @@ export function CalendarPage() {
       const created = await provider.createEvent(calendarRemoteId, input);
 
       // Save to local DB
-      await upsertCalendarEventFromProvider(activeAccountId, calendarDbId ?? null, created);
+      await storeProviderEvent(activeAccountId, calendarDbId ?? null, created);
 
       setShowCreate(false);
       loadEvents();
@@ -381,37 +379,4 @@ export function CalendarPage() {
       )}
     </div>
   );
-}
-
-async function upsertCalendarEventFromProvider(
-  accountId: string,
-  calendarId: string | null,
-  event: CalendarEventData,
-): Promise<void> {
-  // A recurring event is stored once, as the server's master. The rule and the
-  // end of the series are kept alongside it so the range query can find it in
-  // months its own DTSTART does not fall in.
-  const recurring = event.icalData ? isRecurring(event.icalData) : false;
-
-  await upsertCalendarEvent({
-    accountId,
-    googleEventId: event.remoteEventId,
-    summary: event.summary,
-    description: event.description,
-    location: event.location,
-    startTime: event.startTime,
-    endTime: event.endTime,
-    isAllDay: event.isAllDay,
-    status: event.status,
-    organizerEmail: event.organizerEmail,
-    attendeesJson: event.attendeesJson,
-    htmlLink: event.htmlLink,
-    calendarId,
-    remoteEventId: event.remoteEventId,
-    etag: event.etag,
-    icalData: event.icalData,
-    uid: event.uid,
-    rrule: recurring ? seriesRule(event.icalData!) : null,
-    recurrenceEnd: recurring ? seriesEnd(event.icalData!) : null,
-  });
 }

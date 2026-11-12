@@ -386,3 +386,35 @@ describe("v27 Copilot removal", () => {
     ]);
   });
 });
+
+describe("FTS update trigger", () => {
+  function migrated() {
+    const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    for (const migration of MIGRATIONS) {
+      for (const statement of splitStatements(migration.sql)) db.exec(statement);
+    }
+    db.exec(`
+      INSERT INTO accounts (id, email) VALUES ('acc-1', 'me@example.com');
+      INSERT INTO threads (id, account_id) VALUES ('t1', 'acc-1');
+      INSERT INTO messages (id, account_id, thread_id, date, subject) VALUES ('m1', 'acc-1', 't1', 0, 'quarterly report');
+    `);
+    return db;
+  }
+
+  it("re-indexes a message only when a searched column changes", () => {
+    const db = migrated();
+    const trigger = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'messages_au'").get() as { sql: string };
+    // Marking read, starring or moving a message must not rewrite its index entry.
+    expect(trigger.sql).toMatch(/AFTER UPDATE OF subject, from_name, from_address, body_text, snippet ON messages/i);
+  });
+
+  it("still finds a message by its new subject after an edit", () => {
+    const db = migrated();
+    db.exec("UPDATE messages SET subject = 'annual budget' WHERE id = 'm1'");
+    const hits = db.prepare("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'budget'").all();
+    const stale = db.prepare("SELECT rowid FROM messages_fts WHERE messages_fts MATCH 'quarterly'").all();
+    expect(hits).toHaveLength(1);
+    expect(stale).toHaveLength(0);
+  });
+});

@@ -123,8 +123,9 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
 
       await provider.updateEvent(calendarRemoteId, remoteEventId, {
         summary,
-        description: description || undefined,
-        location: location || undefined,
+        // An empty field is sent as "" so clearing it reaches the server.
+        description,
+        location,
         ...(sendTimes ? {
           startTime: new Date(range.startTime).toISOString(),
           endTime: new Date(range.endTime).toISOString(),
@@ -288,8 +289,9 @@ export function EventDetailModal({ event, calendars, accountId, onClose, onUpdat
           />
 
           <div>
-            <label className="label-mono block mb-1.5">Description</label>
+            <label htmlFor="event-detail-description" className="label-mono block mb-1.5">Description</label>
             <textarea
+              id="event-detail-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Add description"

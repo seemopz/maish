@@ -15,6 +15,9 @@ import {
 import { createDavContact } from "@/services/contacts/contactActions";
 import { ContactDetail, readList } from "./ContactDetail";
 
+/** Rows drawn at once; the search covers every contact. */
+const RENDER_LIMIT = 500;
+
 /**
  * The line under a contact's name in the list.
  *
@@ -55,7 +58,8 @@ export function ContactsPage() {
 
   const load = useCallback(async () => {
     const [loadedContacts, loadedBooks] = await Promise.all([
-      getAllContacts(1000),
+      // All of them: search and filters run on this list, so a cap here hides contacts for good.
+      getAllContacts(null),
       accountId ? getAddressBooksForAccount(accountId) : Promise.resolve([]),
     ]);
     setContacts(loadedContacts);
@@ -206,7 +210,7 @@ export function ContactsPage() {
               </p>
             </div>
           ) : (
-            visible.map((contact) => (
+            visible.slice(0, RENDER_LIMIT).map((contact) => (
               <button
                 key={contact.id}
                 onClick={() => setSelectedId(contact.id)}
@@ -230,6 +234,11 @@ export function ContactsPage() {
                 </span>
               </button>
             ))
+          )}
+          {visible.length > RENDER_LIMIT && (
+            <p className="p-3 text-xs text-text-tertiary text-center">
+              Showing {RENDER_LIMIT.toLocaleString("en")} of {visible.length.toLocaleString("en")} contacts. Search to narrow the list.
+            </p>
           )}
         </div>
       </div>

@@ -1,8 +1,17 @@
 import {
   getCalendarEventsInRangeMulti,
+  upsertCalendarEvent,
   type DbCalendarEvent,
 } from "@/services/db/calendarEvents";
-import { expandOccurrences, hasReadableMaster, type Occurrence } from "./recurrence";
+import {
+  expandOccurrences,
+  hasReadableMaster,
+  isRecurring,
+  seriesEnd,
+  seriesRule,
+  type Occurrence,
+} from "./recurrence";
+import type { CalendarEventData } from "./types";
 
 /**
  * Bridge between the stored calendar rows and what a calendar view renders.
@@ -115,4 +124,38 @@ export async function getOccurrencesInRange(
 ): Promise<CalendarOccurrence[]> {
   const rows = await getCalendarEventsInRangeMulti(accountId, calendarIds, startTime, endTime);
   return expandRows(rows, startTime, endTime);
+}
+
+/** Store an event as a provider returned it. Every sync path goes through here. */
+export async function storeProviderEvent(
+  accountId: string,
+  calendarId: string | null,
+  event: CalendarEventData,
+): Promise<void> {
+  // A recurring event is stored once, as the server's master. The rule and the
+  // end of the series are kept alongside it so the range query can find it in
+  // months its own DTSTART does not fall in.
+  const recurring = event.icalData ? isRecurring(event.icalData) : false;
+
+  await upsertCalendarEvent({
+    accountId,
+    googleEventId: event.remoteEventId,
+    summary: event.summary,
+    description: event.description,
+    location: event.location,
+    startTime: event.startTime,
+    endTime: event.endTime,
+    isAllDay: event.isAllDay,
+    status: event.status,
+    organizerEmail: event.organizerEmail,
+    attendeesJson: event.attendeesJson,
+    htmlLink: event.htmlLink,
+    calendarId,
+    remoteEventId: event.remoteEventId,
+    etag: event.etag,
+    icalData: event.icalData,
+    uid: event.uid,
+    rrule: recurring ? seriesRule(event.icalData!) : null,
+    recurrenceEnd: recurring ? seriesEnd(event.icalData!) : null,
+  });
 }

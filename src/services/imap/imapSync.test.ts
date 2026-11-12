@@ -46,6 +46,7 @@ vi.mock("../db/messages", () => ({
   updateMessageThreadIds: vi.fn(),
   getMessagesForThread: vi.fn(() => []),
   deleteMessagesInFolder: vi.fn(() => []),
+  deleteLocalSentCopies: vi.fn(async () => []),
 }));
 vi.mock("../db/threads", () => ({
   upsertThread: vi.fn(),
@@ -63,6 +64,7 @@ vi.mock("../db/accounts", () => ({
   updateAccountSyncState: vi.fn(),
 }));
 vi.mock("../db/connection", () => ({
+  getDb: vi.fn(async () => ({ select: vi.fn(async () => []), execute: vi.fn() })),
   withTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
 }));
 vi.mock("../db/folderSyncState", () => ({

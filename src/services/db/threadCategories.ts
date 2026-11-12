@@ -45,10 +45,10 @@ export async function getThreadCategoryWithManual(
 export async function getRecentRuleCategorizedThreadIds(
   accountId: string,
   limit = 20,
-): Promise<{ id: string; subject: string; snippet: string; fromAddress: string }[]> {
+): Promise<{ id: string; subject: string; snippet: string; fromAddress: string; lastMessageAt: number }[]> {
   const db = await getDb();
   return db.select(
-    `SELECT t.id, t.subject, t.snippet, m.from_address as fromAddress
+    `SELECT t.id, t.subject, t.snippet, m.from_address as fromAddress, t.last_message_at as lastMessageAt
      FROM threads t
      INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
      INNER JOIN thread_categories tc ON tc.account_id = t.account_id AND tc.thread_id = t.id

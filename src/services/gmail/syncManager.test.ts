@@ -44,6 +44,7 @@ vi.mock("../db/calendars", () => ({
 vi.mock("../db/calendarEvents", () => ({
   upsertCalendarEvent: vi.fn(),
   deleteEventByRemoteId: vi.fn(),
+  deleteEventsMissingFromWindow: vi.fn(),
 }));
 
 vi.mock("../logFile", () => ({
@@ -457,6 +458,106 @@ describe("syncManager", () => {
       expect(errors[0]).toBe("Unknown error");
     });
   });
+  describe("background calendar sync", () => {
+    it("stores the rule and series end of a recurring event, like the calendar page does", async () => {
+      const { hasCalendarSupport, getCalendarProvider } = await import("../calendar/providerFactory");
+      const { getVisibleCalendars } = await import("../db/calendars");
+      const { upsertCalendarEvent } = await import("../db/calendarEvents");
+      const ical = [
+        "BEGIN:VCALENDAR",
+        "BEGIN:VEVENT",
+        "UID:weekly",
+        "DTSTART:20260105T090000Z",
+        "DTEND:20260105T100000Z",
+        "RRULE:FREQ=WEEKLY;UNTIL=20260330T090000Z",
+        "END:VEVENT",
+        "END:VCALENDAR",
+      ].join("\r\n");
+      mockGetAccount.mockResolvedValue({ ...makeGmailAccount("c1"), provider: "caldav" } as never);
+      vi.mocked(hasCalendarSupport).mockResolvedValueOnce(true);
+      vi.mocked(getVisibleCalendars).mockResolvedValueOnce([{ id: "cal-1", remote_id: "/cal/", sync_token: null } as never]);
+      vi.mocked(getCalendarProvider).mockResolvedValueOnce({
+        type: "caldav",
+        listCalendars: async () => [],
+        syncEvents: async () => ({
+          created: [{ remoteEventId: "/cal/weekly.ics", startTime: 1767603600, endTime: 1767607200, icalData: ical } as never],
+          updated: [],
+          deletedRemoteIds: [],
+        }),
+      } as never);
+
+      await syncAccount("c1");
+
+      expect(vi.mocked(upsertCalendarEvent)).toHaveBeenCalledWith(
+        expect.objectContaining({ rrule: "FREQ=WEEKLY;UNTIL=20260330T090000Z", recurrenceEnd: expect.any(Number) }),
+      );
+    });
+  });
+
+  describe("calendar deletions and ctag", () => {
+    async function setup(listed: { ctag: string | null }, stored: { ctag: string | null }, result: object, id = "cal-1") {
+      const { hasCalendarSupport, getCalendarProvider } = await import("../calendar/providerFactory");
+      const { getVisibleCalendars } = await import("../db/calendars");
+      mockGetAccount.mockResolvedValue({ ...makeGmailAccount("c2"), provider: "caldav" } as never);
+      vi.mocked(hasCalendarSupport).mockResolvedValueOnce(true);
+      vi.mocked(getVisibleCalendars).mockResolvedValueOnce([
+        { id, remote_id: "/cal/", sync_token: null, ...stored } as never,
+      ]);
+      const syncEvents = vi.fn(async () => ({ created: [], updated: [], deletedRemoteIds: [], newSyncToken: null, newCtag: null, ...result }));
+      vi.mocked(getCalendarProvider).mockResolvedValueOnce({
+        type: "caldav",
+        listCalendars: async () => [{ remoteId: "/cal/", displayName: "Cal", color: null, isPrimary: true, ...listed }],
+        syncEvents,
+      } as never);
+      return syncEvents;
+    }
+
+    it("deletes stored events of a complete listing's range that the server no longer returns", async () => {
+      const { deleteEventsMissingFromWindow } = await import("../db/calendarEvents");
+      await setup({ ctag: "2" }, { ctag: "1" }, {
+        created: [{ remoteEventId: "/cal/a.ics", startTime: 150, endTime: 160, icalData: null }],
+        window: { start: 100, end: 200 },
+      });
+
+      await syncAccount("c2");
+
+      expect(vi.mocked(deleteEventsMissingFromWindow)).toHaveBeenCalledWith("cal-1", 100, 200, ["/cal/a.ics"]);
+    });
+
+    it("skips the download while the calendar's ctag is unchanged, and stores a new one", async () => {
+      const { updateCalendarSyncToken } = await import("../db/calendars");
+      // The first sync of a run always fetches: the window has moved since the last one.
+      const first = await setup({ ctag: "7" }, { ctag: "7" }, {}, "cal-ctag");
+      await syncAccount("c2");
+      expect(first).toHaveBeenCalled();
+
+      const unchanged = await setup({ ctag: "7" }, { ctag: "7" }, {}, "cal-ctag");
+      await syncAccount("c2");
+      expect(unchanged).not.toHaveBeenCalled();
+
+      const changed = await setup({ ctag: "8" }, { ctag: "7" }, {}, "cal-ctag");
+      await syncAccount("c2");
+      expect(changed).toHaveBeenCalled();
+      expect(vi.mocked(updateCalendarSyncToken)).toHaveBeenCalledWith("cal-ctag", null, "8");
+    });
+  });
+
+  describe("empty IMAP account", () => {
+    it("forces a full resync at most once, not on every delta of an empty mailbox", async () => {
+      const { imapDeltaSync, imapInitialSync } = await import("../imap/imapSync");
+      const { getThreadCountForAccount } = await import("../db/threads");
+      mockGetAccount.mockResolvedValue({ ...makeGmailAccount("e1", "imap-synced-1"), provider: "imap" } as never);
+      vi.mocked(imapDeltaSync).mockResolvedValue({ messages: [] });
+      vi.mocked(getThreadCountForAccount).mockResolvedValue(0);
+
+      await syncAccount("e1");
+      await syncAccount("e1");
+      await syncAccount("e1");
+
+      expect(vi.mocked(imapInitialSync)).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("resync outcome", () => {
     it("resyncAccount rejects with the sync error instead of resolving as done", async () => {
       mockGetAccount.mockResolvedValue(makeGmailAccount("r1"));

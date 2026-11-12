@@ -7,6 +7,8 @@ export interface CalendarInfo {
   displayName: string;
   color: string | null;
   isPrimary: boolean;
+  /** CalDAV collection tag: unchanged means no event in it changed. */
+  ctag?: string | null;
 }
 
 export interface CalendarEventData {
@@ -65,6 +67,12 @@ export interface CalendarSyncResult {
   deletedRemoteIds: string[];
   newSyncToken: string | null;
   newCtag: string | null;
+  /**
+   * Set when the result lists every event of this range (epoch seconds), not
+   * only changes: stored events starting in it that it does not list are gone
+   * from the server.
+   */
+  window?: { start: number; end: number };
 }
 
 /**

@@ -6,6 +6,13 @@ import {
   setThreadCategoriesBatch,
 } from "@/services/db/threadCategories";
 
+/**
+ * Threads already sent to the AI this run, with the newest message they had
+ * then. The query returns the same top 20 after every sync, and sending them
+ * again each time costs money and sends the same mail out again.
+ */
+const categorized = new Map<string, number>();
+
 export async function categorizeNewThreads(accountId: string): Promise<void> {
   try {
     // Check if AI and auto-categorize are enabled
@@ -16,7 +23,9 @@ export async function categorizeNewThreads(accountId: string): Promise<void> {
     if (autoCat === "false") return;
 
     // Get recently rule-categorized inbox threads (AI refines, not replaces)
-    const threads = await getRecentRuleCategorizedThreadIds(accountId, 20);
+    const threads = (await getRecentRuleCategorizedThreadIds(accountId, 20)).filter(
+      (t) => categorized.get(`${accountId}:${t.id}`) !== t.lastMessageAt,
+    );
     if (threads.length === 0) return;
 
     // Categorize via AI (refines rule-based results)
@@ -29,6 +38,7 @@ export async function categorizeNewThreads(accountId: string): Promise<void> {
       })),
     );
 
+    for (const t of threads) categorized.set(`${accountId}:${t.id}`, t.lastMessageAt);
     if (categories.size === 0) return;
 
     // Store results (setThreadCategoriesBatch respects manual overrides)

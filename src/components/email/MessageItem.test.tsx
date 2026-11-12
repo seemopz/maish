@@ -112,6 +112,18 @@ describe("MessageItem", () => {
     expect(screen.getByText("Bob")).toBeInTheDocument();
   });
 
+  it("hands the renderer the same inline attachment list on a re-render", async () => {
+    // A new array per render re-runs the renderer's cid effect, and on IMAP
+    // every run fetches each inline image from the server again.
+    const { rerender } = render(<MessageItem message={makeMessage()} isLast={true} blockImages={false} focused={false} />);
+    await act(async () => {});
+    rerender(<MessageItem message={makeMessage()} isLast={true} blockImages={false} focused={true} />);
+
+    const calls = recordRendererProps.mock.calls;
+    expect(calls.length).toBeGreaterThan(1);
+    expect(calls[calls.length - 1]![0].inlineAttachments).toBe(calls[calls.length - 2]![0].inlineAttachments);
+  });
+
   it("applies red background when isSpam is true", () => {
     const { container } = render(
       <MessageItem message={makeMessage()} isLast={true} blockImages={false} isSpam={true} />,

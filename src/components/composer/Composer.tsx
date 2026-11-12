@@ -291,7 +291,8 @@ export function Composer() {
 
     // Get undo send delay
     const delaySetting = await getSetting("undo_send_delay_seconds");
-    const delay = parseInt(delaySetting ?? "5", 10) * 1000;
+    const delaySeconds = parseInt(delaySetting ?? "5", 10);
+    const delay = delaySeconds * 1000;
     const currentDraftId = state.draftId;
 
     // Show undo send UI
@@ -305,13 +306,15 @@ export function Composer() {
       cc: state.cc,
       bcc: state.bcc,
       subject: state.subject,
-      bodyHtml: html,
+      // Without the signature: a reopened composer adds it again.
+      bodyHtml: editor?.getHTML() ?? "",
       threadId: state.threadId,
       inReplyToMessageId: state.inReplyToMessageId,
       references: state.references,
       draftId: currentDraftId,
       fromEmail: state.fromEmail,
       attachments: state.attachments,
+      delaySeconds,
     };
 
     const timer = setTimeout(async () => {
@@ -370,7 +373,7 @@ export function Composer() {
     // window was swallowed the same way. Once the composer is closed there is
     // nothing left to double-submit.
     sendingRef.current = false;
-  }, [activeAccountId, activeAccount, closeComposer, getFullHtml]);
+  }, [activeAccountId, activeAccount, closeComposer, getFullHtml, editor]);
 
   const handleSchedule = useCallback(async (scheduledAt: number) => {
     if (!activeAccountId || !activeAccount) return;
@@ -530,6 +533,13 @@ export function Composer() {
         onDragLeave={handleDragLeave}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        onKeyDown={(e) => {
+          // The global shortcut handler leaves Ctrl+Enter to the composer.
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            void handleSend();
+          }
+        }}
       >
         {isDragging && (
           <div className="absolute inset-1 z-10 flex items-center justify-center bg-bg-secondary/90 border border-dashed border-text-tertiary rounded-md pointer-events-none">

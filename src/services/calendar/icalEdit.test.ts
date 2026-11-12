@@ -496,3 +496,60 @@ describe("editOccurrence and the recurrence rule", () => {
     expect(edited.match(/RRULE:/g)).toHaveLength(1);
   });
 });
+
+describe("editMaster moving a whole series", () => {
+  /** Wednesdays 18:00 Vienna with an exclusion, a moved instance and an UNTIL on the last instance. */
+  const SERIES = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "BEGIN:VEVENT",
+    "UID:shift-uid",
+    "DTSTAMP:20260901T090000Z",
+    "DTSTART;TZID=Europe/Vienna:20261007T180000",
+    "DTEND;TZID=Europe/Vienna:20261007T190000",
+    "RRULE:FREQ=WEEKLY;BYDAY=WE;UNTIL=20261028T170000Z",
+    "EXDATE;TZID=Europe/Vienna:20261014T180000",
+    "SUMMARY:Weekly",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:shift-uid",
+    "RECURRENCE-ID;TZID=Europe/Vienna:20261021T180000",
+    "DTSTAMP:20260901T090000Z",
+    "DTSTART;TZID=Europe/Vienna:20261021T200000",
+    "DTEND;TZID=Europe/Vienna:20261021T210000",
+    "SUMMARY:Moved that week",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+
+  it("takes exclusions, moved instances, the weekday and the last instance along", () => {
+    // Thursday 19:00 instead of Wednesday 18:00: a day and an hour later.
+    const edited = editMaster(SERIES, {
+      startTime: ts("2026-10-08T17:00:00Z"),
+      endTime: ts("2026-10-08T18:00:00Z"),
+    });
+
+    const occurrences = expandOccurrences(edited, OCTOBER[0], OCTOBER[1]);
+    expect(occurrences.map((o) => o.startTime)).toEqual([
+      ts("2026-10-08T17:00:00Z"), // first instance
+      // 15 Oct stays excluded
+      ts("2026-10-22T19:00:00Z"), // the moved instance, still two hours after the series time
+      ts("2026-10-29T18:00:00Z"), // the last one, after the DST change
+    ]);
+    expect(occurrences[1]!.summary).toBe("Moved that week");
+  });
+
+  it("changes nothing else when only the time of day moves", () => {
+    const edited = editMaster(SERIES, {
+      startTime: ts("2026-10-07T17:00:00Z"),
+      endTime: ts("2026-10-07T18:00:00Z"),
+    });
+
+    expect(edited).toContain("BYDAY=WE");
+    expect(startsIn(edited)).toEqual([
+      ts("2026-10-07T17:00:00Z"),
+      ts("2026-10-21T19:00:00Z"),
+      ts("2026-10-28T18:00:00Z"),
+    ]);
+  });
+});

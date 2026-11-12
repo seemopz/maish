@@ -206,3 +206,28 @@ export async function deleteMessagesInFolder(
   );
   return rows.map((r) => r.thread_id);
 }
+
+/**
+ * Delete the rows a send stored locally (`imap-sent-…`, no UID) once the
+ * server's copy of the same mail is stored, and return their threads. The
+ * local row may hold the raw header (`<id>`), the synced one has no brackets,
+ * so both forms match.
+ */
+export async function deleteLocalSentCopies(
+  accountId: string,
+  messageIdHeader: string,
+): Promise<string[]> {
+  const id = messageIdHeader.trim().replace(/^<|>$/g, "");
+  if (!id) return [];
+  const db = await getDb();
+  const where =
+    "account_id = $1 AND imap_uid IS NULL AND id LIKE 'imap-sent-%' AND message_id_header IN ($2, $3)";
+  const params = [accountId, id, `<${id}>`];
+  const rows = await db.select<{ thread_id: string }[]>(
+    `SELECT DISTINCT thread_id FROM messages WHERE ${where}`,
+    params,
+  );
+  if (rows.length === 0) return [];
+  await db.execute(`DELETE FROM messages WHERE ${where}`, params);
+  return rows.map((r) => r.thread_id);
+}

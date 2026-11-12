@@ -183,28 +183,27 @@ interface Transition {
  * `fromYear`, derived from the zone data Intl carries. Each offset change is
  * written as a yearly nth-weekday rule (BYMONTH + BYDAY) taken from that
  * year's transitions and checked against Intl for the following years.
- * Returns null for a zone Intl does not know or whose changes follow no such
- * rule (e.g. Morocco's Ramadan suspension), so the caller can fall back to UTC
- * instead of writing a TZID with a wrong definition.
+ * A zone whose changes follow no such rule gets its changes listed year by
+ * year. Returns null only for a zone Intl does not know, so the caller can fall
+ * back to UTC instead of writing a TZID with a wrong definition.
  */
 export function buildVTimezone(zone: string, fromYear: number): string[] | null {
   if (!getFormatter(zone)) return null;
 
   const first = transitionsIn(zone, fromYear);
-  if (first.length > 2) return null;
   const rules = first.map(weekdayRule);
 
   // Checked up to a decade past now too: a back-dated open series still runs today.
   const lastYear = Math.max(fromYear, new Date().getUTCFullYear()) + RULE_CHECK_YEARS;
-  for (let year = fromYear + 1; year <= lastYear; year++) {
+  let followsRule = first.length <= 2;
+  for (let year = fromYear + 1; followsRule && year <= lastYear; year++) {
     const actual = transitionsIn(zone, year);
-    if (actual.length !== rules.length) return null;
-    const matches = rules.every((rule, i) => {
+    followsRule = actual.length === rules.length && rules.every((rule, i) => {
       const t = actual[i]!;
       return t.from === rule.from && t.to === rule.to && t.at === ruleInstant(rule, year);
     });
-    if (!matches) return null;
   }
+  if (!followsRule) return listedVTimezone(zone, fromYear, lastYear);
 
   const lines = ["BEGIN:VTIMEZONE", `TZID:${zone}`];
   if (rules.length === 0) {
@@ -228,6 +227,44 @@ export function buildVTimezone(zone: string, fromYear: number): string[] | null 
       `TZOFFSETTO:${formatOffset(rule.to)}`,
       `END:${kind}`,
     );
+  }
+  lines.push("END:VTIMEZONE");
+  return lines;
+}
+
+/**
+ * A zone whose changes follow no yearly weekday rule (Morocco's Ramadan
+ * suspension, Jerusalem's Friday before the last Sunday) as one observance per
+ * change, taken from Intl.
+ * shortcut: after `lastYear` the last offset simply continues; a series still running a decade on drifts then.
+ */
+function listedVTimezone(zone: string, fromYear: number, lastYear: number): string[] {
+  const p = (n: number) => String(n).padStart(2, "0");
+  const local = (epoch: number, offset: number) => {
+    const w = new Date((epoch + offset) * 1000);
+    return `${w.getUTCFullYear()}${p(w.getUTCMonth() + 1)}${p(w.getUTCDate())}T${p(w.getUTCHours())}${p(w.getUTCMinutes())}${p(w.getUTCSeconds())}`;
+  };
+  const startOffset = formatOffset(offsetSeconds(Date.UTC(fromYear, 0, 1) / 1000, zone));
+  const lines = [
+    "BEGIN:VTIMEZONE",
+    `TZID:${zone}`,
+    "BEGIN:STANDARD",
+    `DTSTART:${fromYear}0101T000000`,
+    `TZOFFSETFROM:${startOffset}`,
+    `TZOFFSETTO:${startOffset}`,
+    "END:STANDARD",
+  ];
+  for (let year = fromYear; year <= lastYear; year++) {
+    for (const t of transitionsIn(zone, year)) {
+      const kind = t.to > t.from ? "DAYLIGHT" : "STANDARD";
+      lines.push(
+        `BEGIN:${kind}`,
+        `DTSTART:${local(t.at, t.from)}`,
+        `TZOFFSETFROM:${formatOffset(t.from)}`,
+        `TZOFFSETTO:${formatOffset(t.to)}`,
+        `END:${kind}`,
+      );
+    }
   }
   lines.push("END:VTIMEZONE");
   return lines;

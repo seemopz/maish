@@ -45,6 +45,15 @@ describe("imageAllowlist service", () => {
       expect(result.has("carol@example.com")).toBe(false);
     });
 
+    it("answers for the addresses as the caller passed them, whatever their case", async () => {
+      // Stored lower-case; a message may carry the sender as Alice@Example.com.
+      mockDb.select.mockResolvedValueOnce([{ sender_address: "alice@example.com" }]);
+
+      const result = await getAllowlistedSenders("acc-1", ["Alice@Example.com"]);
+
+      expect(result.has("Alice@Example.com")).toBe(true);
+    });
+
     it("uses a single query with IN clause", async () => {
       mockDb.select.mockResolvedValueOnce([]);
 

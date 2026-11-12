@@ -7,6 +7,7 @@ import { getEmailProvider } from "@/services/email/providerFactory";
 import { Modal } from "@/components/ui/Modal";
 import { Download, Eye } from "lucide-react";
 import { formatFileSize, isImage, isPdf, isText, canPreview } from "@/utils/fileTypeHelpers";
+import { saveDialogName } from "@/utils/fileUtils";
 
 /** Dedup attachments by filename+size (content-based) */
 function dedup(attachments: DbAttachment[]): DbAttachment[] {
@@ -147,7 +148,7 @@ export function AttachmentPreview({
     setSaving(true);
     try {
       const filePath = await save({
-        defaultPath: attachment.filename ?? "attachment",
+        defaultPath: saveDialogName(attachment.filename),
         filters: [{ name: "All Files", extensions: ["*"] }],
       });
 

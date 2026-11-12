@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileAsBase64 } from "./fileUtils";
+import { readFileAsBase64, saveDialogName } from "./fileUtils";
 
 describe("readFileAsBase64", () => {
   it("returns base64 content without data URL prefix", async () => {
@@ -60,5 +60,20 @@ describe("readFileAsBase64", () => {
     } finally {
       globalThis.FileReader = OriginalFileReader;
     }
+  });
+});
+
+describe("saveDialogName", () => {
+  it("keeps only the last path segment of a sender-chosen file name", () => {
+    expect(saveDialogName("../../.bashrc")).toBe(".bashrc");
+    expect(saveDialogName("C:\\Users\\x\\AppData\\evil.exe")).toBe("evil.exe");
+    expect(saveDialogName("/etc/cron.d/job")).toBe("job");
+    expect(saveDialogName("report.pdf")).toBe("report.pdf");
+  });
+
+  it("falls back to a neutral name when nothing usable is left", () => {
+    expect(saveDialogName(null)).toBe("attachment");
+    expect(saveDialogName("..")).toBe("attachment");
+    expect(saveDialogName("dir/")).toBe("attachment");
   });
 });

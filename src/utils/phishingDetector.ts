@@ -432,8 +432,12 @@ export function scanLinksInHtml(html: string): LinkAnalysis[] {
       continue;
     }
 
-    // Skip relative URLs (no protocol and doesn't look like a dangerous scheme)
-    if (!trimmedHref.includes("://") && !trimmedHref.startsWith("data:") && !trimmedHref.startsWith("javascript:") && !trimmedHref.startsWith("vbscript:") && !trimmedHref.startsWith("blob:")) {
+    // Skip relative URLs. Whether a scheme is present is the URL parser's call:
+    // "https:evil.com" and "JavaScript:" are absolute too, and a text test for
+    // "://" let them through unchecked.
+    try {
+      new URL(trimmedHref);
+    } catch {
       continue;
     }
 

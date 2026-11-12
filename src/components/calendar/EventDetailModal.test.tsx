@@ -88,6 +88,18 @@ describe("EventDetailModal", () => {
     mockDeleteEvent.mockResolvedValue({ objectRemoved: true });
   });
 
+  it("saves a description and location that were cleared", async () => {
+    const { onUpdated } = renderModal(makeOccurrence({ description: "Agenda", location: "Room 4", rrule: null, isSeriesInstance: false, occurrenceId: null }));
+
+    fireEvent.click(screen.getByRole("button", { name: /edit/i }));
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText(/location/i), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+
+    await waitFor(() => expect(onUpdated).toHaveBeenCalled());
+    expect(mockUpdateEvent.mock.calls[0]?.[2]).toMatchObject({ description: "", location: "" });
+  });
+
   describe("a write the server refuses", () => {
     it("reports a conflict instead of closing as if the save had worked", async () => {
       const { onUpdated } = renderModal();

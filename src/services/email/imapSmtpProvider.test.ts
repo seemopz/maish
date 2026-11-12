@@ -239,6 +239,16 @@ describe("ImapSmtpProvider", () => {
       );
     });
 
+    it("leaves copies outside the inbox where they are, such as the user's own replies in Sent", async () => {
+      vi.mocked(findSpecialFolder).mockResolvedValue("Archive");
+      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+
+      await provider.archive("thread-1", ["imap-acc-1-INBOX-100", "imap-acc-1-Sent-7", "imap-acc-1-Projects-3"]);
+
+      expect(imapMoveMessages).toHaveBeenCalledTimes(1);
+      expect(imapMoveMessages).toHaveBeenCalledWith(mockImapConfig, "INBOX", [100], "Archive");
+    });
+
     it("skips messages already in Archive", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("Archive");
       vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
@@ -376,6 +386,18 @@ describe("ImapSmtpProvider", () => {
         [100],
         "INBOX",
       );
+    });
+  });
+
+  describe("spam (not spam)", () => {
+    it("moves only the Junk copies back to the inbox", async () => {
+      vi.mocked(findSpecialFolder).mockResolvedValue("Junk");
+      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+
+      await provider.spam("thread-1", ["imap-acc-1-Junk-100", "imap-acc-1-Sent-7"], false);
+
+      expect(imapMoveMessages).toHaveBeenCalledTimes(1);
+      expect(imapMoveMessages).toHaveBeenCalledWith(mockImapConfig, "Junk", [100], "INBOX");
     });
   });
 

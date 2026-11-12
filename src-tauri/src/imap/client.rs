@@ -21,6 +21,8 @@ const TCP_CONNECT_ATTEMPTS: u32 = 3;
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 const IMAP_CMD_TIMEOUT: Duration = Duration::from_secs(30);
+/// For a FETCH: the longest wait for the next message of the response, not for
+/// the whole batch. For APPEND: the whole upload.
 const IMAP_FETCH_TIMEOUT: Duration = Duration::from_secs(120);
 const IMAP_SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 const OVERALL_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -372,8 +374,13 @@ pub async fn fetch_messages(
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
+    // See fetch_flags: 0 would be stored as the folder's UIDVALIDITY.
+    let Some(uidvalidity) = mailbox.uid_validity else {
+        session.taint();
+        return Err(format!("SELECT {folder} gave no UIDVALIDITY"));
+    };
     let folder_status = ImapFolderStatus {
-        uidvalidity: mailbox.uid_validity.unwrap_or(0),
+        uidvalidity,
         uidnext: mailbox.uid_next.unwrap_or(0),
         exists: mailbox.exists,
         unseen: mailbox.unseen.unwrap_or(0),
@@ -381,25 +388,23 @@ pub async fn fetch_messages(
     };
 
     log::info!(
-        "IMAP SELECT {folder}: exists={}, uidvalidity={}, uidnext={}, fetching UIDs: {uid_range}",
+        "IMAP SELECT {folder}: exists={}, uidvalidity={uidvalidity}, uidnext={}, fetching UIDs: {uid_range}",
         mailbox.exists,
-        mailbox.uid_validity.unwrap_or(0),
         mailbox.uid_next.unwrap_or(0),
     );
 
     // Try UID FETCH first; if the stream is empty, fall back to sequence-number FETCH.
     // Some IMAP servers return empty streams for UID FETCH despite valid UIDs.
-    let fetches = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
-        let stream = session
-            .uid_fetch(uid_range, "(UID FLAGS INTERNALDATE BODY.PEEK[])")
-            .await
-            .map_err(|e| format!("UID FETCH {folder} uids={uid_range} failed: {e}"))?;
-        Ok::<_, String>(stream.collect::<Vec<_>>().await)
-    })
+    let stream = tokio::time::timeout(
+        IMAP_CMD_TIMEOUT,
+        session.uid_fetch(uid_range, "(UID FLAGS INTERNALDATE BODY.PEEK[])"),
+    )
     .await
-    .map_err(|_| format!("UID FETCH {folder} timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?;
-
-    let raw_fetches: Vec<_> = fetches?;
+    .map_err(|_| format!("UID FETCH {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
+    .map_err(|e| format!("UID FETCH {folder} uids={uid_range} failed: {e}"))?;
+    let raw_fetches = collect_with_idle_timeout(stream, IMAP_FETCH_TIMEOUT)
+        .await
+        .map_err(|_| format!("UID FETCH {folder} timed out: nothing received for {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?;
     let mut fetch_ok = 0u32;
     let mut fetch_err = 0u32;
     let mut fetches = Vec::new();
@@ -523,6 +528,21 @@ pub async fn fetch_message_body(
     )
 }
 
+/// Collect a FETCH response stream, allowing `idle` between two items rather
+/// than for the whole response: a large batch on a slow link takes long but
+/// keeps arriving, a stalled one stops.
+async fn collect_with_idle_timeout<S: futures::Stream>(
+    stream: S,
+    idle: Duration,
+) -> Result<Vec<S::Item>, tokio::time::error::Elapsed> {
+    let mut stream = std::pin::pin!(stream);
+    let mut items = Vec::new();
+    while let Some(item) = tokio::time::timeout(idle, stream.next()).await? {
+        items.push(item);
+    }
+    Ok(items)
+}
+
 /// Seen and Flagged state out of a FETCH flag list.
 fn read_and_starred(flags: &[Flag<'_>]) -> (bool, bool) {
     (
@@ -592,21 +612,22 @@ pub async fn fetch_flags(
     }
 
     let range = format!("1:{}", mailbox.exists);
-    let fetched = tokio::time::timeout(IMAP_FETCH_TIMEOUT, async {
-        let stream = session
-            .fetch(&range, "(UID FLAGS)")
-            .await
-            .map_err(|e| format!("FETCH {folder} flags failed: {e}"))?;
-        Ok::<_, String>(stream.collect::<Vec<_>>().await)
-    })
-    .await;
+    // Err holds the timeout that ran out.
+    let fetched =
+        match tokio::time::timeout(IMAP_CMD_TIMEOUT, session.fetch(&range, "(UID FLAGS)")).await {
+            Ok(Ok(stream)) => collect_with_idle_timeout(stream, IMAP_FETCH_TIMEOUT)
+                .await
+                .map_err(|_| IMAP_FETCH_TIMEOUT),
+            Ok(Err(e)) => return Err(format!("FETCH {folder} flags failed: {e}")),
+            Err(_) => Err(IMAP_CMD_TIMEOUT),
+        };
     let items = match fetched {
-        Ok(items) => items?,
-        Err(_) => {
+        Ok(items) => items,
+        Err(waited) => {
             session.taint();
             return Err(format!(
-                "FETCH {folder} flags timed out after {}s — check your server settings or network connection",
-                IMAP_FETCH_TIMEOUT.as_secs()
+                "FETCH {folder} flags timed out after {}s without data — check your server settings or network connection",
+                waited.as_secs()
             ));
         }
     };
@@ -748,6 +769,7 @@ pub async fn set_flags(
     flag_op: &str,
     flags: &str,
 ) -> Result<(), String> {
+    check_flag_list(flags)?;
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
@@ -839,6 +861,49 @@ fn imap_quote(value: &str) -> Result<String, String> {
     Ok(quoted)
 }
 
+/// A STORE or APPEND flag list from the webview (RFC 3501 §9 `flag-list`):
+/// `(`, flags separated by single spaces, `)`; each flag an atom, optionally
+/// after one backslash. It goes into the command line as is, so anything else
+/// could end the list early and append arguments of its own.
+fn check_flag_list(flags: &str) -> Result<(), String> {
+    let is_flag = |flag: &str| {
+        let atom = flag.strip_prefix('\\').unwrap_or(flag);
+        !atom.is_empty()
+            && atom
+                .bytes()
+                .all(|b| b.is_ascii_graphic() && !br#"(){%*"\]"#.contains(&b))
+    };
+    let valid = flags
+        .strip_prefix('(')
+        .and_then(|f| f.strip_suffix(')'))
+        .is_some_and(|inner| inner.is_empty() || inner.split(' ').all(is_flag));
+    if valid {
+        Ok(())
+    } else {
+        Err(format!("Invalid IMAP flag list: {flags:?}"))
+    }
+}
+
+/// A SEARCH date from the webview (RFC 3501 `date`, e.g. `1-Jan-2024`).
+fn check_since_date(date: &str) -> Result<(), String> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let digits = |s: &str, len: std::ops::RangeInclusive<usize>| {
+        len.contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())
+    };
+    let parts: Vec<&str> = date.split('-').collect();
+    let valid = matches!(parts.as_slice(), [day, month, year]
+        if digits(day, 1..=2)
+            && MONTHS.iter().any(|m| m.eq_ignore_ascii_case(month))
+            && digits(year, 4..=4));
+    if valid {
+        Ok(())
+    } else {
+        Err(format!("Invalid IMAP date: {date:?}"))
+    }
+}
+
 /// What may be expunged after messages have been flagged \Deleted.
 ///
 /// A bare `EXPUNGE` (RFC 3501 section 6.4.3) removes *every* \Deleted message
@@ -923,9 +988,15 @@ pub async fn append_message(
     flags: Option<&str>,
     raw_message: &[u8],
 ) -> Result<Option<u32>, String> {
+    if let Some(flags) = flags {
+        check_flag_list(flags)?;
+    }
+    // async-imap puts the name between quotes without escaping it.
+    let quoted = imap_quote(folder)?;
+    let escaped = &quoted[1..quoted.len() - 1];
     tokio::time::timeout(
         IMAP_FETCH_TIMEOUT,
-        session.append(folder, flags, None, raw_message),
+        session.append(escaped, flags, None, raw_message),
     )
     .await
     .map_err(|_| {
@@ -1240,14 +1311,22 @@ pub async fn search_folder(
     folder: &str,
     since_date: Option<String>,
 ) -> Result<ImapFolderSearchResult, String> {
+    if let Some(date) = &since_date {
+        check_since_date(date)?;
+    }
     // SELECT the folder
     let mailbox = tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
+    // See fetch_flags: 0 would be stored as the folder's UIDVALIDITY.
+    let Some(uidvalidity) = mailbox.uid_validity else {
+        session.taint();
+        return Err(format!("SELECT {folder} gave no UIDVALIDITY"));
+    };
     let folder_status = ImapFolderStatus {
-        uidvalidity: mailbox.uid_validity.unwrap_or(0),
+        uidvalidity,
         uidnext: mailbox.uid_next.unwrap_or(0),
         exists: mailbox.exists,
         unseen: mailbox.unseen.unwrap_or(0),
@@ -1368,7 +1447,7 @@ pub async fn raw_fetch_messages(
 
     // Parse SELECT response for UIDVALIDITY, EXISTS, UNSEEN
     let mut exists = 0u32;
-    let mut uidvalidity = 0u32;
+    let mut uidvalidity = None;
     let mut unseen = 0u32;
     for line in select_response.lines() {
         if let Some(n) = parse_untagged_number(line, "EXISTS") {
@@ -1376,7 +1455,7 @@ pub async fn raw_fetch_messages(
         }
         if line.contains("[UIDVALIDITY") {
             if let Some(v) = extract_bracket_number(line, "UIDVALIDITY") {
-                uidvalidity = v;
+                uidvalidity = Some(v);
             }
         }
         if line.contains("[UNSEEN") {
@@ -1386,6 +1465,8 @@ pub async fn raw_fetch_messages(
         }
     }
 
+    // See fetch_flags: 0 would be stored as the folder's UIDVALIDITY.
+    let uidvalidity = uidvalidity.ok_or_else(|| format!("SELECT {folder} gave no UIDVALIDITY"))?;
     let folder_status = ImapFolderStatus {
         uidvalidity,
         uidnext: 0,
@@ -2279,6 +2360,152 @@ mod tests {
     ) -> Vec<String> {
         drop(session);
         server.await.unwrap()
+    }
+
+    // A 50-message batch on a slow link takes longer than the timeout as a
+    // whole while every message still arrives well within it.
+    #[tokio::test]
+    async fn a_slow_but_steady_fetch_is_not_cut_off() {
+        let steady = futures::stream::iter(0..8).then(|i| async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            i
+        });
+        let items = collect_with_idle_timeout(steady, Duration::from_millis(150)).await;
+        assert_eq!(items.ok(), Some((0..8).collect::<Vec<_>>()));
+    }
+
+    #[tokio::test]
+    async fn a_stalled_fetch_times_out() {
+        let stalled = futures::stream::iter(0..3).then(|i| async move {
+            if i == 1 {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+            i
+        });
+        assert!(
+            collect_with_idle_timeout(stalled, Duration::from_millis(100))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_without_uidvalidity_is_an_error() {
+        let (mut session, _server) = scripted(vec![(
+            "SELECT",
+            Some("* 0 EXISTS\r\n{tag} OK [READ-WRITE] done\r\n"),
+        )])
+        .await;
+
+        assert!(fetch_messages(&mut session, "INBOX", "1").await.is_err());
+        assert!(!session.is_clean());
+    }
+
+    #[tokio::test]
+    async fn search_without_uidvalidity_is_an_error() {
+        let (mut session, _server) = scripted(vec![(
+            "SELECT",
+            Some("* 0 EXISTS\r\n{tag} OK [READ-WRITE] done\r\n"),
+        )])
+        .await;
+
+        assert!(search_folder(&mut session, "INBOX", None).await.is_err());
+        assert!(!session.is_clean());
+    }
+
+    // async-imap wraps the APPEND mailbox in quotes without escaping it.
+    #[tokio::test]
+    async fn append_quotes_the_folder_name() {
+        let (mut session, server) = scripted(vec![]).await;
+
+        append_message(
+            &mut session,
+            r#"Dra"f\ts"#,
+            None,
+            b"Subject: x\r\n\r\nb\r\n",
+        )
+        .await
+        .unwrap();
+
+        let sent = commands(session, server).await;
+        assert!(
+            sent.iter().any(|c| c.contains(r#"APPEND "Dra\"f\\ts""#)),
+            "{sent:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn append_refuses_flags_that_are_not_a_flag_list() {
+        let (mut session, server) = scripted(vec![]).await;
+
+        let result = append_message(&mut session, "Drafts", Some("(\\Draft\""), DRAFT).await;
+
+        assert!(result.is_err());
+        let sent = commands(session, server).await;
+        assert!(!sent.iter().any(|c| c.contains("APPEND")), "{sent:?}");
+    }
+
+    #[tokio::test]
+    async fn flag_change_refuses_a_flag_that_is_not_an_atom() {
+        let (mut session, server) = scripted(vec![]).await;
+
+        let result = set_flags(&mut session, "INBOX", "1", "+FLAGS", "(\\Seen) X").await;
+
+        assert!(result.is_err());
+        let sent = commands(session, server).await;
+        assert!(!sent.iter().any(|c| c.contains("STORE")), "{sent:?}");
+    }
+
+    #[test]
+    fn flag_lists_accept_system_flags_and_keywords_only() {
+        for ok in ["()", "(\\Seen)", "(\\Seen \\Flagged)", "($Label1 Junk)"] {
+            assert!(check_flag_list(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "\\Seen",
+            "(\\Seen",
+            "(\\Seen))",
+            "(\\)",
+            "(\\Seen  \\Flagged)",
+            "(Se\"en)",
+            "(Se(en)",
+            "(\\Seen\r\n)",
+            "(Sé)",
+        ] {
+            assert!(check_flag_list(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn search_refuses_a_since_date_that_is_not_a_date() {
+        let (mut session, server) = scripted(vec![(
+            "SELECT",
+            Some("* 0 EXISTS\r\n* OK [UIDVALIDITY 7] ok\r\n{tag} OK [READ-WRITE] done\r\n"),
+        )])
+        .await;
+
+        let result = search_folder(&mut session, "INBOX", Some("1-Jan-2024 OR ALL".into())).await;
+
+        assert!(result.is_err());
+        let sent = commands(session, server).await;
+        assert!(!sent.iter().any(|c| c.contains("SEARCH")), "{sent:?}");
+    }
+
+    #[test]
+    fn since_dates_follow_rfc_3501() {
+        for ok in ["1-Jan-2024", "01-Dec-1999", "31-May-2026"] {
+            assert!(check_since_date(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "1-Jan-24",
+            "123-Jan-2024",
+            "1 Jan 2024",
+            "1-Foo-2024",
+            "1-Jan-2024)",
+        ] {
+            assert!(check_since_date(bad).is_err(), "{bad:?}");
+        }
     }
 
     // A bare set in SEARCH is sequence numbers (RFC 3501 §6.4.4), so with

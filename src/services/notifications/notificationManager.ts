@@ -72,7 +72,9 @@ export async function initNotifications(): Promise<void> {
 
     await onAction(async (event) => {
       const actionId = event.actionTypeId;
-      const ctx = lastNotificationContext;
+      // The notification names its own mail; the last-notified slot is only a
+      // fallback for a platform that does not hand `extra` back.
+      const ctx = (event.extra as NotificationContext | undefined) ?? lastNotificationContext;
 
       if (actionId === "reply" && ctx?.threadId && ctx?.accountId) {
         await showAndFocusMainWindow();
@@ -120,7 +122,8 @@ export function queueNewEmailNotification(
   pendingCount++;
 
   // Store context for action handling
-  lastNotificationContext = { threadId, accountId, fromAddress, subject };
+  const context: NotificationContext = { threadId, accountId, fromAddress, subject };
+  lastNotificationContext = context;
 
   // Debounce: wait 2s before showing, to batch during sync
   if (notifyTimer) clearTimeout(notifyTimer);
@@ -130,12 +133,15 @@ export function queueNewEmailNotification(
         title: from,
         body: subject || "(No subject)",
         actionTypeId: "email",
+        extra: { ...context },
       });
     } else if (pendingCount > 1) {
+      // Reply and Archive would act on one of the mails at random.
+      lastNotificationContext = null;
       sendNotification({
         title: "Maish",
         body: `${pendingCount} new emails`,
-        actionTypeId: "email",
+        actionTypeId: "default",
       });
     }
     pendingCount = 0;
@@ -174,5 +180,6 @@ export function notifyFollowUpDue(
     title: "Follow up needed",
     body: subject || "(No subject)",
     actionTypeId: "email",
+    extra: { ...lastNotificationContext },
   });
 }

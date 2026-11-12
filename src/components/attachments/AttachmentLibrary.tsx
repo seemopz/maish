@@ -15,6 +15,7 @@ import { AttachmentGridItem } from "./AttachmentGridItem";
 import { AttachmentListItem } from "./AttachmentListItem";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { isImage, isPdf, isDocument, isSpreadsheet, isArchive } from "@/utils/fileTypeHelpers";
+import { saveDialogName } from "@/utils/fileUtils";
 import { navigateToLabel } from "@/router/navigate";
 
 type TypeFilter = "all" | "images" | "pdfs" | "documents" | "spreadsheets" | "archives" | "other";
@@ -158,7 +159,7 @@ export function AttachmentLibrary() {
     if (!att.gmail_attachment_id || !accountId) return;
     try {
       const filePath = await save({
-        defaultPath: att.filename ?? "attachment",
+        defaultPath: saveDialogName(att.filename),
         filters: [{ name: "All Files", extensions: ["*"] }],
       });
       if (!filePath) return;

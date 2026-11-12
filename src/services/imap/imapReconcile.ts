@@ -27,6 +27,14 @@ export function resetReconcileClock(): void {
   lastReconciledAt.clear();
 }
 
+/**
+ * A move out of the folder made here leaves its old rows next to the copies the
+ * destination delivers until the folder is listed again: let the next sync do it.
+ */
+export function reconcileSoon(accountId: string, folderPath: string): void {
+  lastReconciledAt.delete(`${accountId}\u0000${folderPath}`);
+}
+
 export interface ReconcileFolderArgs {
   accountId: string;
   config: ImapConfig;

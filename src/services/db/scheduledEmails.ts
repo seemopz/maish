@@ -61,6 +61,16 @@ export async function insertScheduledEmail(email: {
   return id;
 }
 
+/**
+ * Put rows a previous run claimed and never finished (the app quit or crashed
+ * mid-send) back in the queue. Only safe while no send can be in flight, i.e.
+ * before this run's checker sends anything.
+ */
+export async function requeueInterruptedScheduledEmails(): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE scheduled_emails SET status = 'pending' WHERE status = 'sending'");
+}
+
 /** Take a pending row for sending. Only one checker run wins, so a mail is never sent twice. */
 export async function claimScheduledEmail(id: string): Promise<boolean> {
   const db = await getDb();

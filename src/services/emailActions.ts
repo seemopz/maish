@@ -223,6 +223,20 @@ async function applyLocalDbUpdate(
         );
       }
       break;
+    case "moveToFolder":
+      // The provider moves every folder copy, so every folder label goes; flag
+      // folders (\Flagged, \Important, \All) are views, not places a copy sits in.
+      await db.execute(
+        `DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2 AND label_id != $3
+           AND label_id IN (SELECT id FROM labels WHERE account_id = $1 AND imap_folder_path IS NOT NULL
+                              AND id NOT IN ('STARRED', 'IMPORTANT', 'all-mail'))`,
+        [accountId, action.threadId, action.folderPath],
+      );
+      await db.execute(
+        "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, $3)",
+        [accountId, action.threadId, action.folderPath],
+      );
+      break;
     case "addLabel":
       await db.execute(
         "INSERT OR IGNORE INTO thread_labels (account_id, thread_id, label_id) VALUES ($1, $2, $3)",
@@ -399,6 +413,7 @@ function conversations(count: number, singular: string, plural: string): string 
 function addedLabel(action: EmailAction): string | null {
   if (action.type === "trash") return "TRASH";
   if (action.type === "spam") return action.isSpam ? "SPAM" : "INBOX";
+  if (action.type === "moveToFolder") return action.folderPath;
   return null;
 }
 

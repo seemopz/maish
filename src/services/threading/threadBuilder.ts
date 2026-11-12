@@ -19,6 +19,7 @@ export interface ThreadableMessage {
 
 export interface ThreadGroup {
   threadId: string; // generated thread ID for this group
+  legacyThreadId?: string; // the pre-widening id of the same root
   messageIds: string[]; // local message IDs belonging to this thread
 }
 
@@ -119,10 +120,29 @@ function djb2Hash(str: string): string {
   return (hash >>> 0).toString(16);
 }
 
+/** 32-bit FNV-1a, hex. Paired with djb2 so two roots collide only if both do. */
+function fnv1aHash(str: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16);
+}
+
 /**
- * Generate a deterministic thread ID from a root Message-ID.
+ * Generate a deterministic thread ID from a root Message-ID. 32 bits alone
+ * collide within a large mailbox and merge unrelated conversations.
  */
 export function generateThreadId(rootMessageId: string): string {
+  return `imap-thread-${djb2Hash(rootMessageId)}-${fnv1aHash(rootMessageId)}`;
+}
+
+/**
+ * The id `generateThreadId` returned before it was widened. Threads stored
+ * under it keep it: delta sync looks it up so a reply does not split them.
+ */
+export function legacyThreadId(rootMessageId: string): string {
   return `imap-thread-${djb2Hash(rootMessageId)}`;
 }
 
@@ -345,6 +365,7 @@ export function buildThreads(messages: ThreadableMessage[]): ThreadGroup[] {
 
     threadGroups.push({
       threadId: generateThreadId(rootMessageId),
+      legacyThreadId: legacyThreadId(rootMessageId),
       messageIds: messagesInThread.map((m) => m.id),
     });
   }

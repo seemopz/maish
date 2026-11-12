@@ -24,6 +24,7 @@ import {
   updateMessageThreadIds,
   getMessagesForThread,
   deleteMessagesInFolder,
+  deleteLocalSentCopies,
 } from "../db/messages";
 import {
   upsertThread,
@@ -35,7 +36,7 @@ import {
 } from "../db/threads";
 import { upsertAttachment } from "../db/attachments";
 import { getAccount, updateAccountSyncState, type DbAccount } from "../db/accounts";
-import { withTransaction } from "../db/connection";
+import { getDb, withTransaction } from "../db/connection";
 import {
   upsertFolderSyncState,
   getAllFolderSyncStates,
@@ -43,6 +44,7 @@ import {
 } from "../db/folderSyncState";
 import {
   buildThreads,
+  parseReferences,
   type ThreadableMessage,
   type ThreadGroup,
 } from "../threading/threadBuilder";
@@ -236,6 +238,45 @@ export function imapMessageToParsedMessage(
 // ---------------------------------------------------------------------------
 
 /**
+ * The thread a group of fetched messages belongs to locally. Delta sync threads
+ * only what it fetched, so its root is whatever the new mail references; the
+ * conversation may already be stored under another root (an older one, or a
+ * subject merge). A stored message the group references, or that is one of
+ * its messages, names the thread; failing that, a thread stored under the
+ * pre-widening id of the same root.
+ */
+async function resolveStoredThreadId(
+  accountId: string,
+  group: ThreadGroup,
+  imapMsgByLocalId: Map<string, ImapMessage>,
+): Promise<string> {
+  const ids = new Set<string>();
+  for (const localId of group.messageIds) {
+    const msg = imapMsgByLocalId.get(localId);
+    if (!msg) continue;
+    if (msg.message_id) ids.add(msg.message_id);
+    for (const ref of parseReferences(msg.references)) ids.add(ref);
+    for (const ref of parseReferences(msg.in_reply_to)) ids.add(ref);
+  }
+  const db = await getDb();
+  if (ids.size > 0) {
+    // Stored with or without brackets (the SMTP path keeps them); 400 stays under SQLite's 999.
+    const keys = [...ids].slice(-200).flatMap((id) => [id, `<${id}>`]);
+    const placeholders = keys.map((_, i) => `$${i + 2}`).join(", ");
+    const rows = await db.select<{ thread_id: string }[]>(
+      `SELECT thread_id FROM messages WHERE account_id = $1 AND message_id_header IN (${placeholders})
+        ORDER BY date ASC LIMIT 1`,
+      [accountId, ...keys],
+    );
+    if (rows[0]) return rows[0].thread_id;
+  }
+  if (group.legacyThreadId && (await getThreadById(accountId, group.legacyThreadId))) {
+    return group.legacyThreadId;
+  }
+  return group.threadId;
+}
+
+/**
  * Store threads and their messages into the local DB.
  *
  * `skippedMessageIds` holds the messages of every thread that was left alone
@@ -252,6 +293,10 @@ async function storeThreadsAndMessages(
   const storedMessages: ParsedMessage[] = [];
   const skippedMessageIds = new Set<string>();
 
+  for (const group of threadGroups) {
+    group.threadId = await resolveStoredThreadId(accountId, group, imapMsgByLocalId);
+  }
+
   // Pre-check pending ops OUTSIDE any transaction
   const skippedThreadIds = new Set<string>();
   for (const group of threadGroups) {
@@ -267,6 +312,7 @@ async function storeThreadsAndMessages(
   for (let i = 0; i < threadGroups.length; i += THREAD_BATCH_SIZE) {
     const batch = threadGroups.slice(i, i + THREAD_BATCH_SIZE);
 
+    const sentCopyThreadIds = new Set<string>();
     await withTransaction(async () => {
       for (const group of batch) {
         if (skippedThreadIds.has(group.threadId)) continue;
@@ -360,6 +406,12 @@ async function storeThreadsAndMessages(
             imapUid: imapMsg?.uid ?? null,
             imapFolder: imapMsg?.folder ?? null,
           });
+          // The send stored its own row before the server's Sent copy existed.
+          if (imapMsg?.message_id) {
+            for (const t of await deleteLocalSentCopies(accountId, imapMsg.message_id)) {
+              sentCopyThreadIds.add(t);
+            }
+          }
 
           for (const att of parsed.attachments) {
             await upsertAttachment({
@@ -419,6 +471,7 @@ async function storeThreadsAndMessages(
         }
         await setThreadLabels(accountId, group.threadId, [...allLabelIds]);
       }
+      await deleteEmptyThreads(accountId, [...sentCopyThreadIds]);
     });
   }
 

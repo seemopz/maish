@@ -8,7 +8,8 @@ import { imapInitialSync, imapDeltaSync } from "../imap/imapSync";
 import { clearAllFolderSyncStates } from "../db/folderSyncState";
 import { hasCalendarSupport, getCalendarProvider } from "../calendar/providerFactory";
 import { getVisibleCalendars, upsertCalendar, updateCalendarSyncToken } from "../db/calendars";
-import { upsertCalendarEvent, deleteEventByRemoteId } from "../db/calendarEvents";
+import { deleteEventByRemoteId, deleteEventsMissingFromWindow } from "../db/calendarEvents";
+import { storeProviderEvent } from "../calendar/occurrences";
 import { syncContactsForAccount } from "../contacts/contactSync";
 import { logToFile } from "../logFile";
 
@@ -143,6 +144,9 @@ async function syncGmailAccount(accountId: string): Promise<void> {
   }
 }
 
+/** IMAP accounts that already had their empty-database recovery this run. */
+const recoveredImapAccounts = new Set<string>();
+
 /**
  * Run a sync for a single IMAP account (initial or delta).
  */
@@ -163,9 +167,12 @@ async function syncImapAccount(accountId: string): Promise<void> {
     // Recovery: if delta sync found nothing new but the DB has no threads,
     // the previous initial sync likely failed or stored data incorrectly.
     // Force a full re-sync to recover.
-    if (result.messages.length === 0) {
+    // Once per account and run: a mailbox that is simply empty would otherwise
+    // get a full initial sync on every tick.
+    if (result.messages.length === 0 && !recoveredImapAccounts.has(accountId)) {
       const threadCount = await getThreadCountForAccount(accountId);
       if (threadCount === 0) {
+        recoveredImapAccounts.add(accountId);
         console.warn(`[syncManager] IMAP delta sync returned 0 new messages and DB has 0 threads for ${accountId} — forcing full re-sync`);
         await clearAccountHistoryId(accountId);
         await clearAllFolderSyncStates(accountId);
@@ -189,6 +196,10 @@ async function syncImapAccount(accountId: string): Promise<void> {
     });
   }
 }
+
+/** When each calendar's events were last downloaded this run, for the ctag skip. */
+const lastFullCalendarFetch = new Map<string, number>();
+const CTAG_REFETCH_MS = 6 * 60 * 60_000;
 
 /**
  * Sync calendars for a single account via the CalendarProvider abstraction.
@@ -216,41 +227,44 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
 
     // Sync events for each visible calendar
     const visibleCals = await getVisibleCalendars(accountId);
+    const listedCtag = new Map(calendarInfos.map((c) => [c.remoteId, c.ctag ?? null]));
     for (const cal of visibleCals) {
       try {
+        // An unchanged CalDAV ctag means no event changed. The full fetch still
+        // runs every few hours, since its date window moves with time.
+        const ctag = listedCtag.get(cal.remote_id) ?? null;
+        const lastFetch = lastFullCalendarFetch.get(cal.id);
+        if (ctag !== null && ctag === cal.ctag && lastFetch !== undefined && Date.now() - lastFetch < CTAG_REFETCH_MS) {
+          continue;
+        }
+
         const syncResult = await provider.syncEvents(cal.remote_id, cal.sync_token ?? undefined);
 
         // Upsert created/updated events
         for (const event of [...syncResult.created, ...syncResult.updated]) {
-          await upsertCalendarEvent({
-            accountId,
-            googleEventId: event.remoteEventId,
-            summary: event.summary,
-            description: event.description,
-            location: event.location,
-            startTime: event.startTime,
-            endTime: event.endTime,
-            isAllDay: event.isAllDay,
-            status: event.status,
-            organizerEmail: event.organizerEmail,
-            attendeesJson: event.attendeesJson,
-            htmlLink: event.htmlLink,
-            calendarId: cal.id,
-            remoteEventId: event.remoteEventId,
-            etag: event.etag,
-            icalData: event.icalData,
-            uid: event.uid,
-          });
+          await storeProviderEvent(accountId, cal.id, event);
         }
 
         // Delete removed events
         for (const remoteId of syncResult.deletedRemoteIds) {
           await deleteEventByRemoteId(cal.id, remoteId);
         }
+        // A complete listing also tells which stored events are gone.
+        // shortcut: a deleted series whose master starts before the window stays; upgrade with a sync-collection REPORT.
+        if (syncResult.window) {
+          await deleteEventsMissingFromWindow(
+            cal.id,
+            syncResult.window.start,
+            syncResult.window.end,
+            [...syncResult.created, ...syncResult.updated].map((e) => e.remoteEventId),
+          );
+        }
+        lastFullCalendarFetch.set(cal.id, Date.now());
 
         // Update sync token
-        if (syncResult.newSyncToken || syncResult.newCtag) {
-          await updateCalendarSyncToken(cal.id, syncResult.newSyncToken, syncResult.newCtag);
+        const newCtag = syncResult.newCtag ?? ctag;
+        if (syncResult.newSyncToken || newCtag) {
+          await updateCalendarSyncToken(cal.id, syncResult.newSyncToken, newCtag);
         }
       } catch (err) {
         console.warn(`[syncManager] Calendar sync failed for ${cal.display_name ?? cal.remote_id}:`, err);

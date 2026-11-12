@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
 #[derive(Serialize)]
@@ -68,35 +68,24 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
 
     log::info!("OAuth callback server listening on port {}", port);
 
-    // Wait for exactly one connection (the redirect from the provider) with a
-    // 5-minute timeout, or until a newer login takes over.
-    let accepted = tokio::select! {
-        result = tokio::time::timeout(Duration::from_secs(300), listener.accept()) => result,
+    // Wait for the redirect from the provider for up to five minutes, or
+    // until a newer login takes over.
+    let result = tokio::select! {
+        result = tokio::time::timeout(
+            Duration::from_secs(300),
+            wait_for_callback(&listener, &state, CALLBACK_READ_TIMEOUT),
+        ) => result.map_err(|_| "OAuth timed out — please try again".to_string())?,
         _ = cancel_rx => return Err("Sign-in was restarted".to_string()),
     };
 
-    let (mut stream, _) = accepted
-        .map_err(|_| "OAuth timed out — please try again".to_string())?
-        .map_err(|e| format!("Failed to accept: {}", e))?;
+    drop(listener);
+    result
+}
 
-    // Read the HTTP request
-    let mut buf = vec![0u8; 4096];
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|e| format!("Failed to read: {}", e))?;
-    let request = String::from_utf8_lossy(&buf[..n]);
+/// How long one connection may take to send its request line.
+const CALLBACK_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
-    // Extract query string from GET request line
-    let (code, returned_state) = parse_auth_code_and_state(&request)?;
-
-    // Validate state parameter (CSRF protection)
-    if returned_state != state {
-        return Err("OAuth state mismatch — possible CSRF attack".to_string());
-    }
-
-    // Send a success response to the browser
-    let html = r#"<!DOCTYPE html>
+const SUCCESS_PAGE: &str = r#"<!DOCTYPE html>
 <html>
 <head><title>Maish</title></head>
 <body style="font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #e2e8f0;">
@@ -107,21 +96,67 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
 </body>
 </html>"#;
 
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{}",
-        html.len(),
-        html
-    );
+/// Accept connections until one carries the provider's redirect.
+///
+/// Browsers also ask for /favicon.ico or open a connection they never use, and
+/// a port scanner may knock: each is answered (or closed after `read_timeout`)
+/// and the wait goes on. A redirect carrying a state from another sign-in (a
+/// stale tab) is ignored too; only the provider's `error=` ends the wait.
+async fn wait_for_callback(
+    listener: &TcpListener,
+    state: &str,
+    read_timeout: Duration,
+) -> Result<OAuthResult, String> {
+    loop {
+        let (mut stream, _) = listener
+            .accept()
+            .await
+            .map_err(|e| format!("Failed to accept: {}", e))?;
 
+        let Ok(request) = tokio::time::timeout(read_timeout, read_request_line(&mut stream)).await
+        else {
+            log::debug!("OAuth callback: connection sent no request, closed");
+            continue;
+        };
+
+        match parse_auth_code_and_state(&request) {
+            Ok((code, returned_state)) if returned_state == state => {
+                respond(&mut stream, "200 OK", SUCCESS_PAGE).await;
+                return Ok(OAuthResult {
+                    code,
+                    state: returned_state,
+                });
+            }
+            Ok(_) => {
+                log::warn!("OAuth callback with the state of another sign-in ignored");
+                respond(&mut stream, "400 Bad Request", "").await;
+            }
+            Err(e) if e.starts_with("OAuth error") => return Err(e),
+            Err(_) => respond(&mut stream, "404 Not Found", "").await,
+        }
+    }
+}
+
+/// Read until the request line is complete, the peer stops sending, or 8 KiB.
+async fn read_request_line(stream: &mut TcpStream) -> String {
+    let mut request = Vec::new();
+    let mut chunk = [0u8; 1024];
+    while !request.windows(2).any(|w| w == b"\r\n") && request.len() < 8192 {
+        match stream.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => request.extend_from_slice(&chunk[..n]),
+        }
+    }
+    String::from_utf8_lossy(&request).into_owned()
+}
+
+async fn respond(stream: &mut TcpStream, status: &str, html: &str) {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/html\r\nContent-Length: {}\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{html}",
+        html.len()
+    );
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.flush().await;
-
-    drop(listener);
-
-    Ok(OAuthResult {
-        code,
-        state: returned_state,
-    })
 }
 
 fn parse_auth_code_and_state(request: &str) -> Result<(String, String), String> {
@@ -318,6 +353,70 @@ mod tests {
 
         assert!(matches!(sent, Ok(Err(e)) if e.is_timeout()));
         drop(listener);
+    }
+
+    /// Browsers ask for /favicon.ico, open speculative connections and port
+    /// scanners knock; none of that may end the sign-in.
+    #[tokio::test]
+    async fn waits_past_connections_that_are_not_the_redirect() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client = tokio::spawn(async move {
+            // Silent: connects and sends nothing.
+            let _silent = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut favicon = tokio::net::TcpStream::connect(addr).await.unwrap();
+            favicon
+                .write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: x\r\n\r\n")
+                .await
+                .unwrap();
+            let mut stale = tokio::net::TcpStream::connect(addr).await.unwrap();
+            stale
+                .write_all(b"GET /?code=old&state=other HTTP/1.1\r\n\r\n")
+                .await
+                .unwrap();
+            let mut real = tokio::net::TcpStream::connect(addr).await.unwrap();
+            real.write_all(b"GET /?code=abc&state=s1 HTTP/1.1\r\nHost: x\r\n\r\n")
+                .await
+                .unwrap();
+            let mut answer = String::new();
+            real.read_to_string(&mut answer).await.unwrap();
+            answer
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            wait_for_callback(&listener, "s1", Duration::from_millis(200)),
+        )
+        .await
+        .expect("must not hang on a silent connection")
+        .unwrap();
+
+        assert_eq!(result.code, "abc");
+        assert!(client.await.unwrap().starts_with("HTTP/1.1 200"));
+    }
+
+    #[tokio::test]
+    async fn a_denied_sign_in_ends_the_wait() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+            s.write_all(b"GET /?error=access_denied&state=s1 HTTP/1.1\r\n\r\n")
+                .await
+                .unwrap();
+            let mut sink = Vec::new();
+            let _ = s.read_to_end(&mut sink).await;
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            wait_for_callback(&listener, "s1", Duration::from_millis(200)),
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(result, Err(e) if e.contains("access_denied")));
     }
 
     /// The redirect URI the provider is given names one fixed port. A server

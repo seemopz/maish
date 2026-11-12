@@ -1,6 +1,6 @@
 %global app_name maish
 # x-release-please-start-version
-%global app_version 0.11.2
+%global app_version 0.11.3
 # x-release-please-end
 %global app_release 1
 

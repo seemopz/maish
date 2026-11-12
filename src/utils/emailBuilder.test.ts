@@ -26,6 +26,13 @@ describe("emailBuilder", () => {
       .toEqual({ inReplyToMessageId: null, references: null });
   });
 
+  it("wraps bare Message-IDs (stored that way by IMAP sync) in angle brackets", () => {
+    expect(replyHeaders({ message_id_header: "c@x", references_header: "a@x b@x" }))
+      .toEqual({ inReplyToMessageId: "<c@x>", references: "<a@x> <b@x> <c@x>" });
+    expect(replyHeaders({ message_id_header: " c@x ", references_header: "<a@x>  b@x" }))
+      .toEqual({ inReplyToMessageId: "<c@x>", references: "<a@x> <b@x> <c@x>" });
+  });
+
   it("builds a basic email", () => {
     const raw = buildRawEmail({
       from: "sender@example.com",

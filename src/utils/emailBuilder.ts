@@ -87,6 +87,14 @@ function generateMessageId(from: string): string {
   return `<${timestamp}.${random}@${domain}>`;
 }
 
+/**
+ * Message-IDs in RFC 5322 §3.6.4 form, each `<id>`. IMAP sync stores them bare
+ * (mail-parser strips the brackets), Gmail and sent copies keep them.
+ */
+function bracketIds(value: string): string[] {
+  return (value.match(/<[^>]*>|[^\s<>]+/g) ?? []).map((id) => (id.startsWith("<") ? id : `<${id}>`));
+}
+
 /** In-Reply-To and References for a reply to `msg`, from its RFC 5322 Message-ID. */
 export function replyHeaders(msg: {
   message_id_header: string | null;
@@ -94,8 +102,9 @@ export function replyHeaders(msg: {
 }): { inReplyToMessageId: string | null; references: string | null } {
   const id = msg.message_id_header?.trim();
   if (!id) return { inReplyToMessageId: null, references: null };
-  const refs = msg.references_header?.trim();
-  return { inReplyToMessageId: id, references: refs ? `${refs} ${id}` : id };
+  const inReplyTo = id.startsWith("<") ? id : `<${id}>`;
+  const refs = bracketIds(msg.references_header ?? "");
+  return { inReplyToMessageId: inReplyTo, references: [...refs, inReplyTo].join(" ") };
 }
 
 /**
